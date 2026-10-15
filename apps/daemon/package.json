@@ -28,7 +28,7 @@
     "@opencreator/protocol": "workspace:*",
     "@opencreator/skill-market": "workspace:*",
     "@opencreator/writing-templates": "workspace:*",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "cheerio": "1.1.2",
     "cron-parser": "^5.6.1",
     "cross-spawn": "^7.0.6",

@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -139,6 +140,14 @@ const packageWithSigningEnvironment = async builderEnv => {
       await submitAndWaitForNotarization(componentNotaryArchive, notarizationArgs);
     } finally { rmSync(componentNotaryArchive, { force: true }); }
   }
+  // electron-builder merges extraResources with first-wins dedupe, so the
+  // daemon runtime placeholder committed in the repo (empty checksums) would
+  // shadow the freshly built descriptor. Sync the staged daemon runtime so
+  // the packaged app carries this build's descriptor (verify-package checks it).
+  copyFileSync(
+    resolve(desktopDir, '.pack', 'components', 'remotion-component.json'),
+    resolve(desktopDir, '.pack', 'daemon', 'runtime', 'remotion-component.json')
+  );
   await runStage(
     mode === 'dir' ? '生成可运行目录' : '生成桌面安装包',
     'electron-builder',

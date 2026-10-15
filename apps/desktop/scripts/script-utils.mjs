@@ -6,11 +6,15 @@ export async function runStage(label, command, args, options = {}) {
   const startedAt = Date.now();
   console.log(`[desktop-package] 开始：${label}`);
 
-  const child = spawn(command, args, {
+  // Shell mode (win32 + bare command) joins the argv without escaping, so any
+  // argument containing whitespace (repo paths with spaces) must be quoted or
+  // the command line splits mid-argument.
+  const useShell = process.platform === 'win32' && !isAbsolute(command);
+  const child = spawn(command, useShell ? args.map(escapeShellArgument) : args, {
     cwd: options.cwd,
     env: options.env ?? process.env,
     stdio: options.stdio ?? 'inherit',
-    shell: process.platform === 'win32' && !isAbsolute(command),
+    shell: useShell,
     detached: process.platform !== 'win32'
   });
 
@@ -66,6 +70,14 @@ export async function runStage(label, command, args, options = {}) {
     );
   }
   console.log(`[desktop-package] 完成：${label}（${durationMs}ms）`);
+}
+
+/** Quotes an argv entry for cmd.exe when the shell joins arguments verbatim. */
+function escapeShellArgument(value) {
+  const text = String(value);
+  if (/^[^\s"]*$/.test(text)) return text;
+  // cmd.exe style: wrap in double quotes, double any embedded quotes.
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 async function terminateProcessTree(pid) {

@@ -100,9 +100,8 @@ assertExists(join(
   daemonDir,
   'node_modules',
   'better-sqlite3',
-  'build',
-  'Release',
-  'better_sqlite3.node'
+  'prebuilds',
+  `${targetPlatform}-${targetArch}.node`
 ));
 assertExists(join(webDir, 'index.html'));
 assertExists(join(daemonDir, 'runtime', 'opencreator-runtime', 'SKILL.md'));

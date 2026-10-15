@@ -12,7 +12,6 @@ import {
   writeFileSync
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { runStage } from './script-utils.mjs';
 
@@ -36,17 +35,7 @@ const runtimeDependencyDir = resolve(
 );
 const runtimeDependencyManifest = resolve(runtimeDependencyDir, 'package.json');
 const runtimeDependencyLockfile = resolve(runtimeDependencyDir, 'pnpm-lock.yaml');
-const targetArch = process.env.OPENCREATOR_DESKTOP_TARGET_ARCH ?? process.arch;
-const require = createRequire(import.meta.url);
-const nodeGypRoot = dirname(require.resolve('node-gyp/package.json'));
-const cacheDir = resolve(
-  process.env.OPENCREATOR_DESKTOP_CACHE_DIR
-    ?? resolve(desktopDir, '.cache')
-);
 const offline = process.env.OPENCREATOR_DESKTOP_OFFLINE === '1';
-const nativeBuildEnv = { ...process.env };
-delete nativeBuildEnv.npm_config_recursive;
-mkdirSync(cacheDir, { recursive: true });
 cleanBuildOutputs();
 
 await runStage('校验冻结锁文件', 'pnpm', [
@@ -99,42 +88,23 @@ prepareWorkspaceRuntimePackages();
 const betterSqlite3Root = dirname(realpathSync(
   resolve(targetDir, 'node_modules/better-sqlite3/package.json')
 ));
-await runStage('重建 Electron 原生 SQLite', process.execPath, [
-  resolve(nodeGypRoot, 'bin/node-gyp.js'),
-  'rebuild',
-  '--release',
-  `--target=${desktopPackageVersion('electron')}`,
-  `--arch=${targetArch}`,
-  '--dist-url=https://electronjs.org/headers',
-  `--devdir=${resolve(cacheDir, 'node-gyp')}`
-], {
-  cwd: betterSqlite3Root,
-  timeoutMs: 10 * 60_000,
-  env: {
-    ...nativeBuildEnv,
-    npm_config_runtime: 'electron',
-    npm_config_target: desktopPackageVersion('electron'),
-    npm_config_arch: targetArch,
-    npm_config_disturl: 'https://electronjs.org/headers',
-    npm_config_devdir: resolve(cacheDir, 'node-gyp'),
-    npm_config_build_from_source: 'true',
-    npm_config_offline: offline ? 'true' : 'false',
-    npm_config_update_notifier: 'false'
-  }
-});
+// better-sqlite3 v13+ bundles an N-API prebuild (prebuilds/<platform>-<arch>.node)
+// inside the npm tarball. It loads on both Node and Electron without a per-ABI
+// node-gyp rebuild, so packaging never requires a native toolchain (MSVC/clang).
+assertBetterSqlitePrebuild(betterSqlite3Root);
 pruneBetterSqliteBuildArtifacts(betterSqlite3Root);
 cpSync(
   resolve(rootDir, 'apps', 'daemon', 'runtime'),
   resolve(targetDir, 'runtime'),
   { recursive: true }
 );
+prunePythonCacheArtifacts(resolve(targetDir, 'runtime'));
 rmSync(targetCreatorPresetRoot, { recursive: true, force: true });
 cpSync(creatorPresetBuildRoot, targetCreatorPresetRoot, { recursive: true });
 pruneDependencyInstallMetadata();
 pruneDevelopmentArtifacts(targetDir);
 
 assertExists(resolve(targetDir, 'dist/main.js'));
-assertExists(resolve(targetDir, 'node_modules/better-sqlite3/build/Release/better_sqlite3.node'));
 assertExists(resolve(targetDir, 'runtime/opencreator-runtime/SKILL.md'));
 assertExists(resolve(targetDir, 'runtime/opencreator-runtime/manifest.json'));
 assertExists(resolve(targetDir, 'runtime/creator-presets/catalog.json'));
@@ -315,14 +285,43 @@ function pruneDevelopmentArtifacts(root) {
   }
 }
 
+function assertBetterSqlitePrebuild(packageRoot) {
+  const prebuildsDir = resolve(packageRoot, 'prebuilds');
+  const binaries = existsSync(prebuildsDir)
+    ? readdirSync(prebuildsDir).filter(name => name.endsWith('.node'))
+    : [];
+  if (binaries.length === 0) {
+    throw new Error(
+      'Desktop Daemon deployment is missing the bundled better-sqlite3 '
+      + `N-API prebuild: ${prebuildsDir}`
+    );
+  }
+}
+
 function pruneBetterSqliteBuildArtifacts(root) {
-  const binaryPath = resolve(root, 'build/Release/better_sqlite3.node');
-  const binary = readFileSync(binaryPath);
-  rmSync(resolve(root, 'build'), { recursive: true, force: true });
-  mkdirSync(dirname(binaryPath), { recursive: true });
-  writeFileSync(binaryPath, binary);
-  for (const path of ['binding.gyp', 'deps', 'src']) {
+  // Keep prebuilds/*.node (the runtime binary); drop build-only artifacts so
+  // the deployment stays lean and packers never treat it as a source module.
+  for (const path of ['build', 'binding.gyp', 'deps', 'src']) {
     rmSync(resolve(root, path), { recursive: true, force: true });
+  }
+}
+
+function prunePythonCacheArtifacts(root) {
+  // Local dev/test runs can litter the daemon runtime with Python bytecode
+  // caches; the package contract forbids Python runtime markers in the daemon
+  // payload, so strip them from the staged copy.
+  if (!existsSync(root)) return;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = resolve(root, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === '__pycache__') {
+        rmSync(path, { recursive: true, force: true });
+      } else {
+        prunePythonCacheArtifacts(path);
+      }
+    } else if (entry.name.endsWith('.pyc') || entry.name.endsWith('.pyo')) {
+      rmSync(path, { force: true });
+    }
   }
 }
 
@@ -391,13 +390,4 @@ function directorySize(root) {
     else if (entry.isFile()) total += statSync(path).size;
   }
   return total;
-}
-
-function desktopPackageVersion(name) {
-  const packageJson = JSON.parse(
-    readFileSync(resolve(desktopDir, 'package.json'), 'utf8')
-  );
-  const value = packageJson.devDependencies?.[name] ?? packageJson.dependencies?.[name];
-  if (typeof value !== 'string') throw new Error(`Missing Desktop dependency: ${name}`);
-  return value.replace(/^[^\d]*/, '');
 }
