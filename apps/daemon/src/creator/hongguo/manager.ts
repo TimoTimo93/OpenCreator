@@ -2,9 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { mkdir, open, readdir, rename, rm } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { basename, join, relative } from 'node:path';
 import { z } from 'zod';
-import type { HongguoComponentStatus, RuntimeErrorCode } from '@opencreator/protocol';
+import type { HongguoComponentStatus, HongguoDramaApiStatus, RuntimeErrorCode } from '@opencreator/protocol';
 import {
   readPrivateJsonFile,
   writePrivateJsonFile
@@ -73,6 +74,8 @@ type HongguoState = {
   latest?: ChannelLatest;
   lastCheckedAt?: string;
   lastCheckAttemptAt?: string;
+  /** Stable loopback API credentials handed to the component on launch. */
+  api?: { port: number; token: string };
 };
 
 export class HongguoUpdateError extends Error {
@@ -92,6 +95,14 @@ export type HongguoSpawnedProcess = {
   onError(listener: (error: Error) => void): void;
 };
 
+export type HongguoDramaFetchOptions = {
+  method?: 'GET' | 'POST';
+  query?: Record<string, string | number | boolean | null | undefined>;
+  body?: unknown;
+  /** Total budget covering API readiness plus the upstream request. */
+  timeoutMs?: number;
+};
+
 export type HongguoComponentManagerDeps = {
   fetchImpl?: typeof fetch;
   now?: () => Date;
@@ -109,6 +120,13 @@ export type HongguoComponentManager = {
   check(input: { force: boolean }): Promise<HongguoComponentStatus>;
   update(): Promise<HongguoComponentStatus>;
   launch(): Promise<HongguoComponentStatus>;
+  /** Health-checks the component's loopback API without spawning anything. */
+  probeDramaApi(): Promise<HongguoDramaApiStatus>;
+  /**
+   * Calls the component's loopback drama API, launching the component first
+   * when needed (single-flight) and attaching the persisted bearer token.
+   */
+  apiFetch(pathname: string, options?: HongguoDramaFetchOptions): Promise<unknown>;
   close(): void;
 };
 
@@ -139,6 +157,11 @@ export async function createHongguoComponentManager(
   let runningPid: number | null = null;
   let abortController: AbortController | null = null;
   let fatalError: string | null = null;
+  let apiReady = false;
+  let apiLastError: string | null = null;
+  let ensureInFlight: Promise<{ port: number; token: string }> | null = null;
+
+  const implFetch = (): typeof fetch => deps.fetchImpl ?? fetch;
 
   const persist = () => writePrivateJsonFile(statePath, state);
 
@@ -459,10 +482,15 @@ export async function createHongguoComponentManager(
     try {
       await mkdir(dataRoot, { recursive: true });
       await mkdir(downloadsRoot, { recursive: true });
+      // Cổng + token loopback: mọi tiến trình do OpenCreator mở đều phục vụ
+      // drama API để màn hình Khám phá phim/Gợi ý hot đọc dữ liệu.
+      const api = await resolveApiPortAndToken();
       const proc = spawnProcess(exePath, {
         ...process.env,
         HONGGUO_USER_DATA_DIR: dataRoot,
-        HONGGUO_DOWNLOAD_DIR: downloadsRoot
+        HONGGUO_DOWNLOAD_DIR: downloadsRoot,
+        HONGGUO_API_PORT: String(api.port),
+        HONGGUO_API_TOKEN: api.token
       });
       proc.onExit(code => {
         runningPid = null;
@@ -495,7 +523,151 @@ export async function createHongguoComponentManager(
     abortController = null;
   };
 
-  return { status, check, update, launch, close };
+  /**
+   * Cổng + token được lưu trong state.json để daemon khởi động lại vẫn nói
+   * chuyện được với tiến trình Hồng Quả đang chạy (token/ cổng không đổi).
+   */
+  const resolveApiPortAndToken = async (): Promise<{ port: number; token: string }> => {
+    const existing = state.api;
+    if (
+      existing !== undefined
+      && Number.isInteger(existing.port)
+      && existing.port > 0
+      && typeof existing.token === 'string'
+      && existing.token.length >= 8
+    ) {
+      return existing;
+    }
+    const api = { port: await findFreePort(), token: randomUUID() };
+    state.api = api;
+    await persist().catch(() => undefined);
+    return api;
+  };
+
+  const probeHealth = async (port: number, timeoutMs: number): Promise<boolean> => {
+    try {
+      const response = await implFetch()(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(timeoutMs) });
+      if (!response.ok) return false;
+      const payload = (await response.json()) as { ok?: unknown; name?: unknown };
+      return payload?.ok === true && payload?.name === 'hongguo-drama-api';
+    } catch {
+      return false;
+    }
+  };
+
+  const buildDramaStatus = (ready: boolean): HongguoDramaApiStatus => {
+    refreshRunning();
+    return {
+      ready,
+      port: state.api?.port ?? null,
+      installed: state.active !== undefined,
+      running: runningPid !== null,
+      error: apiLastError
+    };
+  };
+
+  const probeDramaApi = async (): Promise<HongguoDramaApiStatus> => {
+    const api = state.api;
+    if (api === undefined) return buildDramaStatus(false);
+    apiReady = await probeHealth(api.port, 600);
+    return buildDramaStatus(apiReady);
+  };
+
+  /** Đảm bảo API đang phản hồi; tự khởi động component nếu chưa chạy. */
+  const ensureApi = async (timeoutMs: number): Promise<{ port: number; token: string }> => {
+    if (ensureInFlight !== null) return ensureInFlight;
+    const run = (async (): Promise<{ port: number; token: string }> => {
+      const api = await resolveApiPortAndToken();
+      if (await probeHealth(api.port, 800)) {
+        apiReady = true;
+        apiLastError = null;
+        return api;
+      }
+      refreshRunning();
+      if (state.active === undefined) {
+        apiLastError = 'Hongguo chưa được cài đặt';
+        throw new HongguoUpdateError('creator_hongguo_unavailable', 'Hongguo is not installed yet', 503);
+      }
+      if (phase !== 'idle') {
+        throw new HongguoUpdateError('creator_hongguo_unavailable', 'Another Hongguo component operation is already running', 503);
+      }
+      if (runningPid === null) await launch();
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (await probeHealth(api.port, 600)) {
+          apiReady = true;
+          apiLastError = null;
+          return api;
+        }
+        refreshRunning();
+        if (runningPid === null && fatalError !== null) {
+          apiLastError = fatalError;
+          throw new HongguoUpdateError('creator_hongguo_launch_failed', fatalError, 502);
+        }
+        await delay(400);
+      }
+      apiReady = false;
+      apiLastError = 'Ứng dụng Hồng Quả không phản hồi API. Nếu ứng dụng đang mở từ ngoài OpenCreator, hãy đóng nó và mở lại từ OpenCreator.';
+      throw new HongguoUpdateError('creator_hongguo_unavailable', apiLastError, 503);
+    })();
+    ensureInFlight = run.finally(() => {
+      ensureInFlight = null;
+    });
+    return ensureInFlight;
+  };
+
+  const apiFetch = async (pathname: string, options: HongguoDramaFetchOptions = {}): Promise<unknown> => {
+    const timeoutMs = options.timeoutMs ?? 60_000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      // Ngân sách khởi động component không vượt quá tổng ngân sách yêu cầu.
+      const { port, token } = await ensureApi(Math.min(timeoutMs, 30_000));
+      const url = new URL(`http://127.0.0.1:${port}${pathname}`);
+      for (const [key, value] of Object.entries(options.query ?? {})) {
+        if (value === undefined || value === null || value === '') continue;
+        url.searchParams.set(key, String(value));
+      }
+      const response = await implFetch()(url, {
+        method: options.method ?? 'GET',
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: 'application/json',
+          ...(options.body === undefined ? {} : { 'content-type': 'application/json' })
+        },
+        ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new HongguoUpdateError(
+          'creator_hongguo_unavailable',
+          `Hongguo drama API responded with status ${response.status}`,
+          502
+        );
+      }
+      const text = await response.text();
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        throw new HongguoUpdateError(
+          'creator_hongguo_unavailable',
+          'Hongguo drama API returned a non-JSON response',
+          502
+        );
+      }
+    } catch (error) {
+      if (error instanceof HongguoUpdateError) throw error;
+      const message = error instanceof Error && error.name === 'AbortError'
+        ? `Hongguo drama API request timed out after ${timeoutMs}ms`
+        : messageOf(error);
+      apiLastError = message;
+      throw new HongguoUpdateError('creator_hongguo_unavailable', message, 504);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  return { status, check, update, launch, probeDramaApi, apiFetch, close };
 }
 
 type HongguoComponentDownloadProgressState = HongguoComponentStatus['downloadProgress'];
@@ -506,6 +678,26 @@ type HongguoComponentDownloadProgressState = HongguoComponentStatus['downloadPro
 
 function versionKey(version: string, viRevision: number): string {
   return `${version}-vi.${viRevision}`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Cổng loopback trống do OS cấp (dùng cho drama API của component). */
+async function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address !== null ? address.port : 0;
+      server.close(() => {
+        if (port > 0) resolve(port);
+        else reject(new Error('could not allocate a loopback port'));
+      });
+    });
+  });
 }
 
 function isNewer(candidate: ChannelLatest | InstalledVersion, against: ChannelLatest | InstalledVersion): boolean {

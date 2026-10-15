@@ -30,6 +30,8 @@ export type RuntimeDependenciesController = {
   checkHongguoUpdate?(force?: boolean): Promise<HongguoComponentStatus>;
   updateHongguo?(): Promise<HongguoComponentStatus>;
   launchHongguo?(): Promise<HongguoComponentStatus>;
+  /** Raw runtime dependency service (drama discovery + component ops). */
+  service?: RuntimeDependencyService;
 };
 
 export function useRuntimeDependencies(input: {
@@ -320,6 +322,7 @@ export function useRuntimeDependencies(input: {
     updateYtDlp,
     checkHongguoUpdate,
     updateHongguo,
-    launchHongguo
+    launchHongguo,
+    service: input.service ?? undefined
   };
 }

@@ -27,9 +27,11 @@ import {
 } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalizedCopy } from '../../i18n/useLocalizedCopy.js';
+import { useAppLanguage } from '../../i18n/LanguageProvider.js';
 import NativeSelect from '../../components/forms/NativeSelect.js';
 import CreatorTaskSummary from './CreatorTaskSummary.js';
 import CreatorToolShell from './CreatorToolShell.js';
+import { DramaBrowsePane, DramaHotPane } from './DramaPanes.js';
 import SupportedVideoSources from './SupportedVideoSources.js';
 import VideoDownloadThumbnail from './VideoDownloadThumbnail.js';
 import {
@@ -62,6 +64,7 @@ export default function VideoDownloadWorkspace(props: {
   batch?: VideoDownloadBatchView;
 }) {
   const l = useLocalizedCopy();
+  const { t } = useAppLanguage();
   const session = useOptionalCreatorSession();
   const [url, setUrl] = useState(() => readString(session?.state.sourceUrl) ?? '');
   const [mediaType, setMediaType] = useState<DownloadMediaType>(
@@ -71,6 +74,8 @@ export default function VideoDownloadWorkspace(props: {
     () => readString(session?.state.selectedOptionId) ?? ''
   );
   const [currentStep, setCurrentStep] = useState<DownloadStep>(0);
+  // Nguồn nội dung ở bước 0: liên kết / Khám phá phim / Gợi ý hot (thành phần Hồng Quả).
+  const [sourceTab, setSourceTab] = useState<'link' | 'browse' | 'hot'>('link');
   const [resultTab, setResultTab] = useState<DownloadResultTab>('formats');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -753,6 +758,35 @@ export default function VideoDownloadWorkspace(props: {
 
 
         {currentStep === 0 && props.batch === undefined ? (
+          <nav className="video-source-tabs" role="tablist" aria-label={t('dashboard.drama.tabs')}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sourceTab === 'link'}
+              onClick={() => setSourceTab('link')}
+            >
+              {t('dashboard.drama.tabLink')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sourceTab === 'browse'}
+              onClick={() => setSourceTab('browse')}
+            >
+              {t('dashboard.drama.title')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sourceTab === 'hot'}
+              onClick={() => setSourceTab('hot')}
+            >
+              {t('dashboard.drama.hotTitle')}
+            </button>
+          </nav>
+        ) : null}
+
+        {currentStep === 0 && props.batch === undefined && sourceTab === 'link' ? (
           <section
             className="creator-tool-panel"
             aria-labelledby="video-download-source-title"
@@ -785,6 +819,28 @@ export default function VideoDownloadWorkspace(props: {
                 {probing ? l('正在解析', 'Analyzing') : l('解析链接', 'Analyze')}
               </button>
             </label>
+          </section>
+        ) : null}
+
+        {currentStep === 0 && props.batch === undefined && sourceTab === 'browse' ? (
+          <section className="creator-tool-panel">
+            <DramaBrowsePane
+              runtimeDependencies={props.runtimeDependencies}
+              {...(props.onOpenRuntimeComponents === undefined
+                ? {}
+                : { onOpenRuntimeComponents: props.onOpenRuntimeComponents })}
+            />
+          </section>
+        ) : null}
+
+        {currentStep === 0 && props.batch === undefined && sourceTab === 'hot' ? (
+          <section className="creator-tool-panel">
+            <DramaHotPane
+              runtimeDependencies={props.runtimeDependencies}
+              {...(props.onOpenRuntimeComponents === undefined
+                ? {}
+                : { onOpenRuntimeComponents: props.onOpenRuntimeComponents })}
+            />
           </section>
         ) : null}
 

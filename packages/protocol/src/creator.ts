@@ -426,6 +426,185 @@ export type HongguoComponentStatusResponse = {
   hongguo: HongguoComponentStatus;
 };
 
+// ---------------------------------------------------------------------------
+// Hongguo drama discovery API
+//
+// The component process serves a token-guarded loopback API (127.0.0.1) for
+// catalog browsing, search, series/episode resolution and its download queue.
+// The daemon proxies those payloads verbatim - the shapes below mirror the
+// component's IPC responses so the web UI can reuse the same logic.
+// ---------------------------------------------------------------------------
+
+export type HongguoDramaSource = {
+  id: string;
+  label: string;
+  custom?: boolean;
+};
+
+export type HongguoDramaMediaSourcesResponse = {
+  success: boolean;
+  sources?: HongguoDramaSource[];
+  error?: string;
+};
+
+export type HongguoDramaCategory = {
+  slug: string;
+  label: string;
+  group?: string;
+};
+
+export type HongguoDramaCategoriesResponse = {
+  categories: HongguoDramaCategory[];
+};
+
+export type HongguoDramaGenre = {
+  slug: string;
+  label: string;
+};
+
+export type HongguoDramaItem = {
+  series_id: string;
+  series_title: string;
+  cover?: string;
+  rank?: number;
+  episode_label?: string;
+  episode_count?: number;
+  completion_status?: string;
+  heat?: string;
+  tags?: string[];
+  intro?: string;
+  series_intro?: string;
+  url?: string;
+};
+
+export type HongguoDramaBrowseResponse = {
+  success: boolean;
+  results?: HongguoDramaItem[];
+  page?: number;
+  total?: number;
+  totalPages?: number;
+  genres?: HongguoDramaGenre[];
+  hasMore?: boolean;
+  sourceUrl?: string;
+  unsupported?: boolean;
+  emptyMessage?: string;
+  pageTitle?: string;
+  meta?: {
+    page?: number;
+    totalPages?: number;
+    total?: number;
+    genres?: HongguoDramaGenre[];
+  };
+  error?: string;
+};
+
+export type HongguoDramaSearchResponse = {
+  success: boolean;
+  results?: HongguoDramaItem[];
+  pageTitle?: string;
+  meta?: {
+    page?: number;
+    totalPages?: number;
+    total?: number;
+    genres?: HongguoDramaGenre[];
+  };
+  error?: string;
+};
+
+export type HongguoDramaEpisodeStatus =
+  | 'missing'
+  | 'pending'
+  | 'downloading'
+  | 'completed'
+  | 'stopped'
+  | 'failed';
+
+export type HongguoDramaEpisode = {
+  vid: string;
+  vid_index: number;
+  title?: string;
+  web_available?: boolean | null;
+  locked?: boolean;
+  taskId?: string | null;
+  status?: HongguoDramaEpisodeStatus | string;
+  progress?: number;
+  fileSize?: number;
+  fileUrl?: string | null;
+  savePath?: string | null;
+};
+
+export type HongguoDramaSeriesDetail = {
+  series_id: string;
+  series_title: string;
+  cover?: string;
+  total: number;
+  web_accessible_episodes?: number | null;
+  seriesDir?: string | null;
+  completedCount?: number;
+  episodes?: HongguoDramaEpisode[];
+};
+
+export type HongguoDramaSeriesResponse = {
+  success: boolean;
+  data?: HongguoDramaSeriesDetail;
+  error?: string;
+};
+
+export type HongguoDramaBatchRequest = {
+  seriesId: string;
+  seriesTitle?: string;
+  episodes: Array<{
+    vid: string;
+    vid_index: number;
+    title?: string;
+    cover?: string;
+  }>;
+  quality?: string;
+};
+
+export type HongguoDramaBatchResponse = {
+  success: boolean;
+  count?: number;
+  requested?: number;
+  error?: string;
+};
+
+export type HongguoDramaTask = {
+  id?: string;
+  status?: string;
+  progress?: number;
+  savePath?: string;
+  error?: string;
+  startTime?: number;
+  endTime?: number;
+  hongguoInfo?: {
+    vid?: string;
+    vid_index?: number;
+    series_id?: string;
+    series_title?: string;
+    ep_title?: string;
+    quality?: string;
+  };
+};
+
+export type HongguoDramaDownloadTasksResponse = {
+  tasks: HongguoDramaTask[];
+};
+
+export type HongguoDramaApiStatus = {
+  /** The loopback API of the component process answered a health check. */
+  ready: boolean;
+  port: number | null;
+  installed: boolean;
+  running: boolean;
+  error: string | null;
+};
+
+export type HongguoDramaStatusResponse = {
+  hongguo: HongguoComponentStatus;
+  drama: HongguoDramaApiStatus;
+};
+
 export type CreatorRuntimeComponent = {
   id: 'whisperkit' | 'whisper.cpp' | 'faster-whisper' | 'remotion';
   name: string;

@@ -5,6 +5,24 @@ import { ApiClientError } from '../runtime/client.js';
 import type { RuntimeDependencyService } from '../services/runtime-dependency-service.js';
 import { useRuntimeDependencies } from './use-runtime-dependencies.js';
 
+/** Mock đủ bộ method drama discovery cho service test (tất cả optional với UI). */
+function dramaMocks() {
+  return {
+    getDramaStatus: vi.fn(async () => ({
+      hongguo: hongguoStatus(),
+      drama: { ready: false, port: null, installed: false, running: false, error: null }
+    })),
+    getDramaMediaSources: vi.fn(async () => ({ success: true, sources: [] })),
+    getDramaCategories: vi.fn(async () => ({ categories: [] })),
+    browseDrama: vi.fn(async () => ({ success: true, results: [] })),
+    searchDrama: vi.fn(async () => ({ success: true, results: [] })),
+    getDramaSeries: vi.fn(async () => ({ success: true })),
+    getDramaSeriesEpisodes: vi.fn(async () => ({ success: true })),
+    downloadDramaBatch: vi.fn(async () => ({ success: true })),
+    getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] }))
+  };
+}
+
 describe('useRuntimeDependencies', () => {
   it('forwards a component download independently of the selected transcription provider', async () => {
     const componentsStatus: CreatorRuntimeComponentsResponse = {
@@ -18,7 +36,8 @@ describe('useRuntimeDependencies', () => {
       getHongguoStatus: vi.fn(async () => ({ hongguo: hongguoStatus() })),
       checkHongguoUpdate: vi.fn(async () => ({ hongguo: hongguoStatus() })),
       updateHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
-      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() }))
+      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      ...dramaMocks()
     };
     const { result } = renderHook(() => useRuntimeDependencies({ connected: true, service }));
     await waitFor(() => expect(result.current.componentsStatus).toEqual(componentsStatus));
@@ -49,7 +68,8 @@ describe('useRuntimeDependencies', () => {
       getHongguoStatus: vi.fn(async () => ({ hongguo: hongguoStatus() })),
       checkHongguoUpdate: vi.fn(async () => ({ hongguo: hongguoStatus() })),
       updateHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
-      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() }))
+      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      ...dramaMocks()
     } as RuntimeDependencyService;
 
     const { result } = renderHook(() => useRuntimeDependencies({
@@ -79,7 +99,8 @@ describe('useRuntimeDependencies', () => {
       getHongguoStatus: vi.fn(async () => ({ hongguo: hongguoStatus() })),
       checkHongguoUpdate: vi.fn(async () => ({ hongguo: hongguoStatus() })),
       updateHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
-      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() }))
+      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      ...dramaMocks()
     } as RuntimeDependencyService;
     const { result } = renderHook(() => useRuntimeDependencies({
       connected: true,
@@ -112,7 +133,8 @@ describe('useRuntimeDependencies', () => {
       getHongguoStatus: vi.fn(async () => ({ hongguo: hongguoStatus() })),
       checkHongguoUpdate: vi.fn(async () => ({ hongguo: hongguoStatus() })),
       updateHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
-      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() }))
+      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      ...dramaMocks()
     } as RuntimeDependencyService;
     const { result } = renderHook(() => useRuntimeDependencies({
       connected: true,

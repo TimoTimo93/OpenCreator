@@ -252,6 +252,7 @@ import { createGatewayCreatorSource } from '../gateway/creator-service-source.js
 import { createCodexAppServerHost } from '../codex/app-server-host-2026-07-28.js';
 import { registerCreatorRoutes } from './routes.creator.js';
 import { registerCreatorRuntimeRoutes } from './routes.creator-runtime.js';
+import { registerCreatorDramaRoutes } from './routes.creator-drama.js';
 import { registerDiagnosticsRoutes } from './routes.diagnostics.js';
 import { registerImageGenerationRoutes } from './routes.image-generation.js';
 import { registerMcpRoutes } from './routes.mcp.js';
@@ -1599,6 +1600,7 @@ export async function buildServer(input: BuildServerInput) {
     remotion: remotionComponent,
     readConfig: () => creatorServicesConfigStore.read()
   }, creatorHongguoComponentManager);
+  await registerCreatorDramaRoutes(server, creatorHongguoComponentManager);
   await registerImageGenerationRoutes(server, imageGenerationService);
   await registerCreatorRoutes(server, creatorService, creatorEvents, {
     sseHeartbeatMs: input.sseHeartbeatMs,

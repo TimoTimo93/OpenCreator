@@ -2,7 +2,16 @@ import type {
   CreatorRuntimeComponent,
   CreatorRuntimeComponentsResponse,
   CreatorYtDlpStatusResponse,
-  HongguoComponentStatusResponse
+  HongguoComponentStatusResponse,
+  HongguoDramaBatchRequest,
+  HongguoDramaBatchResponse,
+  HongguoDramaBrowseResponse,
+  HongguoDramaCategoriesResponse,
+  HongguoDramaDownloadTasksResponse,
+  HongguoDramaMediaSourcesResponse,
+  HongguoDramaSearchResponse,
+  HongguoDramaSeriesResponse,
+  HongguoDramaStatusResponse
 } from '@opencreator/protocol';
 
 type ClientLike = {
@@ -44,6 +53,53 @@ export function createRuntimeDependencyService(client: ClientLike) {
     },
     launchHongguo(): Promise<HongguoComponentStatusResponse> {
       return client.post('/creator/hongguo/launch') as Promise<HongguoComponentStatusResponse>;
+    },
+    // -------------------------------------------------------------------------
+    // Drama discovery (Khám phá phim / Gợi ý hot) - proxied to the component's
+    // loopback API; the daemon launches the component on the first call.
+    // -------------------------------------------------------------------------
+    getDramaStatus(): Promise<HongguoDramaStatusResponse> {
+      return client.get('/creator/drama/status') as Promise<HongguoDramaStatusResponse>;
+    },
+    getDramaMediaSources(): Promise<HongguoDramaMediaSourcesResponse> {
+      return client.get('/creator/drama/media-sources') as Promise<HongguoDramaMediaSourcesResponse>;
+    },
+    getDramaCategories(): Promise<HongguoDramaCategoriesResponse> {
+      return client.get('/creator/drama/categories') as Promise<HongguoDramaCategoriesResponse>;
+    },
+    browseDrama(query: {
+      source?: string;
+      category?: string;
+      genre?: string;
+      page?: number;
+      forceRefresh?: boolean;
+    }): Promise<HongguoDramaBrowseResponse> {
+      const params = new URLSearchParams();
+      if (query.source !== undefined && query.source !== '') params.set('source', query.source);
+      if (query.category !== undefined && query.category !== '') params.set('category', query.category);
+      if (query.genre !== undefined && query.genre !== '') params.set('genre', query.genre);
+      if (query.page !== undefined) params.set('page', String(query.page));
+      if (query.forceRefresh === true) params.set('forceRefresh', 'true');
+      const suffix = params.toString();
+      return client.get(`/creator/drama/browse${suffix === '' ? '' : `?${suffix}`}`) as Promise<HongguoDramaBrowseResponse>;
+    },
+    searchDrama(keyword: string, options?: { source?: string; page?: number }): Promise<HongguoDramaSearchResponse> {
+      const params = new URLSearchParams({ keyword });
+      if (options?.source !== undefined && options.source !== '') params.set('source', options.source);
+      if (options?.page !== undefined) params.set('page', String(options.page));
+      return client.get(`/creator/drama/search?${params.toString()}`) as Promise<HongguoDramaSearchResponse>;
+    },
+    getDramaSeries(seriesId: string): Promise<HongguoDramaSeriesResponse> {
+      return client.get(`/creator/drama/series?seriesId=${encodeURIComponent(seriesId)}`) as Promise<HongguoDramaSeriesResponse>;
+    },
+    getDramaSeriesEpisodes(seriesId: string): Promise<HongguoDramaSeriesResponse> {
+      return client.get(`/creator/drama/series-episodes?seriesId=${encodeURIComponent(seriesId)}`) as Promise<HongguoDramaSeriesResponse>;
+    },
+    downloadDramaBatch(body: HongguoDramaBatchRequest): Promise<HongguoDramaBatchResponse> {
+      return client.post('/creator/drama/download-batch', body) as Promise<HongguoDramaBatchResponse>;
+    },
+    getDramaDownloadTasks(): Promise<HongguoDramaDownloadTasksResponse> {
+      return client.get('/creator/drama/download-tasks') as Promise<HongguoDramaDownloadTasksResponse>;
     }
   };
 }
