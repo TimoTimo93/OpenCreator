@@ -1,9 +1,11 @@
 import { copyFile, link, mkdir, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type {
-  CreatorJson,
-  CreatorServicesConfig
+import {
+  type CreatorJson,
+  type CreatorServicesConfig,
+  resolveEffectiveTranscriptionProvider
 } from '@opencreator/protocol';
 import type { CreatorExecutorInput } from '../executor.js';
 import { CreatorExecutorError } from '../executor.js';
@@ -114,14 +116,19 @@ export async function runKrillinCli(input: RunKrillinCliInput): Promise<KrillinR
   const dependencyBin = join(input.dependencyRoot, 'bin');
   await rm(launcherRoot, { recursive: true, force: true });
   await mkdir(configDir, { recursive: true });
+  const officialTranscriptionModel = gatewayCreatorBinding(input.config)?.models.transcription;
+  const effectiveTranscriptionProvider = resolveEffectiveTranscriptionProvider(
+    input.config.transcription,
+    officialTranscriptionModel
+  );
   const cliResourceRoot = await prepareCliResourceRoot({
     resourceRoot: input.resourceRoot,
     dependencyRoot: input.dependencyRoot,
     launcherRoot,
     onDemandTranscriptionProvider: isOnDemandTranscriptionProvider(
-      input.config.transcription.provider
-    ) ? input.config.transcription.provider : undefined,
-    onDemandTranscriptionModel: input.config.transcription.provider === 'whisper.cpp'
+      effectiveTranscriptionProvider
+    ) ? effectiveTranscriptionProvider : undefined,
+    onDemandTranscriptionModel: effectiveTranscriptionProvider === 'whisper.cpp'
       ? input.config.transcription.whisperCpp.model
       : undefined,
     ytDlpRuntime: input.ytDlpRuntime
@@ -143,12 +150,15 @@ export async function runKrillinCli(input: RunKrillinCliInput): Promise<KrillinR
     await writeInitialManifest(input.stage, input.options);
   }
 
+  const executable = resolveInside(input.resourceRoot, cli.path);
+  const supportsRenderLineMode = cliSupportsRenderLineMode(executable);
   const args = buildKrillinCliCommandArguments(
     input.stage,
     input.artifacts,
     input.options,
     stylePath,
-    input.source
+    input.source,
+    supportsRenderLineMode
   );
   input.stage.reportProgress({
     krillinMode: 'cli',
@@ -159,7 +169,7 @@ export async function runKrillinCli(input: RunKrillinCliInput): Promise<KrillinR
     let response: KrillinCliResponse;
     try {
       response = await executeCli({
-        executable: resolveInside(input.resourceRoot, cli.path),
+        executable,
         args,
         cwd: launcherRoot,
         runtimeBin,
@@ -232,12 +242,33 @@ function stageConfig(
   return config;
 }
 
+export const cliRenderCapabilitiesCache = new Map<string, boolean>();
+
+export function cliSupportsRenderLineMode(executablePath: string): boolean {
+  const cached = cliRenderCapabilitiesCache.get(executablePath);
+  if (cached !== undefined) return cached;
+  try {
+    const result = spawnSync(executablePath, ['render-horizontal', '--help'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 3000
+    });
+    const supported = result.stdout?.includes('--line-mode') === true;
+    cliRenderCapabilitiesCache.set(executablePath, supported);
+    return supported;
+  } catch {
+    cliRenderCapabilitiesCache.set(executablePath, false);
+    return false;
+  }
+}
+
 export function buildKrillinCliCommandArguments(
   stage: CreatorExecutorInput,
   artifacts: MaterializedKrillinArtifact[],
   options: Record<string, unknown>,
   stylePath: string | undefined,
-  sourceOverride?: string
+  sourceOverride?: string,
+  supportsRenderLineMode: boolean = true
 ): string[] {
   const command = krillinCliStageId(stage.stageRun.stageId);
   const common = ['--workdir', stage.workdir, '--task-id', stage.stageRun.id];
@@ -311,17 +342,22 @@ export function buildKrillinCliCommandArguments(
     if ((!video && !sourceUrl) || !subtitle) {
       throw new CreatorExecutorError('creator_stage_input_missing', 'Render video and subtitle inputs are required');
     }
+    const lineModeArgs = supportsRenderLineMode
+      ? [
+          '--line-mode', subtitle === bilingual || subtitle === vertical
+            ? booleanOption(options, 'bilingualTop', true) ? 'bilingual-target-top' : 'bilingual-target-bottom'
+            : 'target-only',
+          ...(subtitle === vertical && target ? ['--mixed-target-subtitle', target] : []),
+          ...(!booleanOption(options, 'bilingual', false) && subtitle !== target ? ['--target-only'] : [])
+        ]
+      : [];
     return [
       command,
       ...common,
       ...mediaCache,
       ...(video ? ['--video', video] : ['--source-url', sourceUrl!]),
       '--subtitle', subtitle,
-      '--line-mode', subtitle === bilingual || subtitle === vertical
-        ? booleanOption(options, 'bilingualTop', true) ? 'bilingual-target-top' : 'bilingual-target-bottom'
-        : 'target-only',
-      ...(subtitle === vertical && target ? ['--mixed-target-subtitle', target] : []),
-      ...(!booleanOption(options, 'bilingual', false) && subtitle !== target ? ['--target-only'] : []),
+      ...lineModeArgs,
       ...(dubbed && !dubbedVideo && dubbedAudio ? ['--audio', dubbedAudio] : []),
       ...(dubbed ? ['--dubbed'] : []),
       ...(command === 'render-vertical'
@@ -402,6 +438,37 @@ function executeCli(input: {
         return;
       }
       if (response.ok !== true || code !== 0) {
+        const errorMsg = response.error?.message ?? stderr;
+        if (
+          typeof errorMsg === 'string'
+          && (
+            errorMsg.includes('flag provided but not defined: -line-mode')
+            || errorMsg.includes('flag provided but not defined: -preview-width')
+            || errorMsg.includes('flag provided but not defined: -preview-height')
+            || errorMsg.includes('flag provided but not defined: -mixed-target-subtitle')
+            || errorMsg.includes('flag provided but not defined: -target-only')
+          )
+        ) {
+          const filteredArgs: string[] = [];
+          for (let i = 0; i < input.args.length; i++) {
+            const arg = input.args[i];
+            if (arg === undefined) continue;
+            if (arg === '--line-mode' || arg === '--preview-width' || arg === '--preview-height' || arg === '--mixed-target-subtitle') {
+              i++;
+            } else if (arg === '--target-only') {
+              // skip flag without value
+            } else {
+              filteredArgs.push(arg);
+            }
+          }
+          if (filteredArgs.length < input.args.length) {
+            void executeCli({
+              ...input,
+              args: filteredArgs
+            }).then(resolvePromise, reject);
+            return;
+          }
+        }
         reject(new KrillinCliError(
           response.error?.code ?? 'krillin_cli_failed',
           redact(response.error?.message ?? (stderr || 'KrillinAI CLI failed')),
@@ -641,6 +708,7 @@ export async function prepareCliResourceRoot(input: {
       join(dependencyBin, 'whispercpp'),
       join(overlayBin, 'whispercpp')
     );
+    await linkDirectoryEntries(join(dependencyBin, 'whispercpp'), overlayBin);
   }
   return input.launcherRoot;
 }

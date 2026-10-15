@@ -1282,7 +1282,10 @@ function ttsCredentialsConfigured(
   provider: CreatorTtsProvider,
   response: CreatorServicesConfigResponse
 ): boolean {
-  if (provider === 'edge-tts') return true;
+  if (provider === 'edge-tts' || provider === 'vieneu') return true;
+  if (provider === 'elevenlabs') {
+    return (response.config.tts.elevenlabs?.apiKeys?.length ?? 0) > 0;
+  }
   if (provider === 'volcengine') {
     const value = response.config.tts.volcengine;
     return (value.appId.trim().length > 0 && value.accessToken.trim().length > 0)
@@ -1291,8 +1294,8 @@ function ttsCredentialsConfigured(
         && response.configuredCredentials.includes('tts.volcengine.accessToken')
       );
   }
-  const providerConfig = response.config.tts[provider];
-  return providerConfig.apiKey.trim().length > 0
+  const providerConfig = response.config.tts[provider as 'openai' | 'minimax' | 'aliyun'];
+  return (providerConfig?.apiKey.trim().length ?? 0) > 0
     || response.configuredCredentials.some(credential => credential === `tts.${provider}.apiKey`);
 }
 

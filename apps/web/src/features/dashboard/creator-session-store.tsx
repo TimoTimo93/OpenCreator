@@ -394,7 +394,7 @@ export function CreatorSessionProvider(props: {
   const captureCreatorFailure = useCallback((
     operation: string,
     cause: unknown,
-    fallbackMessage = 'The operation did not complete. Check diagnostics in the Agent panel.',
+    fallbackMessage = '操作未完成，请在 Agent 区域查看诊断。',
     source: 'upload' | 'preflight' | 'agent' | 'client' = 'client'
   ): OpenCreatorIssue => {
     const causeObject = typeof cause === 'object' && cause !== null ? cause : undefined;

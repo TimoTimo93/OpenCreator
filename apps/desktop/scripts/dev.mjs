@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { connect } from 'node:net';
 import { dirname, resolve } from 'node:path';
@@ -9,21 +10,40 @@ const electron = require('electron');
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(scriptDir, '..');
 const rootDir = resolve(desktopDir, '../..');
+const isWin = process.platform === 'win32';
+const pnpmCmd = isWin ? 'pnpm.cmd' : 'pnpm';
+const openCreatorHome = process.env.OPENCREATOR_HOME || resolve(rootDir, '.opencreator');
+process.env.OPENCREATOR_HOME = openCreatorHome;
+process.env.OPENCREATOR_LANG = process.env.OPENCREATOR_LANG || 'vi-VN';
+if (!process.env.OPENCREATOR_NODE_BIN && existsSync('C:\\Program Files\\nodejs\\node.exe')) {
+  process.env.OPENCREATOR_NODE_BIN = 'C:\\Program Files\\nodejs\\node.exe';
+}
 let webProcess;
 
 try {
-  await run('pnpm', ['--filter', '@opencreator/daemon', 'build'], rootDir);
-  await run('pnpm', ['--filter', '@opencreator/desktop', 'build'], rootDir);
-  if (!(await isPortOpen(19861))) {
-    webProcess = spawn('pnpm', ['--filter', '@opencreator/web', 'dev'], {
-      cwd: rootDir,
-      env: process.env,
-      stdio: 'inherit'
-    });
-    await waitForPort(19861, 30_000);
+  await run(pnpmCmd, ['--filter', '@opencreator/daemon', 'build'], rootDir);
+  await run(pnpmCmd, ['--filter', '@opencreator/desktop', 'build'], rootDir);
+  await run(pnpmCmd, ['--filter', '@opencreator/web', 'build'], rootDir);
+  if (process.env.OPENCREATOR_DESKTOP_DEV_SERVER === '1') {
+    if (!(await isPortOpen(19861))) {
+      webProcess = spawn(pnpmCmd, ['--filter', '@opencreator/web', 'dev'], {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          OPENCREATOR_HOME: openCreatorHome,
+          OPENCREATOR_LANG: process.env.OPENCREATOR_LANG,
+          OPENCREATOR_DESKTOP_DEV: '1'
+        },
+        stdio: 'inherit',
+        shell: isWin
+      });
+      await waitForPort(19861, 30_000);
+    }
   }
   const code = await run(electron, ['.'], desktopDir, {
     ...process.env,
+    OPENCREATOR_HOME: openCreatorHome,
+    OPENCREATOR_LANG: process.env.OPENCREATOR_LANG,
     OPENCREATOR_DESKTOP_DEV: '1'
   });
   process.exitCode = code;
@@ -32,8 +52,15 @@ try {
 }
 
 function run(command, args, cwd, env = process.env) {
+  const isExe = typeof command === 'string' && command.toLowerCase().endsWith('.exe');
+  const useShell = isWin && !isExe;
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { cwd, env, stdio: 'inherit' });
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      stdio: 'inherit',
+      shell: useShell
+    });
     child.once('error', reject);
     child.once('exit', code => resolvePromise(code ?? 1));
   }).then(code => {

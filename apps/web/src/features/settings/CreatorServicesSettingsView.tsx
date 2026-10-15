@@ -44,6 +44,7 @@ import type { ConnectionService } from '../../services/connection-service.js';
 import { IssueList } from '../issues/IssuePresenter.js';
 import { usePageIssueState } from '../issues/page-issue-state.js';
 import { inferLlmProviderId, llmProviderOptions } from './llm-provider-selection.js';
+import { MultiApiKeyManager } from './MultiApiKeyManager.js';
 import './creator-services-settings.css';
 
 const CodexImageStatusNotice = lazy(async () => {
@@ -56,7 +57,7 @@ type ModelSettingsService = Pick<ConnectionService, 'getCodexProvider' | 'update
   getCodexModels?: ConnectionService['getCodexModels'];
 };
 type ModelFieldErrors = Partial<Record<'baseUrl' | 'apiKey' | 'model' | 'proxy', string>>;
-type TextModelMode = 'codex' | 'custom';
+type TextModelMode = 'codex' | 'custom' | 'agnes';
 
 export function CreatorServicesSettingsView(props: {
   connected: boolean;
@@ -435,6 +436,7 @@ export function CreatorServicesSettingsView(props: {
                 setValidationError(undefined);
                 setNotice(undefined);
               }}
+              service={props.service}
             />
           ) : null}
           {activeSection === 'transcription' ? (
@@ -523,6 +525,7 @@ function TextModelSettings(props: SettingsGroupProps & {
   providerId: string;
   runtimeModelIds: readonly string[];
   onProviderIdChange(value: string): void;
+  service?: CreatorServicesSettingsService | null;
 }) {
   const l = useLocalizedCopy();
   const legacyApiKeyConfigured = props.config.llm.source === 'custom'
@@ -530,8 +533,11 @@ function TextModelSettings(props: SettingsGroupProps & {
   const providerApiKeyConfigured = props.provider?.apiKeyConfigured === true;
   const codexAvailable = props.provider !== undefined
     && (props.provider.authentication === 'chatgpt' || providerApiKeyConfigured);
+  const agnesKeysAvailable = (props.config.llm.agnesAi?.apiKeys?.length ?? 0) > 0;
   const textTasksAvailable = props.mode === 'codex'
     ? codexAvailable
+    : props.providerId === 'agnes-ai'
+    ? agnesKeysAvailable || props.apiKey.trim().length > 0
     : legacyApiKeyConfigured || props.apiKey.trim().length > 0;
   const selectedModeAvailable = props.mode === 'codex' ? codexAvailable : textTasksAvailable;
   const TextTaskStatusIcon = textTasksAvailable ? Check : CircleAlert;
@@ -571,22 +577,95 @@ function TextModelSettings(props: SettingsGroupProps & {
             ))}
           </select>
         </label> : null}
-        {props.mode === 'custom' ? <OpenAiFields
-          id="llm"
-          credential="llm.apiKey"
-          configuredCredentials={modelCredentials}
-          value={{
-            baseUrl: props.baseUrl,
-            apiKey: props.apiKey,
-            model: props.model
-          }}
-          modelPlaceholder="gpt-5.6-sol"
-          modelSuggestions={props.providerId === 'openai' && props.runtimeModelIds.length > 0
-            ? props.runtimeModelIds
-            : creatorProviderCatalogById.llm[props.providerId]?.models.map(model => model.id)}
-          errors={props.fieldErrors}
-          onChange={props.onProviderChange}
-        /> : (
+        {props.mode === 'custom' && props.providerId === 'agnes-ai' ? (
+          <div style={{ width: '100%' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '0.75rem' }}>
+              <label className="creator-services-field">
+                <span>{l('API Base URL', 'API Base URL')}</span>
+                <input
+                  type="text"
+                  value={props.baseUrl || 'https://apihub.agnes-ai.com/v1'}
+                  placeholder="https://apihub.agnes-ai.com/v1"
+                  onChange={e => props.onProviderChange({ baseUrl: e.target.value, model: props.model || 'agnes-3.0-pro', apiKey: props.apiKey })}
+                />
+              </label>
+              <label className="creator-services-field">
+                <span>{l('Mô hình AI', 'AI Model')}</span>
+                <select
+                  value={props.model || 'agnes-3.0-pro'}
+                  onChange={e => props.onProviderChange({ baseUrl: props.baseUrl || 'https://apihub.agnes-ai.com/v1', model: e.target.value, apiKey: props.apiKey })}
+                >
+                  <option value="agnes-3.0-pro">Agnes 3.0 Pro (Tối ưu dịch thuật video - Khuyên dùng)</option>
+                  <option value="agnes-2.5-pro">Agnes 2.5 Pro (Tốc độ cao)</option>
+                </select>
+              </label>
+            </div>
+            <MultiApiKeyManager
+              title="Danh sách API Key Agnes AI (agnes-ai.com)"
+              description="Hỗ trợ dán danh sách nhiều key (mỗi dòng một key). Tự động tách dòng, lưu và xoay vòng failover khi gặp lỗi 429/402."
+              apiKeys={props.config.llm.agnesAi?.apiKeys || []}
+              onChange={keys => props.update(config => {
+                if (!config.llm.agnesAi) {
+                  config.llm.agnesAi = { baseUrl: props.baseUrl || 'https://apihub.agnes-ai.com/v1', apiKeys: [], model: props.model || 'agnes-3.0-pro' };
+                }
+                config.llm.agnesAi.apiKeys = keys;
+                if (keys[0]) {
+                  config.llm.apiKey = keys[0];
+                  props.onProviderChange({ baseUrl: props.baseUrl || 'https://apihub.agnes-ai.com/v1', model: props.model || 'agnes-3.0-pro', apiKey: keys[0] });
+                }
+              })}
+              onTestKey={async (key) => props.service?.testApiKey ? props.service.testApiKey({ provider: 'agnes-ai', key, baseUrl: props.baseUrl || props.config.llm.agnesAi?.baseUrl }) : { valid: true }}
+            />
+          </div>
+        ) : props.mode === 'custom' ? (
+          <>
+            <OpenAiFields
+              id="llm"
+              credential="llm.apiKey"
+              configuredCredentials={modelCredentials}
+              value={{
+                baseUrl: props.baseUrl,
+                apiKey: props.apiKey,
+                model: props.model
+              }}
+              modelPlaceholder="gpt-5.6-sol"
+              modelSuggestions={props.providerId === 'openai' && props.runtimeModelIds.length > 0
+                ? props.runtimeModelIds
+                : creatorProviderCatalogById.llm[props.providerId]?.models.map(model => model.id)}
+              errors={props.fieldErrors}
+              onChange={props.onProviderChange}
+            />
+            {(props.providerId === 'router-local' || props.baseUrl.includes('20128')) ? (
+              <div style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', fontWeight: 500 }}>
+                  <input
+                    type="checkbox"
+                    checked={props.config.llm.failoverToAgnes ?? true}
+                    onChange={e => props.update(config => {
+                      config.llm.failoverToAgnes = e.target.checked;
+                    })}
+                  />
+                  <span>Tự động Failover sang danh sách API Key Agnes AI khi 9router (localhost:20128) hết quota</span>
+                </label>
+                <p style={{ margin: '0.4rem 0 0 1.6rem', fontSize: '0.8rem', color: '#888' }}>
+                  Khi dịch vụ AI tại <code>http://localhost:20128</code> hết hạn mức hoặc gặp lỗi 429/402, hệ thống tự động xoay vòng sang danh sách API Key của Agnes AI để đảm bảo công việc dịch thuật video không bị dừng.
+                </p>
+                <div style={{ marginTop: '0.75rem' }}>
+                  <MultiApiKeyManager
+                    title="Danh sách API Key Agnes AI dự phòng (agnes-ai.com)"
+                    description="Dán các API Key Agnes AI vào đây để sẵn sàng tự động chuyển tiếp khi 9router hết quota."
+                    apiKeys={props.config.llm.agnesAi?.apiKeys || []}
+                    onChange={keys => props.update(config => {
+                      if (!config.llm.agnesAi) config.llm.agnesAi = { baseUrl: 'https://apihub.agnes-ai.com/v1', apiKeys: [], model: 'agnes-3.0-pro' };
+                      config.llm.agnesAi.apiKeys = keys;
+                    })}
+                    onTestKey={async (key) => props.service?.testApiKey ? props.service.testApiKey({ provider: 'agnes-ai', key, baseUrl: props.config.llm.agnesAi?.baseUrl }) : { valid: true }}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : (
           <p className="creator-services-runtime-note">
             {props.provider === undefined
               ? l('未检测到可用的本机 Codex Runtime', 'No local Codex runtime was detected')
@@ -928,7 +1007,9 @@ function TtsSettings(props: SettingsGroupProps) {
         label={l('服务商', 'Provider')}
         value={provider}
         options={[
-          ['openai', 'OpenAI TTS'],
+          ['openai', 'OpenAI TTS (9router / Custom)'],
+          ['elevenlabs', 'ElevenLabs TTS (6 Giọng Đọc Tiếng Việt)'],
+          ['vieneu', 'VieNeu-TTS v3 Pro (Local Offline Engine)'],
           ['minimax', 'MiniMax'],
           ['aliyun', l('阿里云百炼', 'Alibaba Cloud Model Studio')],
           ['volcengine', l('火山引擎', 'Volcengine')],
@@ -936,14 +1017,110 @@ function TtsSettings(props: SettingsGroupProps) {
         ]}
         onChange={value => props.update(config => {
           config.tts.provider = value as CreatorServicesConfig['tts']['provider'];
+          if (value === 'elevenlabs' && !config.tts.elevenlabs) {
+            config.tts.elevenlabs = {
+              baseUrl: 'https://api.elevenlabs.io',
+              apiKeys: [],
+              model: 'eleven_multilingual_v2',
+              defaultVoiceId: 'f5q6kePPoQAjCPYG6moa'
+            };
+          }
+          if (value === 'vieneu' && !config.tts.vieneu) {
+            config.tts.vieneu = {
+              baseUrl: 'http://127.0.0.1:7860',
+              model: 'v3turbo',
+              defaultVoiceId: 'Mai Anh'
+            };
+          }
           const preset = creatorProviderOfKind('tts', value);
-          if (preset?.defaultBaseUrl !== undefined && value !== 'edge-tts') {
+          if (preset?.defaultBaseUrl !== undefined && value !== 'edge-tts' && value !== 'elevenlabs' && value !== 'vieneu') {
             const target = config.tts[value as 'openai' | 'minimax' | 'aliyun'];
             target.baseUrl = target.baseUrl || preset.defaultBaseUrl;
             if (!target.model && preset.models[0] !== undefined) target.model = preset.models[0].id;
           }
         })}
       />
+      {provider === 'elevenlabs' ? (
+        <div style={{ width: '100%' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '0.75rem', marginBottom: '0.75rem' }}>
+            <label className="creator-services-field">
+              <span>{l('API Base URL', 'API Base URL')}</span>
+              <input
+                type="text"
+                value={props.config.tts.elevenlabs?.baseUrl || 'https://api.elevenlabs.io'}
+                placeholder="https://api.elevenlabs.io"
+                onChange={e => props.update(config => {
+                  if (!config.tts.elevenlabs) config.tts.elevenlabs = { baseUrl: 'https://api.elevenlabs.io', apiKeys: [], model: 'eleven_multilingual_v2', defaultVoiceId: 'f5q6kePPoQAjCPYG6moa' };
+                  config.tts.elevenlabs.baseUrl = e.target.value;
+                })}
+              />
+            </label>
+            <label className="creator-services-field">
+              <span>{l('Mô hình ElevenLabs', 'ElevenLabs Model')}</span>
+              <select
+                value={props.config.tts.elevenlabs?.model || 'eleven_multilingual_v2'}
+                onChange={e => props.update(config => {
+                  if (!config.tts.elevenlabs) config.tts.elevenlabs = { baseUrl: 'https://api.elevenlabs.io', apiKeys: [], model: 'eleven_multilingual_v2', defaultVoiceId: 'f5q6kePPoQAjCPYG6moa' };
+                  config.tts.elevenlabs.model = e.target.value;
+                })}
+              >
+                <option value="eleven_multilingual_v2">eleven_multilingual_v2 (Đa ngôn ngữ chất lượng cao - Khuyên dùng)</option>
+                <option value="eleven_turbo_v2_5">eleven_turbo_v2_5 (Tối ưu tốc độ cao)</option>
+                <option value="eleven_v4">eleven_v4 (Cơ bản)</option>
+              </select>
+            </label>
+          </div>
+          <MultiApiKeyManager
+            title="Danh sách API Key ElevenLabs (Tự động xoay vòng Failover)"
+            description="Hỗ trợ dán hàng loạt API Key (mỗi dòng một key). Khi một key hết quota (mã 429, 402, 456), hệ thống tự động đổi sang key tiếp theo và tự phục hồi sau 15 phút."
+            apiKeys={props.config.tts.elevenlabs?.apiKeys || []}
+            onChange={keys => props.update(config => {
+              if (!config.tts.elevenlabs) config.tts.elevenlabs = { baseUrl: 'https://api.elevenlabs.io', apiKeys: [], model: 'eleven_multilingual_v2', defaultVoiceId: 'f5q6kePPoQAjCPYG6moa' };
+              config.tts.elevenlabs.apiKeys = keys;
+            })}
+            onTestKey={async (key) => props.service?.testApiKey ? props.service.testApiKey({ provider: 'elevenlabs', key, baseUrl: props.config.tts.elevenlabs?.baseUrl }) : { valid: true }}
+          />
+        </div>
+      ) : null}
+      {provider === 'vieneu' ? (
+        <div style={{ width: '100%' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '0.75rem', marginBottom: '0.75rem' }}>
+            <label className="creator-services-field">
+              <span>{l('Base URL VieNeu-TTS (Cục bộ)', 'VieNeu-TTS Base URL')}</span>
+              <input
+                type="text"
+                value={props.config.tts.vieneu?.baseUrl || 'http://127.0.0.1:7860'}
+                placeholder="http://127.0.0.1:7860"
+                onChange={e => props.update(config => {
+                  if (!config.tts.vieneu) config.tts.vieneu = { baseUrl: 'http://127.0.0.1:7860', model: 'v3turbo', defaultVoiceId: 'Mai Anh' };
+                  config.tts.vieneu.baseUrl = e.target.value;
+                })}
+              />
+            </label>
+            <label className="creator-services-field">
+              <span>{l('Phiên bản mô hình', 'Model Version')}</span>
+              <select
+                value={props.config.tts.vieneu?.model || 'v3turbo'}
+                onChange={e => props.update(config => {
+                  if (!config.tts.vieneu) config.tts.vieneu = { baseUrl: 'http://127.0.0.1:7860', model: 'v3turbo', defaultVoiceId: 'Mai Anh' };
+                  config.tts.vieneu.model = e.target.value;
+                })}
+              >
+                <option value="v3turbo">VieNeu-TTS v3 Turbo (48kHz - Khuyên dùng)</option>
+                <option value="v2">VieNeu-TTS v2 (Chuẩn)</option>
+              </select>
+            </label>
+          </div>
+          <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(16, 185, 129, 0.08)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)', fontSize: '0.85rem' }}>
+            <p style={{ margin: 0, color: '#10b981', fontWeight: 500 }}>
+              ✓ Mô hình Offline Dự Phòng Cứu Cánh (VieNeu-TTS v3 Pro)
+            </p>
+            <p style={{ margin: '0.25rem 0 0 0', color: '#aaa', fontSize: '0.8rem' }}>
+              VieNeu-TTS chạy 100% offline không giới hạn quota tại thư mục <code>D:\Agnes AI\VieNeu-TTS</code>. Khi toàn bộ API đám mây cạn kiệt, hệ thống sẽ tự động dùng VieNeu-TTS để tạo giọng đọc lồng tiếng cho video.
+            </p>
+          </div>
+        </div>
+      ) : null}
       {provider === 'openai' ? (
         <OpenAiFields
           id="tts-openai"
@@ -1011,12 +1188,38 @@ function TtsSettings(props: SettingsGroupProps) {
           <TtsVoicePicker
             id={`tts-${provider}-default-voice`}
             provider={provider}
-            model={props.config.tts[provider].model}
-            value={props.config.tts[provider].defaultVoiceId}
+            model={
+              provider === 'elevenlabs'
+                ? (props.config.tts.elevenlabs?.model || 'eleven_multilingual_v2')
+                : provider === 'vieneu'
+                ? (props.config.tts.vieneu?.model || 'v3turbo')
+                : provider === 'volcengine'
+                ? props.config.tts.volcengine.model
+                : props.config.tts[provider as 'openai' | 'minimax' | 'aliyun'].model
+            }
+            value={
+              provider === 'elevenlabs'
+                ? (props.config.tts.elevenlabs?.defaultVoiceId || 'f5q6kePPoQAjCPYG6moa')
+                : provider === 'vieneu'
+                ? (props.config.tts.vieneu?.defaultVoiceId || 'Mai Anh')
+                : provider === 'volcengine'
+                ? props.config.tts.volcengine.defaultVoiceId
+                : props.config.tts[provider as 'openai' | 'minimax' | 'aliyun'].defaultVoiceId
+            }
             service={props.service ?? null}
             allowCustomVoice={provider === 'volcengine'}
             onChange={voiceId => props.update(config => {
-              config.tts[provider].defaultVoiceId = voiceId;
+              if (provider === 'elevenlabs') {
+                if (!config.tts.elevenlabs) config.tts.elevenlabs = { baseUrl: 'https://api.elevenlabs.io', apiKeys: [], model: 'eleven_multilingual_v2', defaultVoiceId: voiceId };
+                else config.tts.elevenlabs.defaultVoiceId = voiceId;
+              } else if (provider === 'vieneu') {
+                if (!config.tts.vieneu) config.tts.vieneu = { baseUrl: 'http://127.0.0.1:7860', model: 'v3turbo', defaultVoiceId: voiceId };
+                else config.tts.vieneu.defaultVoiceId = voiceId;
+              } else if (provider === 'volcengine') {
+                config.tts.volcengine.defaultVoiceId = voiceId;
+              } else {
+                config.tts[provider as 'openai' | 'minimax' | 'aliyun'].defaultVoiceId = voiceId;
+              }
             })}
           />
         </div>

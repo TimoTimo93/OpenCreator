@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { resolveOpenCreatorPaths } from '@opencreator/config';
 import {
   app,
@@ -51,12 +51,15 @@ app.commandLine.appendSwitch('lang', 'zh-CN');
 const APP_ENTRY_AT = Date.now();
 const DEVELOPMENT =
   process.env.OPENCREATOR_DESKTOP_DEV === '1' || !app.isPackaged;
-if (DEVELOPMENT) {
-  app.setPath(
-    'userData',
-    resolveDesktopUserDataPath(app.getPath('userData'), true)
-  );
-}
+const appRootPath = app.getAppPath();
+const defaultOpenCreatorHome = process.env.OPENCREATOR_HOME?.trim()
+  || (process.platform === 'win32'
+    ? 'D:\\Program Files\\OpenCreator\\.opencreator'
+    : (DEVELOPMENT ? resolve(appRootPath, '../../.opencreator') : join(dirname(app.getPath('userData')), 'OpenCreatorPortable')));
+process.env.OPENCREATOR_HOME = defaultOpenCreatorHome;
+
+const userDataPath = join(defaultOpenCreatorHome, DEVELOPMENT ? 'user-data-dev' : 'user-data');
+app.setPath('userData', userDataPath);
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -107,7 +110,8 @@ async function launchDesktop(): Promise<void> {
   const development = DEVELOPMENT;
   const appRoot = app.getAppPath();
   const paths = resolveOpenCreatorPaths({
-    homeDir: app.getPath('home'),
+    env: { ...process.env, OPENCREATOR_HOME: defaultOpenCreatorHome },
+    homeDir: defaultOpenCreatorHome,
     runtimeChannel: development ? 'development' : 'production'
   });
   const dataDir = paths.dataDir;

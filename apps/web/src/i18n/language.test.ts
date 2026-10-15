@@ -16,6 +16,7 @@ describe('display language preference', () => {
     delete document.documentElement.dataset.locale;
   });
 
+
   it('follows Chinese system locales and uses English for other system locales', () => {
     expect(resolveSystemLanguage(['zh-Hans-CN', 'en-US'])).toBe('zh-CN');
     expect(resolveSystemLanguage(['en-GB', 'fr-FR'])).toBe('en-US');

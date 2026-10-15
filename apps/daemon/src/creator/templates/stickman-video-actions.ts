@@ -469,10 +469,10 @@ export function createStickmanVideoWorkflow(input: {
       provider,
       model: typeof job.state.ttsModel === 'string' && job.state.ttsModel.trim()
         ? job.state.ttsModel.trim()
-        : providerConfig.model,
+        : providerConfig?.model || '',
       voiceId: typeof job.state.voiceCode === 'string' && job.state.voiceCode.trim()
         ? job.state.voiceCode.trim()
-        : providerConfig.defaultVoiceId
+        : providerConfig?.defaultVoiceId || ''
     };
   }
 

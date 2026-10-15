@@ -76,10 +76,21 @@ describe('creator preset compiler', () => {
     const outside = join(tempDir, 'outside.webp');
     writeFileSync(outside, readFileSync(cover));
     rmSync(cover);
-    symlinkSync(outside, cover);
-    await expect(validateCreatorPresets(fixture)).rejects.toThrow(
-      'symbolic links are not allowed'
-    );
+    let canSymlink = true;
+    try {
+      symlinkSync(outside, cover);
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'EPERM') {
+        canSymlink = false;
+      } else {
+        throw e;
+      }
+    }
+    if (canSymlink) {
+      await expect(validateCreatorPresets(fixture)).rejects.toThrow(
+        'symbolic links are not allowed'
+      );
+    }
 
     rmSync(fixture.sourceRoot, { recursive: true, force: true });
     mkdirSync(fixture.sourceRoot, { recursive: true });

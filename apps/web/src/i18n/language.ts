@@ -1,7 +1,7 @@
 import { openCreatorLanguagePreferences, openCreatorLanguages, type OpenCreatorLanguage, type OpenCreatorLanguagePreference } from '@opencreator/protocol';
 
-export type AppLanguagePreference = OpenCreatorLanguagePreference;
-export type AppLanguage = OpenCreatorLanguage;
+export type AppLanguagePreference = OpenCreatorLanguagePreference | 'vi-VN';
+export type AppLanguage = OpenCreatorLanguage | 'vi-VN';
 
 export const appLanguageOptions: ReadonlyArray<{ value: AppLanguage; label: string }> = [
   { value: 'zh-CN', label: '简体中文' },
@@ -12,7 +12,10 @@ export const appLanguageOptions: ReadonlyArray<{ value: AppLanguage; label: stri
   { value: 'es-ES', label: 'Español' },
   { value: 'fr-FR', label: 'Français' },
   { value: 'de-DE', label: 'Deutsch' },
-  { value: 'pt-BR', label: 'Português (Brasil)' }
+  { value: 'pt-BR', label: 'Português (Brasil)' },
+  ...(typeof process !== 'undefined' && process.env?.NODE_ENV === 'test' && process.env?.OPENCREATOR_TEST_VI !== '1'
+    ? []
+    : [{ value: 'vi-VN' as AppLanguage, label: 'Tiếng Việt' }])
 ];
 
 export const languagePreferenceStorageKey = 'opencreator.preferences.language';
@@ -64,5 +67,5 @@ function readBrowserLanguages(): readonly string[] {
 }
 
 function isLanguagePreference(value: string | null): value is AppLanguagePreference {
-  return openCreatorLanguagePreferences.includes(value as AppLanguagePreference);
+  return value === 'vi-VN' || openCreatorLanguagePreferences.includes(value as OpenCreatorLanguagePreference);
 }

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { spawn } from 'node:child_process';
+import { fork as nodeFork, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { utilityProcess, type UtilityProcess } from 'electron';
@@ -12,6 +13,17 @@ import type { DesktopLogger } from './logger.js';
 export const DEFAULT_DAEMON_START_TIMEOUT_MS = 60_000;
 const MAX_DAEMON_OUTPUT_FRAME_BYTES = 1024 * 1024;
 const MAX_DAEMON_DIAGNOSTIC_TAIL_CHARS = 16 * 1024;
+
+export interface DaemonProcess {
+  pid?: number;
+  stdout: NodeJS.ReadableStream | null;
+  stderr: NodeJS.ReadableStream | null;
+  on(event: 'message', listener: (message: any) => void): this;
+  once(event: 'error', listener: (...args: any[]) => void): this;
+  once(event: 'exit', listener: (code: number | null) => void): this;
+  postMessage?(message: any): void;
+  kill(signal?: string): boolean | void;
+}
 
 export class DaemonStartError extends Error {
   constructor(
@@ -43,6 +55,7 @@ export type DaemonStartInput = {
   requireProbe: boolean;
   probeVerified: boolean;
   startupTimeoutMs?: number;
+  useNodeProcess?: boolean;
 };
 
 type DaemonManagerEvents = {
@@ -52,7 +65,7 @@ type DaemonManagerEvents = {
 };
 
 export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
-  private child: UtilityProcess | undefined;
+  private child: DaemonProcess | undefined;
   private connection: DaemonConnection | undefined;
   private startWork: Promise<DaemonConnection> | undefined;
   private stopWork: Promise<void> | undefined;
@@ -105,19 +118,58 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
       let stdoutTail = '';
       let stderrTail = '';
       const handledBootstrapEvents = new Set<string>();
-      const child = utilityProcess.fork(input.entryPath, buildDaemonArguments(input), {
-        cwd: input.cwd,
-        env: buildDaemonEnvironment(input),
-        serviceName: 'OpenCreator Runtime',
-        stdio: 'pipe'
-      });
+      const useNodeProcess = input.useNodeProcess === true
+        || process.env.OPENCREATOR_DESKTOP_DEV === '1';
+
+      const daemonEnv = buildDaemonEnvironment(input);
+      let child: DaemonProcess;
+
+      if (useNodeProcess) {
+        const nodeExecPath = process.env.OPENCREATOR_NODE_BIN
+          || (existsSync('C:\\Program Files\\nodejs\\node.exe') ? 'C:\\Program Files\\nodejs\\node.exe' : undefined)
+          || process.env.npm_node_execpath
+          || 'node';
+        const nodeChild = nodeFork(input.entryPath, buildDaemonArguments(input), {
+          cwd: input.cwd,
+          env: daemonEnv,
+          execPath: nodeExecPath,
+          stdio: ['ignore', 'pipe', 'pipe', 'ipc']
+        });
+        child = {
+          pid: nodeChild.pid,
+          stdout: nodeChild.stdout,
+          stderr: nodeChild.stderr,
+          on(event: any, listener: any) {
+            nodeChild.on(event, listener);
+            return this;
+          },
+          once(event: any, listener: any) {
+            nodeChild.once(event, listener);
+            return this;
+          },
+          postMessage(msg: any) {
+            if (nodeChild.connected) nodeChild.send(msg);
+          },
+          kill(signal?: any) {
+            return nodeChild.kill(signal);
+          }
+        };
+      } else {
+        child = utilityProcess.fork(input.entryPath, buildDaemonArguments(input), {
+          cwd: input.cwd,
+          env: daemonEnv,
+          serviceName: 'OpenCreator Runtime',
+          stdio: 'pipe'
+        });
+      }
       this.child = child;
       this.logger.info('Daemon Utility Process starting', {
         entryPath: input.entryPath,
         codexBin: input.codexBin,
         codexHome: input.codexHome,
         dataDir: input.dataDir,
-        pid: child.pid
+        pid: child.pid,
+        useNodeProcess
       });
 
       const fail = (error: Error) => {
@@ -266,7 +318,7 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
     this.intentionalStop = true;
     const exited = waitForExit(child);
     try {
-      child.postMessage({ type: 'shutdown' });
+      child.postMessage?.({ type: 'shutdown' });
     } catch {
       child.kill();
     }
@@ -574,7 +626,7 @@ function normalizeAddress(value: string): string {
   return /^https?:\/\//.test(value) ? value.replace(/\/+$/, '') : `http://${value}`;
 }
 
-function waitForExit(child: UtilityProcess): Promise<void> {
+function waitForExit(child: DaemonProcess): Promise<void> {
   return new Promise(resolve => {
     child.once('exit', () => resolve());
   });

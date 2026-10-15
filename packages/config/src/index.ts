@@ -107,11 +107,24 @@ export function resolveOpenCreatorPaths(input: {
   runtimeChannel?: OpenCreatorRuntimeChannel;
 } = {}): OpenCreatorPaths {
   const env = input.env ?? process.env;
-  const productRoot = join(input.homeDir ?? homedir(), '.opencreator');
-  const defaultRoot = input.runtimeChannel === 'development'
-    ? join(productRoot, 'development')
-    : productRoot;
-  const root = resolve(env.OPENCREATOR_HOME?.trim() || defaultRoot);
+  const preferredLocalD = 'D:\\Program Files\\OpenCreator\\.opencreator';
+
+  let root: string;
+  if (input.homeDir) {
+    const productRoot = join(input.homeDir, '.opencreator');
+    const defaultRoot = input.runtimeChannel === 'development'
+      ? join(productRoot, 'development')
+      : productRoot;
+    root = resolve(input.env?.OPENCREATOR_HOME?.trim() || defaultRoot);
+  } else {
+    const productRoot = process.platform === 'win32'
+      ? preferredLocalD
+      : (existsSync(preferredLocalD) ? preferredLocalD : join(homedir(), '.opencreator'));
+    const defaultRoot = input.runtimeChannel === 'development'
+      ? join(productRoot, 'development')
+      : productRoot;
+    root = resolve(env.OPENCREATOR_HOME?.trim() || defaultRoot);
+  }
   const runtimeDir = join(root, 'runtime');
   return {
     root,

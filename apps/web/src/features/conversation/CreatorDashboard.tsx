@@ -28,6 +28,10 @@ import { useAppLanguage } from '../../i18n/LanguageProvider.js';
 import type { CreatorWorkspace } from '../dashboard/creator-workspace.js';
 import { IssueList } from '../issues/IssuePresenter.js';
 import { usePageIssueState } from '../issues/page-issue-state.js';
+import {
+  getLocalizedPresetTitle,
+  getLocalizedPresetDescription
+} from './creator-preset-vi.js';
 import './CreatorDashboard.css';
 
 export type CreatorSkill = {
@@ -176,7 +180,15 @@ export function CreatorDashboard(props: {
   const moreTagsButtonRef = useRef<HTMLButtonElement>(null);
   const busyIdentitiesRef = useRef(new Set<string>());
   const pageIssues = usePageIssueState('creator-launch');
-  const presets = props.presets ?? [];
+  const presets = useMemo(() => {
+    const raw = props.presets ?? [];
+    if (language !== 'vi-VN') return raw;
+    return raw.map(preset => ({
+      ...preset,
+      title: getLocalizedPresetTitle(preset, language),
+      description: getLocalizedPresetDescription(preset, language)
+    }));
+  }, [props.presets, language]);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const categoryPresets = useMemo(() => {
     if (category === 'recent') {

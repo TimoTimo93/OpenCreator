@@ -46,6 +46,7 @@ import { copyRichContent } from '../../components/markdown/clipboard.js';
 import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer.js';
 import { useAppLanguage } from '../../i18n/LanguageProvider.js';
 import { useLocalizedCopy } from '../../i18n/useLocalizedCopy.js';
+import { writingTemplateViMap } from '../conversation/creator-preset-vi.js';
 import CreatorTaskSummary from './CreatorTaskSummary.js';
 import CreatorToolShell from './CreatorToolShell.js';
 import {
@@ -153,10 +154,23 @@ export default function WechatArticleWorkspace(props: {
   const l = useLocalizedCopy();
   const { language } = useAppLanguage();
   const wechatArticlePresets = useMemo(
-    () => wechatArticlePresetCatalog.map(preset => localizeWritingTemplate(
-      preset,
-      language === 'zh-CN' ? 'zh-CN' : 'en-US'
-    )),
+    () => wechatArticlePresetCatalog.map(preset => {
+      const localized = localizeWritingTemplate(
+        preset,
+        language === 'zh-CN' ? 'zh-CN' : 'en-US'
+      );
+      if (language === 'vi-VN') {
+        const vi = writingTemplateViMap[preset.id];
+        if (vi) {
+          return {
+            ...localized,
+            name: vi.name,
+            description: vi.description
+          };
+        }
+      }
+      return localized;
+    }),
     [language]
   );
   const session = useOptionalCreatorSession();

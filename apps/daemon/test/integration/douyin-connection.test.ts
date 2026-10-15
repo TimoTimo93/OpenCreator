@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
 import { afterEach, expect, it, vi } from 'vitest';
-import { PlatformConnectionService } from '../../src/platform-connections/service.js';
+import { PlatformConnectionService, type PlatformConnectionOptions } from '../../src/platform-connections/service.js';
+import type { BrowserLoginSession } from '../../src/platform-connections/browser-login.js';
 import { PublicPlatformConnectionError } from '../../src/platform-connections/errors.js';
 import { filterPlatformCookies, hasPlatformSession, parsePlatformCookies, serializePlatformCookies } from '../../src/platform-connections/cookies.js';
 import { readBrowserPlatformCookies, type BrowserProfile } from '../../src/platform-connections/browser.js';
@@ -21,11 +22,22 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-async function setup(readBrowserCookies?: typeof readBrowserPlatformCookies, platform: 'youtube' | 'douyin' = 'douyin') {
+async function setup(
+  readBrowserCookies?: typeof readBrowserPlatformCookies,
+  platform: 'youtube' | 'douyin' = 'douyin',
+  options: Partial<PlatformConnectionOptions> = {}
+) {
   const root = await mkdtemp(join(tmpdir(), 'douyin-connection-'));
   roots.push(root);
-  const service = new PlatformConnectionService({ root, platform, getRuntime: () => runtime,
-    listProfiles: async () => [profile], readBrowserCookies });
+  const service = new PlatformConnectionService({
+    root,
+    platform,
+    getRuntime: () => runtime,
+    osPlatform: options.osPlatform ?? 'darwin',
+    listProfiles: async () => [profile],
+    readBrowserCookies,
+    ...options
+  });
   services.push(service);
   await service.initialize();
   return { root, service };
@@ -125,6 +137,55 @@ it('protects the Douyin API, rejects foreign cookies and invalid profiles, and d
     expect(imported.json()).toMatchObject({ platform: 'douyin', status: 'connected' });
     expect(imported.body).not.toContain(cookie.value);
     expect((await youtube.getState()).status).toBe('disconnected');
+    expect((await server.inject({ method: 'POST', url: '/platform-connections/douyin/complete-login', headers })).statusCode).toBe(200);
     expect((await server.inject({ method: 'DELETE', url: '/platform-connections/douyin', headers })).json().status).toBe('disconnected');
   } finally { await server.close(); }
+});
+
+function loginSession() {
+  let exit!: () => void;
+  const session = {
+    profile: { ...profile, directory: '/dedicated/Default' },
+    exited: new Promise<void>(resolve => { exit = resolve; }),
+    close: vi.fn(async () => {}),
+    dispose: vi.fn(async () => {})
+  } satisfies BrowserLoginSession;
+  return { session, exit, openLoginBrowser: vi.fn(async () => session) };
+}
+
+it('Windows 打开专用 Douyin 验证窗口，等待完成验证后关闭并读取会话', async () => {
+  const login = loginSession();
+  const order: string[] = [];
+  login.session.close.mockImplementation(async () => { order.push('close'); });
+  const read = vi.fn(async () => { order.push('read'); return [cookie]; });
+  const { service } = await setup(read, 'douyin', {
+    osPlatform: 'win32',
+    openLoginBrowser: login.openLoginBrowser
+  });
+  expect(await service.getState()).toEqual({
+    platform: 'douyin',
+    status: 'disconnected',
+    connectionMethod: 'browser-login'
+  });
+  await service.connect();
+  await vi.waitFor(async () => expect((await service.getState()).actionRequired).toBe('complete-login'));
+  expect(login.openLoginBrowser).toHaveBeenCalledTimes(1);
+  await service.completeLogin();
+  await vi.waitFor(async () => expect((await service.getState()).status).toBe('connected'));
+  expect(order).toEqual(['close', 'read']);
+  expect(read).toHaveBeenCalledWith(expect.objectContaining({ platform: 'douyin' }));
+});
+
+it('withCookies 自动从浏览器配置中发现并导入 Douyin 会话凭据', async () => {
+  const read = vi.fn(async () => [cookie]);
+  const { root, service } = await setup(read, 'douyin');
+  expect((await service.getState()).status).toBe('disconnected');
+  await service.withCookies(async () => {
+    const contextRuntime = service.authenticatedRuntime(runtime);
+    expect(contextRuntime?.prefixArgs).toContain('--cookies');
+  });
+  expect((await service.getState()).status).toBe('connected');
+  expect(read).toHaveBeenCalledWith(expect.objectContaining({ platform: 'douyin', profile }));
+  const saved = JSON.parse(await readFile(join(root, 'credentials.json'), 'utf8'));
+  expect(saved.cookies).toEqual([cookie]);
 });

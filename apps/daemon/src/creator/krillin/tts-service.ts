@@ -27,6 +27,8 @@ import { parseVolcengineV3Audio } from './volcengine-tts-v3.js';
 import { creatorServiceErrorInfo } from '../../creator-services/upstream-fetch.js';
 import { publicFactsFromFailure } from '../public-error-facts.js';
 import { gatewayCreatorBinding } from '../../gateway/creator-service-source.js';
+import { getSharedElevenLabsTTS } from '../tts/elevenlabs.js';
+import { getSharedVieNeuTTS } from '../tts/vieneu.js';
 
 const MAX_OUTPUT_BYTES = 100 * 1024 * 1024;
 const MAX_PROCESS_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -215,7 +217,7 @@ export function createKrillinTtsService(input: {
     const prepared = prepareConfig(configured, provider, request.model);
     ensureCredentials(prepared.config, provider);
     const defaultVoice = gateway && (selected?.capabilities.includes('default_voice') ?? gateway.capabilities?.speech?.includes('default_voice'));
-    const voiceId = request.voiceId?.trim() || (defaultVoice ? gatewayDefaultVoiceId : selected?.voices?.[0] || prepared.providerConfig.defaultVoiceId);
+    const voiceId = request.voiceId?.trim() || (defaultVoice ? gatewayDefaultVoiceId : selected?.voices?.[0] || prepared.providerConfig?.defaultVoiceId || '');
     const allowedVoices = defaultVoice ? [gatewayDefaultVoiceId] : selected?.voices ?? gateway?.speechVoices;
     if (allowedVoices && !allowedVoices.includes(voiceId)) {
       throw new KrillinTtsServiceError('VALIDATION_FAILED', 'Select a voice supported by this model', 400);
@@ -301,15 +303,39 @@ function prepareConfig(
 ) {
   const config = structuredClone(source);
   config.tts.provider = provider;
+  if (provider === 'elevenlabs' && !config.tts.elevenlabs) {
+    config.tts.elevenlabs = {
+      baseUrl: 'https://api.elevenlabs.io',
+      apiKeys: [],
+      model: 'eleven_multilingual_v2',
+      defaultVoiceId: 'f5q6kePPoQAjCPYG6moa'
+    };
+  }
+  if (provider === 'vieneu' && !config.tts.vieneu) {
+    config.tts.vieneu = {
+      baseUrl: 'http://127.0.0.1:7860',
+      model: 'v3turbo',
+      defaultVoiceId: 'Mai Anh'
+    };
+  }
   const providerConfig = config.tts[provider];
-  if (model?.trim()) providerConfig.model = model.trim();
-  return { config, providerConfig, model: providerConfig.model };
+  if (model?.trim() && providerConfig) providerConfig.model = model.trim();
+  return { config, providerConfig, model: providerConfig?.model || '' };
 }
 
 function ensureCredentials(
   config: CreatorServicesConfig,
   provider: Exclude<CreatorTtsProvider, 'edge-tts'>
 ): void {
+  if (provider === 'vieneu') return;
+  if (provider === 'elevenlabs') {
+    if ((config.tts.elevenlabs?.apiKeys?.length ?? 0) > 0) return;
+    throw new KrillinTtsServiceError(
+      'creator_tts_config_missing',
+      'Vui lòng cấu hình ít nhất 1 API Key cho ElevenLabs TTS trước khi tạo giọng đọc',
+      409
+    );
+  }
   if (provider === 'volcengine') {
     if (config.tts.volcengine.appId.trim() && config.tts.volcengine.accessToken.trim()) return;
     throw new KrillinTtsServiceError(
@@ -318,7 +344,8 @@ function ensureCredentials(
       409
     );
   }
-  if (config.tts[provider].apiKey.trim()) return;
+  const target = config.tts[provider as 'openai' | 'minimax' | 'aliyun'];
+  if (target?.apiKey?.trim()) return;
   throw new KrillinTtsServiceError(
     'creator_tts_config_missing',
     `Configure the ${provider} TTS API key before generating speech`,
@@ -376,7 +403,62 @@ async function executeProviderSynthesis(
   if (input.provider === 'aliyun') return synthesizeAliyun(input);
   if (input.provider === 'minimax') return synthesizeMinimax(input);
   if (input.provider === 'volcengine') return synthesizeVolcengine(input);
+  if (input.provider === 'elevenlabs') return synthesizeElevenLabs(input);
+  if (input.provider === 'vieneu') return synthesizeVieNeu(input);
   return synthesizeOpenAi(input);
+}
+
+async function synthesizeElevenLabs(
+  input: ExecuteSynthesisInput & { timeoutMs: number }
+): Promise<ExecuteSynthesisResult> {
+  const elevenConfig = input.config.tts.elevenlabs;
+  const instance = getSharedElevenLabsTTS({
+    baseUrl: elevenConfig?.baseUrl,
+    apiKeys: elevenConfig?.apiKeys,
+    model: input.model || elevenConfig?.model,
+    defaultVoiceId: input.voiceId || elevenConfig?.defaultVoiceId
+  });
+
+  try {
+    const result = await instance.generateAudio(input.text, {
+      voiceId: input.voiceId,
+      model: input.model,
+      speed: input.speed,
+      format: input.format,
+      signal: input.signal
+    });
+    return result;
+  } catch (err) {
+    console.warn('[TTS] ElevenLabs synthesis failed, attempting VieNeu-TTS local fallback:', err);
+    try {
+      const vieneu = getSharedVieNeuTTS({
+        baseUrl: input.config.tts.vieneu?.baseUrl,
+        defaultVoiceId: input.config.tts.vieneu?.defaultVoiceId
+      });
+      return await vieneu.generateAudio(input.text, {
+        speed: input.speed,
+        signal: input.signal
+      });
+    } catch {
+      throw err;
+    }
+  }
+}
+
+async function synthesizeVieNeu(
+  input: ExecuteSynthesisInput & { timeoutMs: number }
+): Promise<ExecuteSynthesisResult> {
+  const vieneuConfig = input.config.tts.vieneu;
+  const instance = getSharedVieNeuTTS({
+    baseUrl: vieneuConfig?.baseUrl,
+    defaultVoiceId: input.voiceId || vieneuConfig?.defaultVoiceId
+  });
+  return await instance.generateAudio(input.text, {
+    voiceId: input.voiceId,
+    model: input.model,
+    speed: input.speed,
+    signal: input.signal
+  });
 }
 
 async function synthesizeVolcengine(

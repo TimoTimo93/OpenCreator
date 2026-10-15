@@ -5,8 +5,11 @@ export function resolveDesktopUserDataPath(
   development: boolean
 ): string {
   if (!development) return defaultPath;
-  return join(
+  const resolved = join(
     dirname(defaultPath),
     `${basename(defaultPath)} Development`
   );
+  return defaultPath.includes('/') && !defaultPath.includes('\\')
+    ? resolved.replaceAll('\\', '/')
+    : resolved;
 }

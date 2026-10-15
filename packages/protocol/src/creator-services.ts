@@ -8,7 +8,7 @@ export type OpenAiCompatibleConfig = {
   model: string;
 };
 
-export const creatorTtsProviders = ['openai', 'aliyun', 'edge-tts', 'minimax', 'volcengine'] as const;
+export const creatorTtsProviders = ['openai', 'aliyun', 'edge-tts', 'minimax', 'volcengine', 'elevenlabs', 'vieneu'] as const;
 export type CreatorTtsProvider = (typeof creatorTtsProviders)[number];
 
 export function isCreatorTtsProvider(value: unknown): value is CreatorTtsProvider {
@@ -17,6 +17,25 @@ export function isCreatorTtsProvider(value: unknown): value is CreatorTtsProvide
 
 export type CreatorTtsProviderConfig = OpenAiCompatibleConfig & {
   defaultVoiceId: string;
+};
+
+export type ElevenLabsProviderConfig = {
+  baseUrl: string;
+  apiKeys: string[];
+  model: string;
+  defaultVoiceId: string;
+};
+
+export type VieNeuProviderConfig = {
+  baseUrl: string;
+  model: string;
+  defaultVoiceId: string;
+};
+
+export type AgnesAiConfig = {
+  baseUrl: string;
+  apiKeys: string[];
+  model: string;
 };
 
 /**
@@ -104,11 +123,37 @@ export function isCreatorTranscriptionProvider(
   return creatorTranscriptionProviders.some(provider => provider === value);
 }
 
+export function hasValidOpenAiTranscriptionApiKey(apiKey: string | undefined): boolean {
+  if (typeof apiKey !== 'string') return false;
+  const trimmed = apiKey.trim();
+  return trimmed.length > 0 && trimmed !== '9router';
+}
+
+export function resolveEffectiveTranscriptionProvider(
+  transcription: CreatorServicesConfig['transcription'],
+  officialModel?: string,
+  platform: NodeJS.Platform = typeof process !== 'undefined' ? process.platform : 'win32',
+  arch: string = typeof process !== 'undefined' ? process.arch : 'x64'
+): CreatorTranscriptionProvider {
+  if (officialModel) return 'openai';
+  if (transcription.provider === 'openai') {
+    if (hasValidOpenAiTranscriptionApiKey(transcription.openai.apiKey)) {
+      return 'openai';
+    }
+    if (platform === 'darwin' && arch === 'arm64') return 'whisperkit';
+    if (platform === 'win32' && arch === 'x64') return 'whisper.cpp';
+    return 'whisper.cpp';
+  }
+  return transcription.provider;
+}
+
 export type CreatorServicesConfig = {
   proxy: string;
   llm: OpenAiCompatibleConfig & {
     jsonMode: boolean;
-    source: 'codex' | 'custom';
+    source: 'codex' | 'custom' | 'agnes';
+    agnesAi?: AgnesAiConfig;
+    failoverToAgnes?: boolean;
   };
   transcription: {
     provider: CreatorTranscriptionProvider;
@@ -130,6 +175,8 @@ export type CreatorServicesConfig = {
     minimax: CreatorTtsProviderConfig;
     aliyun: CreatorTtsProviderConfig;
     volcengine: VolcengineTtsConfig;
+    elevenlabs?: ElevenLabsProviderConfig;
+    vieneu?: VieNeuProviderConfig;
   };
   image: {
     provider: 'openai' | 'jimeng' | 'kling' | 'gemini' | 'codex-native';
@@ -267,17 +314,23 @@ export function createDefaultCreatorServicesConfig(): CreatorServicesConfig {
   return {
     proxy: '',
     llm: {
-      baseUrl: '',
-      apiKey: '',
-      model: 'gpt-4o-mini',
+      baseUrl: 'http://localhost:20128/v1',
+      apiKey: '9router-local',
+      model: 'cx/gpt-6-sol',
       jsonMode: false,
-      source: 'codex'
+      source: 'codex',
+      agnesAi: {
+        baseUrl: 'https://apihub.agnes-ai.com/v1',
+        apiKeys: [],
+        model: 'agnes-3.0-pro'
+      },
+      failoverToAgnes: true
     },
     transcription: {
       provider: 'openai',
       enableGpuAcceleration: false,
       openai: {
-        baseUrl: '',
+        baseUrl: 'http://localhost:20128/v1',
         apiKey: '',
         model: 'whisper-1'
       },
@@ -299,10 +352,21 @@ export function createDefaultCreatorServicesConfig(): CreatorServicesConfig {
     tts: {
       provider: 'openai',
       openai: {
-        baseUrl: '',
-        apiKey: '',
+        baseUrl: 'http://localhost:20128/v1',
+        apiKey: '9router-local',
         model: 'gpt-4o-mini-tts',
         defaultVoiceId: 'marin'
+      },
+      elevenlabs: {
+        baseUrl: 'https://api.elevenlabs.io',
+        apiKeys: [],
+        model: 'eleven_multilingual_v2',
+        defaultVoiceId: 'f5q6kePPoQAjCPYG6moa'
+      },
+      vieneu: {
+        baseUrl: 'http://127.0.0.1:7860',
+        model: 'v3turbo',
+        defaultVoiceId: 'Mai Anh'
       },
       minimax: {
         baseUrl: 'https://api.minimax.io',

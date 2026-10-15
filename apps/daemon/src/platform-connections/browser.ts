@@ -17,6 +17,9 @@ export async function listBrowserProfiles(): Promise<BrowserProfile[]> {
     ['edge', join(homedir(), 'Library/Application Support/Microsoft Edge')]
   ] : process.platform === 'win32' ? [
     ['chrome', join(process.env.LOCALAPPDATA ?? '', 'Google/Chrome/User Data')],
+    ['chrome', join(process.env.LOCALAPPDATA ?? '', 'Google/Chrome for Testing/User Data')],
+    ['chrome', 'D:\\program\\browsers\\chrome-win64\\User Data'],
+    ['chrome', 'D:\\program\\browsers\\User Data'],
     ['edge', join(process.env.LOCALAPPDATA ?? '', 'Microsoft/Edge/User Data')]
   ] : [
     ['chrome', join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'google-chrome')],
@@ -24,10 +27,24 @@ export async function listBrowserProfiles(): Promise<BrowserProfile[]> {
   ];
   const profiles: BrowserProfile[] = [];
   for (const [browser, root] of roots) {
-    let state: { profile?: { last_used?: string; info_cache?: Record<string, { name?: string }> } };
+    let state: { profile?: { last_used?: string; info_cache?: Record<string, { name?: string }> } } | undefined;
     try { state = JSON.parse(await readFile(join(root, 'Local State'), 'utf8')); }
-    catch { continue; }
-    for (const [directoryName, metadata] of Object.entries(state.profile?.info_cache ?? { Default: {} })) {
+    catch {
+      const defaultDir = join(root, 'Default');
+      const defaultExists = await stat(join(defaultDir, 'Network/Cookies')).catch(() =>
+        stat(join(defaultDir, 'Cookies')).catch(() => undefined));
+      if (defaultExists?.isFile()) {
+        profiles.push({
+          id: createHash('sha256').update(defaultDir).digest('hex').slice(0, 24),
+          browser,
+          label: `${browser === 'chrome' ? 'Chrome' : 'Edge'} · Default`,
+          directory: defaultDir,
+          preferred: true
+        });
+      }
+      continue;
+    }
+    for (const [directoryName, metadata] of Object.entries(state?.profile?.info_cache ?? { Default: {} })) {
       if (!/^(?:Default|Profile \d+)$/.test(directoryName)) continue;
       const directory = join(root, directoryName);
       const exists = await stat(join(directory, 'Network/Cookies')).catch(() =>
@@ -35,7 +52,7 @@ export async function listBrowserProfiles(): Promise<BrowserProfile[]> {
       if (!exists?.isFile()) continue;
       profiles.push({ id: createHash('sha256').update(directory).digest('hex').slice(0, 24), browser,
         label: `${browser === 'chrome' ? 'Chrome' : 'Edge'} · ${metadata.name || directoryName}`,
-        directory, preferred: directoryName === (state.profile?.last_used ?? 'Default') });
+        directory, preferred: directoryName === (state?.profile?.last_used ?? 'Default') });
     }
   }
   return profiles.sort((a, b) => Number(b.preferred) - Number(a.preferred));

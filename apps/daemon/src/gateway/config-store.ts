@@ -26,8 +26,13 @@ export function createGatewayConfigStore(dataDir: string) {
         const id = randomUUID(); await writePrivateJsonFile(devicePath, { id }); return id;
       })();
     },
-    async readCredentials(): Promise<GatewayCredentials | undefined> { const value = await readPrivateJsonFile(secretPath); return value === undefined ? undefined : credentials.parse(value); },
-    writeCredentials(value: GatewayCredentials) { return mutateCredentials(() => writePrivateJsonFile(secretPath, value)); },
+    async readCredentials(): Promise<GatewayCredentials | undefined> {
+      const value = await readPrivateJsonFile(secretPath);
+      return value === undefined ? undefined : credentials.parse(value);
+    },
+    writeCredentials(value: GatewayCredentials) {
+      return mutateCredentials(() => writePrivateJsonFile(secretPath, value));
+    },
     deleteCredentials() { return mutateCredentials(() => deletePrivateJsonFile(secretPath)); },
     async readConfiguration() { const value = await readPrivateJsonFile(publicPath); return value === undefined ? { source: 'manual' as const, bindingVersion: null } : configuration.parse(value); },
     writeConfiguration(value: z.infer<typeof configuration>) { return writePrivateJsonFile(publicPath, value); }

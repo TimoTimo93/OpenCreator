@@ -182,9 +182,12 @@ describe('bundled Runtime official gateway boundary', () => {
       if (requests.length === 1) {
         const tools = requests[0]!.body.tools as Array<{ name?: string }>;
         expect(tools.some(tool => tool.name === 'exec_command')).toBe(true);
+        const checkCmd = process.platform === 'win32'
+          ? `"${process.execPath}" -e "console.log(process.env.OC_GATEWAY_MODEL_KEY ? 'CLOUD_KEY_PRESENT' : 'CLOUD_KEY_ABSENT')"`
+          : 'if test -n "$OC_GATEWAY_MODEL_KEY"; then echo CLOUD_KEY_PRESENT; else echo CLOUD_KEY_ABSENT; fi';
         complete(res, [{
           id: 'fc_test', type: 'function_call', call_id: 'call_test', name: 'exec_command',
-          arguments: JSON.stringify({ cmd: 'if test -n "$OC_GATEWAY_MODEL_KEY"; then echo CLOUD_KEY_PRESENT; else echo CLOUD_KEY_ABSENT; fi', max_output_tokens: 100 }), status: 'completed'
+          arguments: JSON.stringify({ cmd: checkCmd, max_output_tokens: 100 }), status: 'completed'
         }]);
       } else complete(res, [message]);
     });

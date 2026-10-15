@@ -180,7 +180,7 @@ describe('VideoTranslationWorkspace task controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'sv-SE' }));
     expect(screen.getByText('Det gick inte att starta förberedelsen av originalvideon. Kontrollera diagnostiken och försök igen.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Försök ladda ned originalvideon igen' })).toBeEnabled();
-    expect(screen.getByRole('textbox', { name: /subtitles 1$/ })).toHaveValue('保留未保存字幕');
+    expect(screen.getByRole('textbox', { name: /undertexter 1$|subtitles 1$/ })).toHaveValue('保留未保存字幕');
     expect(screen.getByRole('button', { name: /V1/ })).toBeInTheDocument();
     expect(screen.getByText(raw)).not.toBeVisible();
     expect(applyAction).toHaveBeenCalledTimes(requestsBeforeSwitch);
@@ -356,7 +356,7 @@ describe('VideoTranslationWorkspace task controls', () => {
     fireEvent.change(screen.getByRole('combobox', { name: '字幕类型' }), { target: { value: kind } });
     fireEvent.change(screen.getByLabelText('UTF-8 SRT 文件'), { target: { files: [new File(['invalid'], 'local.srt', { type: 'application/x-subrip' })] } });
     await waitFor(() => expect(applyAction).toHaveBeenCalledWith('job_control', expect.objectContaining({ action: 'import-subtitle', input: {
-      kind, fileName: 'local.srt', language: kind === 'source_subtitle' ? 'en' : 'zh_cn', contentBase64: btoa('invalid')
+      kind, fileName: 'local.srt', language: kind === 'source_subtitle' ? 'zh_cn' : 'vi', contentBase64: btoa('invalid')
     } })));
     expect(within(screen.getByRole('group', { name: '导入已有字幕' })).queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByText('Invalid UTF-8 SRT: timeline 2')).not.toBeInTheDocument();
@@ -1488,6 +1488,97 @@ describe('VideoTranslationWorkspace task controls', () => {
     expect(within(workspace).queryByText('翻译进行中')).not.toBeInTheDocument();
     expect(within(workspace).queryByText('翻译任务已开始，进度会实时同步到创作动态')).not.toBeInTheDocument();
   });
+
+  it('initializes fresh workspace with 7 required defaults and retains them across file upload and URL change', async () => {
+    const initialJob: CreatorJob = {
+      id: 'job_fresh',
+      projectId: 'project_1',
+      templateId: 'video-translation',
+      templateVersion: 2,
+      status: 'draft',
+      revision: 0,
+      presetOrigin: null,
+      state: {},
+      agentThreadId: null,
+      providerRequests: [],
+      activities: [],
+      artifacts: [],
+      stages: [],
+      createdAt: '2026-10-15T00:00:00.000Z',
+      updatedAt: '2026-10-15T00:00:00.000Z'
+    };
+
+    render(
+      <LanguageProvider initialPreference="zh-CN">
+        <CreatorSessionProvider
+          initialJob={initialJob}
+          service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+        >
+          <VideoTranslationWorkspace onBack={vi.fn()} />
+        </CreatorSessionProvider>
+      </LanguageProvider>
+    );
+
+    // Initial step is Step 0: 拖放视频到这里
+    expect(screen.getByRole('heading', { name: '拖放视频到这里' })).toBeInTheDocument();
+
+    // Enter a video URL
+    const urlInput = screen.getByLabelText('视频链接');
+    fireEvent.change(urlInput, { target: { value: 'https://www.youtube.com/watch?v=fresh123' } });
+
+    // Navigate to step 1: 翻译设置
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    expect(screen.getByRole('heading', { name: '设置翻译语言' })).toBeInTheDocument();
+
+    // Check defaults 1-3:
+    // 1. Source Language: zh_cn (Tiếng Trung)
+    expect(screen.getByLabelText('源语言')).toHaveValue('zh_cn');
+
+    // 2. Target Language: vi (Tiếng Việt)
+    expect(screen.getByLabelText('翻译为')).toHaveValue('vi');
+
+    // 3. Bilingual: false (Phụ đề song ngữ: Tắt)
+    expect(screen.getByRole('switch', { name: '双语字幕' })).toHaveAttribute('aria-checked', 'false');
+
+    // Navigate to step 2: 视频与字幕
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    expect(screen.getByRole('heading', { name: '视频与字幕' })).toBeInTheDocument();
+
+    // Check default 4: Compose Video with Subtitles: true (Hiển thị video có phụ đề: Bật)
+    expect(screen.getByRole('switch', { name: '合成字幕视频' })).toHaveAttribute('aria-checked', 'true');
+
+    // Check defaults 5-7: Subtitle styles:
+    // 5. Subtitle Font: serif (Phông có chân)
+    expect(screen.getByLabelText('字幕字体')).toHaveValue('serif');
+
+    // 6. Subtitle Weight: medium (Độ dày trung bình)
+    expect(screen.getByLabelText('字幕字重')).toHaveValue('medium');
+
+    // 7. Subtitle Size: medium (Kích thước trung bình)
+    expect(screen.getByLabelText('字幕大小')).toHaveValue('medium');
+
+    // Navigate back to Step 0: 添加视频
+    fireEvent.click(screen.getByRole('button', { name: /添加视频/ }));
+    expect(screen.getByLabelText('上传本地视频')).toBeInTheDocument();
+
+    // Upload a video file
+    const file = new File(['fake video data'], 'test-video.mp4', { type: 'video/mp4' });
+    const fileInput = screen.getByLabelText('上传本地视频');
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    // Navigate to Step 1 and verify defaults 1-3 are retained without resetting
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    expect(screen.getByLabelText('源语言')).toHaveValue('zh_cn');
+    expect(screen.getByLabelText('翻译为')).toHaveValue('vi');
+    expect(screen.getByRole('switch', { name: '双语字幕' })).toHaveAttribute('aria-checked', 'false');
+
+    // Navigate to Step 2 and verify defaults 4-7 are retained without resetting
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    expect(screen.getByRole('switch', { name: '合成字幕视频' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByLabelText('字幕字体')).toHaveValue('serif');
+    expect(screen.getByLabelText('字幕字重')).toHaveValue('medium');
+    expect(screen.getByLabelText('字幕大小')).toHaveValue('medium');
+  });
 });
 
 function job(input: {
@@ -1509,8 +1600,8 @@ function job(input: {
     state: {
       sourceType: 'url',
       sourceUrl: 'https://www.youtube.com/watch?v=job-control',
-      sourceLanguage: 'en',
-      targetLanguage: 'zh_cn',
+      sourceLanguage: 'zh_cn',
+      targetLanguage: 'vi',
       bilingual: true,
       subtitlePosition: 'top',
       preferPlatformCaptions: true,

@@ -3,9 +3,10 @@ import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import sharp from 'sharp';
 import type { YtDlpRuntime } from '../yt-dlp/runtime.js';
 import { buildKrillinSubtitleStyle } from './adapter.js';
-import { createKrillinCliEnvironment } from './cli-runner.js';
+import { cliSupportsRenderLineMode, createKrillinCliEnvironment } from './cli-runner.js';
 import { readKrillinRuntimeManifest, resolveInside } from './manifest.js';
 
 const execute = promisify(execFile);
@@ -22,6 +23,10 @@ export function createSubtitlePreviewService(input: {
       const manifest = readKrillinRuntimeManifest(input.resourceRoot);
       const cli = manifest.resources.find(resource => /(?:^|\/)krillinai-cli(?:\.exe)?$/i.test(resource.path));
       if (cli === undefined) throw new Error('KrillinAI CLI is unavailable');
+      const cliExecutable = resolveInside(input.resourceRoot, cli.path);
+      if (!cliSupportsRenderLineMode(cliExecutable)) {
+        return await renderFallbackSubtitlePreview(request);
+      }
       await mkdir(input.workRoot, { recursive: true });
       const workdir = await mkdtemp(join(input.workRoot, 'subtitle-preview-'));
       try {
@@ -39,7 +44,7 @@ export function createSubtitlePreviewService(input: {
         const bin = join(input.resourceRoot, 'bin');
         const ytDlp = input.getYtDlpRuntime?.();
         try {
-          await execute(resolveInside(input.resourceRoot, cli.path), [
+          await execute(cliExecutable, [
             request.width >= request.height ? 'render-horizontal' : 'render-vertical',
             '--workdir', workdir, '--subtitle', subtitlePath,
             '--subtitle-style-file', stylePath,
@@ -59,7 +64,11 @@ export function createSubtitlePreviewService(input: {
             signal
           });
         } catch (cause) {
-          const stdout = (cause as { stdout?: string }).stdout;
+          const stdout = (cause as { stdout?: string }).stdout ?? '';
+          const stderr = (cause as { stderr?: string }).stderr ?? '';
+          if (stdout.includes('flag provided but not defined') || stderr.includes('flag provided but not defined')) {
+            return await renderFallbackSubtitlePreview(request);
+          }
           let response: { error?: { message?: string } } | undefined;
           try { response = JSON.parse(stdout?.trim().split('\n').at(-1) ?? ''); } catch { /* Keep process failures without JSON diagnostics. */ }
           if (response?.error?.message) throw new Error(response.error.message);
@@ -71,6 +80,44 @@ export function createSubtitlePreviewService(input: {
       }
     }
   };
+}
+
+function escapeXml(unsafe: string): string {
+  return unsafe.replace(/[<>&'"]/g, c => {
+    switch (c) {
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '&': return '&amp;';
+      case '\'': return '&apos;';
+      case '"': return '&quot;';
+      default: return c;
+    }
+  });
+}
+
+async function renderFallbackSubtitlePreview(request: CreatorSubtitlePreviewRequest): Promise<Buffer> {
+  const lines = request.bilingual
+    ? request.subtitlePosition === 'top'
+      ? [request.translationText, request.originalText]
+      : [request.originalText, request.translationText]
+    : [request.translationText];
+  const fontSize = request.subtitleStyle.fontSize === 'small' ? 22 : request.subtitleStyle.fontSize === 'large' ? 34 : 28;
+  const primaryColor = request.subtitleStyle.primaryColor || '#FFFFFF';
+  const secondaryColor = request.subtitleStyle.secondaryColor || '#FFD45C';
+  const outlineColor = request.subtitleStyle.outlineColor || '#000000';
+  const outlineWidth = request.subtitleStyle.outlineWidth ?? 2;
+  const fontFamily = request.subtitleStyle.fontPreset === 'serif' ? 'serif' : 'sans-serif';
+
+  const textElements = lines.map((line, idx) => {
+    const yOffset = request.height - 40 - (lines.length - 1 - idx) * (fontSize + 10);
+    const fill = (lines.length > 1 && idx === 1) ? secondaryColor : primaryColor;
+    return `<text x="50%" y="${yOffset}" text-anchor="middle" font-family="${fontFamily}" font-size="${fontSize}px" font-weight="bold" fill="${fill}" stroke="${outlineColor}" stroke-width="${outlineWidth}" paint-order="stroke fill">${escapeXml(line)}</text>`;
+  }).join('\n');
+
+  const svg = `<svg width="${request.width}" height="${request.height}" xmlns="http://www.w3.org/2000/svg">
+    ${textElements}
+  </svg>`;
+  return await sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 export type SubtitlePreviewService = ReturnType<typeof createSubtitlePreviewService>;

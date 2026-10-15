@@ -23,6 +23,7 @@ import { validateMediaFile } from '../validators/media.js';
 import { withYtDlpProxy } from '../yt-dlp/args.js';
 import type { YtDlpRuntime } from '../yt-dlp/runtime.js';
 import { parseDownloadProbe } from './probe-parser.js';
+import { classifyDouyinChallenge } from './issue-catalog.js';
 
 type DownloadExecutorOptions = {
   configStore: Pick<CreatorServicesConfigStore, 'read'>;
@@ -1196,16 +1197,9 @@ function classifyDownloadError(stderr: string, exitCode: number | null): Creator
     provider: 'yt-dlp',
     ...(httpStatus === undefined ? {} : { httpStatus })
   });
-  if (douyin && text.includes('douyin request signature is required')) {
-    return failure('platform_request_signature_required',
-      'Douyin rejected the downloader because its required browser request signature is not supported. Reconnecting cookies alone cannot fix this; use a local video file.',
-      'unsupported', 403, stderr);
-  }
-  if (douyin && (text.includes('fresh cookies') || text.includes('douyin browser identity was rejected'))) {
-    const status = /http error\s+(\d{3})\b/i.exec(stderr);
-    return failure('platform_session_required',
-      'Douyin did not accept the browser session or requires website verification. Reconnect Douyin in Settings > Platform connections and retry; signing in is not necessarily required.',
-      'unauthorized', status === null ? undefined : Number(status[1]), stderr);
+  const douyinFact = classifyDouyinChallenge(stderr);
+  if (douyinFact) {
+    return failure(douyinFact.code, douyinFact.message, douyinFact.kind, douyinFact.httpStatus, stderr);
   }
   if (/bilibili risk control (?:rejected the media request|blocked media extraction)/.test(text)
     || (text.includes('bilibili risk control') && text.includes('no video formats found'))) {

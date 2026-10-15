@@ -39,6 +39,12 @@ export function createCreatorServicesService(client: ClientLike) {
       return client.patch('/creator-services/config', config);
     },
     testTranscriptionConnection(config: CreatorServicesConfig['transcription']['funasr']): Promise<{ connected: boolean; model: string; models: string[]; capabilities: string[] }> { return client.rawRequest('/creator-services/transcription/test', { method: 'POST', body: config }).then(response => response.json()); },
+    testApiKey(params: { provider: 'elevenlabs' | 'agnes-ai' | 'vieneu'; key?: string; baseUrl?: string }): Promise<{ valid: boolean; error?: string; remainingQuota?: number }> {
+      return client.rawRequest('/creator-services/test-key', {
+        method: 'POST',
+        body: params
+      }).then(response => response.json());
+    },
     resetConfig(): Promise<CreatorServicesConfigResponse> {
       return client.delete('/creator-services/config');
     },

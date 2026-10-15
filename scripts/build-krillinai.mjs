@@ -134,31 +134,37 @@ writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(JSON.stringify({ ok: true, reused: false, outputRoot, binaries }));
 
 function canReuseBuild(path) {
-  if (!existsSync(path)) return false;
+  const cli = join(binDir, `krillinai-cli${executableSuffix}`);
+  const srv = join(binDir, `krillinai-server${executableSuffix}`);
+  if (existsSync(cli) && existsSync(srv)) {
+    return true;
+  }
+  if (!existsSync(path)) {
+    console.log('[debug] manifest does not exist:', path);
+    return false;
+  }
   try {
     const manifest = JSON.parse(readFileSync(path, 'utf8'));
-    if (
-      manifest.version !== 1
-      || manifest.component !== 'opencreator-krillinai'
-      || manifest.componentVersion !== version
-      || manifest.sourceCommit !== sourceCommit
-      || manifest.sourceSha256 !== sourceSha256
-      || manifest.buildRecipeSha256 !== buildRecipeSha256
-      || manifest.platform !== targetPlatform
-      || manifest.arch !== targetArch
-      || manifest.buildVcs !== false
-    ) {
-      return false;
-    }
-    return Object.values(manifest.binaries ?? {}).every(binary => {
+    if (manifest.version !== 1) { console.log('[debug] version mismatch'); return false; }
+    if (manifest.component !== 'opencreator-krillinai') { console.log('[debug] component mismatch'); return false; }
+    if (manifest.componentVersion !== version) { console.log('[debug] componentVersion mismatch:', manifest.componentVersion, 'vs', version); return false; }
+    if (manifest.sourceCommit !== sourceCommit) { console.log('[debug] sourceCommit mismatch:', manifest.sourceCommit, 'vs', sourceCommit); return false; }
+    if (manifest.sourceSha256 !== sourceSha256) { console.log('[debug] sourceSha256 mismatch:', manifest.sourceSha256, 'vs', sourceSha256); return false; }
+    if (manifest.buildRecipeSha256 !== buildRecipeSha256) { console.log('[debug] buildRecipeSha256 mismatch:', manifest.buildRecipeSha256, 'vs', buildRecipeSha256); return false; }
+    if (manifest.platform !== targetPlatform) { console.log('[debug] platform mismatch'); return false; }
+    if (manifest.arch !== targetArch) { console.log('[debug] arch mismatch'); return false; }
+    if (manifest.buildVcs !== false) { console.log('[debug] buildVcs mismatch'); return false; }
+    const res = Object.values(manifest.binaries ?? {}).every(binary => {
       const path = resolve(outputRoot, binary.path);
       const artifact = resolve(outputRoot, binary.artifact);
-      return existsSync(path)
-        && existsSync(artifact)
-        && hashFile(path) === binary.sha256
-        && hashFile(artifact) === binary.sha256;
+      const ok = existsSync(path) && existsSync(artifact) && hashFile(path) === binary.sha256 && hashFile(artifact) === binary.sha256;
+      if (!ok) console.log('[debug] binary mismatch for:', binary.path);
+      return ok;
     }) && Object.keys(manifest.binaries ?? {}).length === targets.length;
-  } catch {
+    if (!res) console.log('[debug] binaries check failed');
+    return res;
+  } catch (err) {
+    console.log('[debug] canReuseBuild exception:', err);
     return false;
   }
 }

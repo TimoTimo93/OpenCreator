@@ -18,30 +18,30 @@
         <div class="status-mark" id="status-mark" aria-hidden="true">
           <span></span>
         </div>
-        <h1 id="status-title">Preparing OpenCreator</h1>
-        <p id="status-detail">Checking the local environment</p>
+        <h1 id="status-title">Đang chuẩn bị OpenCreator</h1>
+        <p id="status-detail">Đang kiểm tra môi trường cục bộ</p>
         <p class="elapsed" id="elapsed" hidden></p>
 
         <div class="failure-actions" id="failure-actions" hidden>
-          <button class="primary" id="retry" type="button">Retry</button>
-          <button id="select-codex" type="button">Select Codex or ChatGPT</button>
-          <button id="diagnostics" type="button">Export diagnostics</button>
-          <button class="quiet" id="quit" type="button">Quit</button>
+          <button class="primary" id="retry" type="button">Thử lại</button>
+          <button id="select-codex" type="button">Chọn Codex hoặc ChatGPT</button>
+          <button id="diagnostics" type="button">Xuất chẩn đoán</button>
+          <button class="quiet" id="quit" type="button">Thoát</button>
         </div>
 
         <div class="failure-actions" id="workspace-actions" hidden>
-          <button class="primary" id="reload-workspace" type="button">Reload Dashboard</button>
-          <button id="restart-runtime" type="button">Restart Runtime</button>
-          <button id="workspace-diagnostics" type="button">Export diagnostics</button>
-          <button class="quiet" id="workspace-quit" type="button">Quit</button>
+          <button class="primary" id="reload-workspace" type="button">Tải lại Bảng điều khiển</button>
+          <button id="restart-runtime" type="button">Khởi động lại Runtime</button>
+          <button id="workspace-diagnostics" type="button">Xuất chẩn đoán</button>
+          <button class="quiet" id="workspace-quit" type="button">Thoát</button>
         </div>
 
         <details id="technical-details" hidden>
-          <summary>Technical details</summary>
+          <summary>Chi tiết kỹ thuật</summary>
           <dl>
             <div><dt>Codex</dt><dd id="codex-path">-</dd></div>
             <div><dt>CODEX_HOME</dt><dd id="codex-home">-</dd></div>
-            <div><dt>Error code</dt><dd id="error-code">-</dd></div>
+            <div><dt>Mã lỗi</dt><dd id="error-code">-</dd></div>
           </dl>
           <pre id="error-message"></pre>
         </details>

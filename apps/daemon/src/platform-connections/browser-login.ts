@@ -13,10 +13,15 @@ export type BrowserLoginSession = {
   dispose(): Promise<void>;
 };
 
+import type { ConnectionPlatform } from '@opencreator/protocol';
 import { PublicPlatformConnectionError } from './errors.js';
 
 export class LoginBrowserCloseError extends PublicPlatformConnectionError {
-  constructor() { super('Close the YouTube sign-in window, then click "Finish sign-in". Other Chrome windows can stay open.'); }
+  constructor(platform: ConnectionPlatform = 'youtube') {
+    super(platform === 'douyin'
+      ? 'Close the Douyin verification window, then click "Finish verification". Other Chrome windows can stay open.'
+      : 'Close the YouTube sign-in window, then click "Finish sign-in". Other Chrome windows can stay open.');
+  }
 }
 
 export function windowsYouTubeBrowserArgs(directory: string, url = 'https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fwww.youtube.com%2F'): string[] {
@@ -24,7 +29,7 @@ export function windowsYouTubeBrowserArgs(directory: string, url = 'https://acco
     '--new-window', url];
 }
 
-export async function openWindowsYouTubeLogin(input: { root: string; signal: AbortSignal; url?: string }): Promise<BrowserLoginSession> {
+export async function openWindowsYouTubeLogin(input: { root: string; signal: AbortSignal; url?: string; platform?: ConnectionPlatform }): Promise<BrowserLoginSession> {
   input.signal.throwIfAborted();
   const executable = await findChrome();
   const directory = resolve(input.root, 'browser-chrome');
@@ -54,17 +59,38 @@ export async function openWindowsYouTubeLogin(input: { root: string; signal: Abo
       const current = await windowsProfileBrowserPids('chrome', directory, signal);
       const closed = await runWindowsBrowserClose(windowsBrowserCloseScript('chrome', current), signal);
       signal.throwIfAborted();
-      if (!closed) throw new LoginBrowserCloseError();
+      if (!closed) throw new LoginBrowserCloseError(input.platform);
     },
     async dispose() { if (watcher.exitCode === null) await terminateProcessTree(watcher.pid); }
   };
 }
 
+export const openWindowsDouyinLogin = (input: { root: string; signal: AbortSignal; url?: string }) =>
+  openWindowsYouTubeLogin({ url: 'https://www.douyin.com/', platform: 'douyin', ...input });
+
 async function findChrome(): Promise<string> {
+  const directCandidates = [
+    'D:\\program\\browsers\\chrome-win64\\chrome.exe',
+    'D:\\Program Files\\browsers\\chrome-win64\\chrome.exe',
+    process.env.CHROME_BIN,
+    process.env.CHROME_PATH
+  ].filter((p): p is string => Boolean(p));
+
+  for (const direct of directCandidates) {
+    if ((await stat(direct).catch(() => undefined))?.isFile()) return direct;
+  }
+
   for (const root of [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA]) {
     if (!root) continue;
-    const executable = join(root, 'Google/Chrome/Application/chrome.exe');
-    if ((await stat(executable).catch(() => undefined))?.isFile()) return executable;
+    for (const sub of [
+      'Google/Chrome/Application/chrome.exe',
+      'Google/Chrome for Testing/chrome.exe',
+      'Microsoft/Edge/Application/msedge.exe',
+      'Microsoft/EdgeCore/Optimized/msedge.exe'
+    ]) {
+      const executable = join(root, sub);
+      if ((await stat(executable).catch(() => undefined))?.isFile()) return executable;
+    }
   }
   throw new PublicPlatformConnectionError('Chrome was not found. Install Chrome and reconnect YouTube.');
 }

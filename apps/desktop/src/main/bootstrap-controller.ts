@@ -404,7 +404,8 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
       defaultCwd: environment.defaultCwd,
       defaultProjectRoot: this.input.defaultProjectRoot,
       requireProbe,
-      probeVerified
+      probeVerified,
+      useNodeProcess: this.input.development
     };
   }
 

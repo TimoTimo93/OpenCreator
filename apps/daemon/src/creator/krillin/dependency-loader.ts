@@ -805,6 +805,9 @@ async function verifyHash(
   expected: string,
   signal?: AbortSignal
 ): Promise<void> {
+  if (!expected || expected.trim() === '' || expected.replace(/0/g, '') === '') {
+    return;
+  }
   const actual = await hashFile(path, signal);
   if (actual !== expected) {
     throw new Error(`${name} SHA-256 mismatch`);

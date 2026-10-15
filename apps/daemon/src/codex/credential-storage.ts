@@ -59,7 +59,7 @@ export function isCodexCredentialStoreConfigurationDiagnostic(
     return true;
   }
   if (typeof error !== 'object' || error === null || !('code' in error)) return false;
-  return error.code === 'ENOTDIR' || error.code === 'EISDIR';
+  return error.code === 'ENOTDIR' || error.code === 'EISDIR' || error.code === 'EEXIST';
 }
 
 function enforceMode(path: string, mode: number): Promise<void> {

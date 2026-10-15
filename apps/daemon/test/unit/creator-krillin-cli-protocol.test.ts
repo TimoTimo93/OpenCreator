@@ -30,7 +30,7 @@ describe('KrillinAI CLI protocol', () => {
 
   it('passes saved legacy styles instead of silently using runtime defaults', () => {
     const stage = { job: { templateId: 'video-translation', state: { subtitleFont: 'rounded', subtitleSize: 'large', subtitleColor: '#123456', subtitleShadowOffsetX: -4, subtitleShadowOffsetY: 6, subtitleShadowBlur: 2 } }, stageRun: { stageId: 'render-horizontal' } };
-    expect(buildKrillinStageOptions(stage as never).subtitleStyle).toMatchObject({ horizontal: { major: { font_name: 'OpenCreator Rounded Bold', font_size: 18, primary_color: '#123456', override_tags: '\\xshad-4\\yshad6\\blur2' } } });
+    expect(buildKrillinStageOptions(stage as never).subtitleStyle).toMatchObject({ horizontal: { major: { font_name: 'OpenCreator Rounded Medium', font_size: 18, primary_color: '#123456', override_tags: '\\xshad-4\\yshad6\\blur2' } } });
   });
 
   it.each([true, false])('keeps edited vertical subtitles and renders the requested bilingual=%s mode', bilingual => {
@@ -217,5 +217,46 @@ describe('KrillinAI CLI protocol', () => {
         base_url: 'http://127.0.0.1:8000/v1', api_key: 'funasr-secret', model: 'sensevoice', timeout_ms: 60000
       }
     });
+  });
+
+  it('automatically falls back from openai to whisper.cpp when apiKey is empty or 9router placeholder', () => {
+    const config = createDefaultCreatorServicesConfig();
+    config.transcription.provider = 'openai';
+    config.transcription.openai.apiKey = '9router';
+
+    const document = parse(createKrillinConfigToml(config)) as {
+      transcribe: { provider: string };
+    };
+    expect(document.transcribe.provider).toBe('whispercpp');
+
+    config.transcription.openai.apiKey = '   ';
+    const documentEmpty = parse(createKrillinConfigToml(config)) as {
+      transcribe: { provider: string };
+    };
+    expect(documentEmpty.transcribe.provider).toBe('whispercpp');
+  });
+
+  it('preserves openai provider when a valid non-placeholder API key is supplied', () => {
+    const config = createDefaultCreatorServicesConfig();
+    config.transcription.provider = 'openai';
+    config.transcription.openai.apiKey = 'sk-custom-openai-secret';
+
+    const document = parse(createKrillinConfigToml(config)) as {
+      transcribe: { provider: string; openai: { api_key: string } };
+    };
+    expect(document.transcribe.provider).toBe('openai');
+    expect(document.transcribe.openai.api_key).toBe('sk-custom-openai-secret');
+  });
+
+  it('preserves openai provider when officialTranscriptionModel is provided', () => {
+    const config = createDefaultCreatorServicesConfig();
+    config.transcription.provider = 'openai';
+    config.transcription.openai.apiKey = '9router';
+
+    const document = parse(createKrillinConfigToml(config, undefined, 'official-asr-v1')) as {
+      transcribe: { provider: string; openai: { official_model: string } };
+    };
+    expect(document.transcribe.provider).toBe('openai');
+    expect(document.transcribe.openai.official_model).toBe('official-asr-v1');
   });
 });

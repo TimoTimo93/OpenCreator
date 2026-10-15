@@ -18,8 +18,8 @@ const promptSchema = z.string().max(creatorPromptMaxLength);
 const shortTextSchema = z.string().max(256);
 
 export const creatorSubtitleStyleSchema = z.object({
-  fontPreset: z.enum(['system', 'sans', 'serif', 'rounded']).default('sans'),
-  fontWeight: z.enum(['regular', 'medium', 'bold']).default('bold'),
+  fontPreset: z.enum(['system', 'sans', 'serif', 'rounded']).default('serif'),
+  fontWeight: z.enum(['regular', 'medium', 'bold']).default('medium'),
   fontSize: z.enum(['small', 'medium', 'large']).default('medium'),
   primaryColor: colorSchema.default('#FFFFFF'),
   secondaryColor: colorSchema.default('#D1D5DB'),
@@ -36,16 +36,16 @@ export const creatorSubtitleStyleSchema = z.object({
 }).strict().default({});
 
 const videoTranslationDefaultsSchema = z.object({
-  sourceLanguage: z.string().min(2).max(32).default('en'),
-  targetLanguage: z.string().min(2).max(32).default('zh_cn'),
+  sourceLanguage: z.string().min(2).max(32).default('zh_cn'),
+  targetLanguage: z.string().min(2).max(32).default('vi'),
   preferPlatformCaptions: z.boolean().default(true),
-  bilingual: z.boolean().default(true),
+  bilingual: z.boolean().default(false),
   subtitlePosition: z.enum(['top', 'bottom']).default('top'),
   subtitleStyle: creatorSubtitleStyleSchema,
   dubbing: z.boolean().default(false),
   voiceCode: shortTextSchema.default(''),
   voiceName: shortTextSchema.default(''),
-  composeVideo: z.boolean().default(false),
+  composeVideo: z.boolean().default(true),
   videoFormat: z.enum(['horizontal', 'vertical', 'all']).default('horizontal'),
   verticalTitle: z.string().max(80).default(''),
   verticalSubtitle: z.string().max(140).default('')

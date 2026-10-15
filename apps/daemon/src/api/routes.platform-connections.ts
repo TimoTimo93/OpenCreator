@@ -8,6 +8,9 @@ export async function registerPlatformConnectionRoutes(server: FastifyInstance, 
     return payload;
   });
   server.post('/platform-connections/youtube/complete-login', () => youtube.completeLogin());
+  if (douyin !== undefined) {
+    server.post('/platform-connections/douyin/complete-login', () => douyin.completeLogin());
+  }
   for (const [platform, connection] of [['youtube', youtube], ['douyin', douyin]] as const) {
     if (connection === undefined) continue;
     const path = `/platform-connections/${platform}`;

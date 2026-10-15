@@ -1,0 +1,1434 @@
+[
+  {
+    "id": "images-go-hard-thumbnail",
+    "titleEn": "Images Go Hard Action Thumbnail",
+    "titleZh": "Images Go Hard 动作电影缩略图",
+    "descEn": "Create a cinematic YouTube thumbnail with a sunset marina, two action characters, and bold three-line typography.",
+    "descZh": "晚霞码头、双人战术角色与左侧三行醒目大字，生成电影感 YouTube 横版封面。",
+    "tags": [
+      "cover",
+      "reference-template",
+      "youtube",
+      "文本排版",
+      "电影感"
+    ]
+  },
+  {
+    "id": "acrylic-hand-painted-split-poster",
+    "titleEn": "Acrylic Hand-Painted Split Poster",
+    "titleZh": "丙烯手绘风格海报设计",
+    "descEn": "Split an uploaded photo into a photographic upper half and a minimal acrylic-painted lower half.",
+    "descZh": "将上传照片制作成上半部真实摄影、下半部极简丙烯手绘插画的 3:4 高级设计海报。",
+    "tags": [
+      "reference-template",
+      "图片转绘",
+      "手绘插画",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "animated-campus-world-reference-board",
+    "titleEn": "Animated Campus World Reference Board",
+    "titleZh": "动画校园世界观参考面板",
+    "descEn": "Build a four-panel anime reference board with consistent characters, campus exterior, and classroom.",
+    "descZh": "生成角色、校园外观和教室场景保持统一的四格世界观参考板。",
+    "tags": [
+      "anime-style",
+      "reference-template",
+      "多视角一致性",
+      "影视叙事",
+      "角色场景"
+    ]
+  },
+  {
+    "id": "architecture-photo-concept-sketch-diptych",
+    "titleEn": "Architecture Photo and Concept Sketch Diptych",
+    "titleZh": "建筑照片概念草图双联海报",
+    "descEn": "Pair an uploaded building photograph with a matching architectural concept sketch.",
+    "descZh": "把上传照片转化为上方实景、下方建筑概念草图的双联海报。",
+    "tags": [
+      "reference-template",
+      "图片转绘",
+      "建筑空间",
+      "设计参考"
+    ]
+  },
+  {
+    "id": "bento-food-packaging-concept",
+    "titleEn": "Bento Food Packaging Concept",
+    "titleZh": "便当化食品包装创意",
+    "descEn": "Reimagine a food product as a neatly partitioned bento-style packaging concept.",
+    "descZh": "把食品或包装商品重新设计为便当式分区陈列创意图。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "图片转绘",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "berry-smoothie-commercial-photo",
+    "titleEn": "Berry Smoothie Commercial Photo",
+    "titleZh": "浆果冰沙商业摄影",
+    "descEn": "Photograph a berry smoothie with polished lighting and realistic food-advertising detail.",
+    "descZh": "生成具有广告质感的饮品产品摄影。",
+    "tags": [
+      "reference-template",
+      "产品摄影",
+      "商业广告",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "beverage-food-marketing-hero",
+    "titleEn": "Beverage and Food Marketing Hero",
+    "titleZh": "饮料食品营销主视觉",
+    "descEn": "Design a commercial hero image for beverages, packaged foods, or frozen products.",
+    "descZh": "生成饮料、冷冻食品和包装商品的商业营销主视觉。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "商业广告",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "blue-white-dunhuang-embroidery-quadriptych",
+    "titleEn": "Blue-and-White, Dunhuang and Embroidery Quadriptych",
+    "titleZh": "青花敦煌刺绣四拼海报",
+    "descEn": "Reinterpret one subject in four panels inspired by porcelain, Dunhuang art, and embroidery.",
+    "descZh": "将同一主体转译为青花瓷、敦煌、刺绣等中国传统视觉语言的四拼风格海报。",
+    "tags": [
+      "reference-template",
+      "传统文化",
+      "手工材质",
+      "系列视觉"
+    ]
+  },
+  {
+    "id": "botanical-plate",
+    "titleEn": "Imaginary Botanical Plate",
+    "titleZh": "虚构植物科学图版",
+    "descEn": "Create a 2:3 botanical plate with a fictional specimen and enlarged details. Source preview; output and rights unverified.",
+    "descZh": "以植物标本和局部放大图制作 2:3 虚构植物科学图版。来源预览；效果及授权待核实。",
+    "tags": [
+      "reference-template",
+      "watercolor",
+      "自然植物"
+    ]
+  },
+  {
+    "id": "botanical-soda",
+    "titleEn": "Botanical Soda Product Still Life",
+    "titleZh": "植物汽水商业静物",
+    "descEn": "Create a square commercial still life for a fictional botanical soda. Source preview; output and rights unverified.",
+    "descZh": "以虚构植物汽水为主体制作正方形商业静物照片。来源预览；效果及授权待核实。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "boutique-ecommerce-product-flatlay-grid",
+    "titleEn": "Boutique E-commerce Product Flatlay Grid",
+    "titleZh": "精品电商产品平铺网格",
+    "descEn": "Arrange fashion and lifestyle products in a polished e-commerce flat-lay grid.",
+    "descZh": "生成精品服饰、配件和生活方式商品的平铺电商展示网格。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "时尚美妆",
+      "电商视觉"
+    ]
+  },
+  {
+    "id": "chinese-luxury-beauty-poster",
+    "titleEn": "Chinese Luxury Beauty Poster",
+    "titleZh": "中文奢华美妆海报",
+    "descEn": "Create a luxury cream advertisement with gold silk, marble, and Chinese typography.",
+    "descZh": "生成一张以面霜产品为视觉中心，使用香槟金丝绸、大理石台面、中文标题和中文卖点的高端美妆广告海报。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "商业广告",
+      "时尚美妆"
+    ]
+  },
+  {
+    "id": "cinematic-action-rpg-screenshot",
+    "titleEn": "Cinematic Action RPG Screenshot",
+    "titleZh": "电影级动作角色扮演游戏截图",
+    "descEn": "Stage a third-person boss battle with environmental storytelling and a complete game HUD.",
+    "descZh": "生成一张包含玩家角色、巨型首领、战斗瞬间、环境叙事和完整 HUD 的电影级第三人称动作角色扮演游戏截图。",
+    "tags": [
+      "reference-template",
+      "游戏视觉",
+      "电影感",
+      "角色场景"
+    ]
+  },
+  {
+    "id": "city-corner-3d-billboard-photography",
+    "titleEn": "City Corner 3D Billboard Photography",
+    "titleZh": "城市巨幕三维广告摄影",
+    "descEn": "Photograph a blue-hour street corner with a wraparound anamorphic 3D billboard.",
+    "descZh": "生成蓝调时刻城市街头摄影，核心是一块包裹建筑转角、具有裸眼三维错觉的巨型户外广告屏。",
+    "tags": [
+      "3d-render",
+      "city-street",
+      "reference-template",
+      "商业广告",
+      "未来科技"
+    ]
+  },
+  {
+    "id": "coastal-poster",
+    "titleEn": "Imaginary Coastal Travel Poster",
+    "titleZh": "虚构海岸城市旅行海报",
+    "descEn": "Create a 2:3 screen-print travel poster for a fictional coastal city. Source preview; output and rights unverified.",
+    "descZh": "以虚构海岸城市为主题制作 2:3 丝网印刷风旅行海报。来源预览；效果及授权待核实。",
+    "tags": [
+      "reference-template",
+      "旅行城市",
+      "编辑设计"
+    ]
+  },
+  {
+    "id": "concept-sofa-development-board",
+    "titleEn": "Concept Sofa Development Board",
+    "titleZh": "概念沙发研发板",
+    "descEn": "Show a furniture concept progressing from form studies to structure and finished sofa.",
+    "descZh": "生成从形态观察、结构推导到成品展示的概念家具研发视觉板。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "工业设计",
+      "设计参考"
+    ]
+  },
+  {
+    "id": "consistent-interior-multiview-grid",
+    "titleEn": "Consistent Interior Multiview Grid",
+    "titleZh": "一致性室内空间多视角网格",
+    "descEn": "Show four consistent views of the same room based on a reference photograph.",
+    "descZh": "生成同一室内空间的多角度一致性设计网格。",
+    "tags": [
+      "reference-template",
+      "多视角一致性",
+      "建筑空间",
+      "设计参考"
+    ]
+  },
+  {
+    "id": "cooking-sketch-illustration-story",
+    "titleEn": "Cooking Sketch Illustration Story",
+    "titleZh": "烹饪速写插画叙事",
+    "descEn": "Tell a cooking story through four to six nostalgic hand-drawn frames.",
+    "descZh": "将食物或烹饪主题转化为包含食材、准备过程、质地和成品的 4 至 6 格怀旧手绘速写故事。",
+    "tags": [
+      "reference-template",
+      "影视叙事",
+      "手绘插画",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "croissant-baking-storyboard",
+    "titleEn": "Croissant Baking Storyboard",
+    "titleZh": "可颂烘焙流程分镜板",
+    "descEn": "Storyboard the steps of croissant baking for a polished food commercial.",
+    "descZh": "生成展示可颂制作过程、镜头顺序和成品诱惑力的食品商业分镜板。",
+    "tags": [
+      "reference-template",
+      "storyboard",
+      "商业广告",
+      "影视叙事",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "deep-sea-freediving-adventure-photo",
+    "titleEn": "Deep-Sea Freediving Adventure Photo",
+    "titleZh": "深海自由潜水探险摄影",
+    "descEn": "Capture a freediver from below against a vast deep-blue underwater backdrop.",
+    "descZh": "生成从水下仰拍自由潜水者的电影感探险摄影，通过水面纹理、深蓝渐变和大面积负空间表现孤独与尺度。",
+    "tags": [
+      "reference-template",
+      "人像摄影",
+      "体育视觉",
+      "创意摄影"
+    ]
+  },
+  {
+    "id": "desert-car-wash-documentary-photo",
+    "titleEn": "Desert Car Wash Documentary Photo",
+    "titleZh": "沙漠洗车电影感纪实摄影",
+    "descEn": "Stage a layered documentary-style scene at an open-air desert car wash.",
+    "descZh": "生成沙漠露天洗车场的电影感纪实画面，通过车尾备胎、水柱、泡沫玻璃和车内人物形成多层叙事。",
+    "tags": [
+      "cinematic",
+      "reference-template",
+      "人像摄影",
+      "创意摄影",
+      "商业广告"
+    ]
+  },
+  {
+    "id": "duotone-studio-commercial-portrait",
+    "titleEn": "Duotone Studio Commercial Portrait",
+    "titleZh": "双色调摄影棚商业肖像",
+    "descEn": "Light a premium studio portrait with vivid magenta and electric-blue tones.",
+    "descZh": "生成具有品红与电光蓝双色布光的高端商业肖像。",
+    "tags": [
+      "reference-template",
+      "人像摄影",
+      "创意摄影",
+      "商业广告"
+    ]
+  },
+  {
+    "id": "exploded-food-infographic",
+    "titleEn": "Exploded Food Infographic",
+    "titleZh": "食物爆炸拆解信息图",
+    "descEn": "Stack the ingredients of a dish in a photorealistic exploded-view infographic.",
+    "descZh": "把食物的不同组成部分按垂直顺序悬浮排列，生成写实爆炸拆解信息图。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "信息图表",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "faithful-vintage-portrait-restoration",
+    "titleEn": "Faithful Vintage Portrait Restoration",
+    "titleZh": "老照片人像保真修复",
+    "descEn": "Upload one portrait photo to restore detail while preserving identity and background. Source preview; output and rights unverified.",
+    "descZh": "上传一张人像照片，保留人物身份和背景进行画质修复。来源预览；效果及授权待核实。",
+    "tags": [
+      "nostalgic",
+      "reference-image",
+      "reference-template",
+      "图片转绘"
+    ]
+  },
+  {
+    "id": "felt-country-miniature-world",
+    "titleEn": "Felt Country Miniature World",
+    "titleZh": "羊毛毡国家微缩世界",
+    "descEn": "Build a handcrafted felt miniature celebrating the landmarks of a chosen country.",
+    "descZh": "将国家、城市和代表性地标转化为具有手工羊毛毡质感的微缩世界。",
+    "tags": [
+      "reference-template",
+      "微缩场景",
+      "手工材质",
+      "旅行城市"
+    ]
+  },
+  {
+    "id": "fifteen-step-photorealistic-recipe",
+    "titleEn": "Fifteen-Step Photorealistic Recipe",
+    "titleZh": "十五步写实食谱信息图",
+    "descEn": "Explain a complete recipe in fifteen photorealistic illustrated steps.",
+    "descZh": "把一道菜的食材、15 个连续制作步骤和成品主视觉整理成竖版写实食谱信息图，也可作为后续图生视频的视觉分镜参考。",
+    "tags": [
+      "reference-template",
+      "信息图表",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "five-panel-cafe-character-collage",
+    "titleEn": "Five-Panel Cafe Character Collage",
+    "titleZh": "五格咖啡馆人物拼贴",
+    "descEn": "Arrange five warm, candid café portraits of the same character in a social collage.",
+    "descZh": "生成适合社交媒体发布的五格咖啡馆人物生活方式拼贴。",
+    "tags": [
+      "reference-template",
+      "人像摄影",
+      "拼贴设计",
+      "社交媒体"
+    ]
+  },
+  {
+    "id": "food-splash-freeze-frame",
+    "titleEn": "Food Splash Freeze Frame",
+    "titleZh": "手持美食飞溅定格",
+    "descEn": "Upload one photo of a person holding food or drink; edit only the splash area. Source preview; output and rights unverified.",
+    "descZh": "上传一张人物手持食物或饮品的照片，仅编辑食物飞溅区域。来源预览；效果及授权待核实。",
+    "tags": [
+      "reference-image",
+      "reference-template",
+      "创意摄影",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "football-player-stats-doodle-poster",
+    "titleEn": "Football Player Stats Doodle Poster",
+    "titleZh": "足球球员数据涂鸦海报",
+    "descEn": "Combine a football player portrait, statistics, and scrapbook-style doodles.",
+    "descZh": "生成以足球运动员、比赛数据和霓虹手写涂鸦为核心的体育宣传海报。",
+    "tags": [
+      "reference-template",
+      "体育视觉",
+      "信息图表",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "four-city-minimal-travel-poster-series",
+    "titleEn": "Four-City Minimal Travel Poster Series",
+    "titleZh": "四城极简旅行海报系列",
+    "descEn": "Create a coordinated series of four minimalist destination posters.",
+    "descZh": "以统一的极简矢量风格生成多个城市或目的地的系列旅行海报。",
+    "tags": [
+      "minimalist",
+      "reference-template",
+      "旅行城市",
+      "海报设计",
+      "系列视觉"
+    ]
+  },
+  {
+    "id": "four-panel-milkshake-recipe",
+    "titleEn": "Four-Panel Milkshake Recipe",
+    "titleZh": "四格奶昔食谱过程拼图",
+    "descEn": "Show ingredients, preparation, blending, and the finished milkshake in four photo panels.",
+    "descZh": "生成用四个连续画面展示食材、处理、混合和成品的写实食谱过程拼图。",
+    "tags": [
+      "reference-template",
+      "影视叙事",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "french-new-wave-torn-paper-poster",
+    "titleEn": "French New Wave Torn-Paper Poster",
+    "titleZh": "法新浪潮撕纸电影海报",
+    "descEn": "Layer torn paper, halftone texture, and typography into a French New Wave film poster.",
+    "descZh": "生成具有撕纸、复印颗粒、网点和手工拼贴质感的法国新浪潮电影海报。",
+    "tags": [
+      "reference-template",
+      "影视叙事",
+      "拼贴设计",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "futuristic-biophilic-atrium",
+    "titleEn": "Futuristic Biophilic Atrium",
+    "titleZh": "未来亲生物中庭空间",
+    "descEn": "Visualize a curved modern atrium with greenery and a sunken circular lounge.",
+    "descZh": "生成融合自然植被、采光和未来建筑语言的中庭休息空间。",
+    "tags": [
+      "3d-render",
+      "reference-template",
+      "建筑空间",
+      "未来科技",
+      "设计参考"
+    ]
+  },
+  {
+    "id": "graded-english-magazine-reading-page",
+    "titleEn": "Graded English Magazine Reading Page",
+    "titleZh": "分级英语杂志阅读页",
+    "descEn": "Design an English reading page with graded text and magazine-style editorial hierarchy.",
+    "descZh": "根据指定主题、CEFR（欧洲语言共同参考框架）英语等级和正文词数，生成一张高级黑白报刊社论风英文杂志阅读页。适合作为不同英语水平的分级阅读材料。",
+    "tags": [
+      "reference-template",
+      "信息图表",
+      "教育科普",
+      "编辑设计"
+    ]
+  },
+  {
+    "id": "grimm-fairy-tale-woodcut-poster",
+    "titleEn": "Grimm Fairy Tale Woodcut Poster",
+    "titleZh": "格林童话木刻版画海报",
+    "descEn": "Illustrate a Grimm fairy tale as a textured woodcut-style poster.",
+    "descZh": "将人物、动物、建筑或场景照片转化为具有童话叙事、木刻版画和手工印刷质感的海报。",
+    "tags": [
+      "reference-template",
+      "手工材质",
+      "海报设计",
+      "角色场景"
+    ]
+  },
+  {
+    "id": "half-photo-half-crayon-memory-card",
+    "titleEn": "Half Photo Half Crayon Memory Card",
+    "titleZh": "五五分混合媒介回忆卡",
+    "descEn": "Blend an original photograph with crayon drawing in a split-media memory card.",
+    "descZh": "将原始照片与蜡笔速写严格上下五五分割，生成克制怀旧的混合媒介回忆卡。",
+    "tags": [
+      "reference-template",
+      "图片转绘",
+      "拼贴设计",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "hand-torn-paper-poster",
+    "titleEn": "Hand-Torn Paper Poster",
+    "titleZh": "手工撕纸海报风格",
+    "descEn": "Assemble an event poster from layered hand-torn paper and collage elements.",
+    "descZh": "生成以荧光撕纸标题、手绘贴纸徽章和陈旧纸张为核心的城市文化活动海报。",
+    "tags": [
+      "reference-template",
+      "拼贴设计",
+      "活动物料",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "handwritten-photo-annotations",
+    "titleEn": "Handwritten Photo Annotations",
+    "titleZh": "生活照片手写涂鸦注释",
+    "descEn": "Upload one photo; preserve its subject and add handwritten text and sparse doodles. Source preview; output and rights unverified.",
+    "descZh": "上传一张生活照片，保留照片主体并添加手写标题和少量涂鸦。来源预览；效果及授权待核实。",
+    "tags": [
+      "reference-image",
+      "reference-template",
+      "手绘插画",
+      "社交媒体"
+    ]
+  },
+  {
+    "id": "haute-couture-fashion-magazine-cover",
+    "titleEn": "Haute Couture Fashion Magazine Cover",
+    "titleZh": "高定时尚杂志封面",
+    "descEn": "Design a couture magazine cover with editorial fashion portraiture and typography.",
+    "descZh": "生成带高定人像、夏日金色光线和奢侈时尚排版的杂志封面。",
+    "tags": [
+      "reference-template",
+      "时尚美妆",
+      "海报设计",
+      "编辑设计"
+    ]
+  },
+  {
+    "id": "ink-double-exposure-portrait-poster",
+    "titleEn": "Ink Double-Exposure Portrait Poster",
+    "titleZh": "水墨双重曝光人物海报",
+    "descEn": "Merge a portrait with ink-wash textures in a double-exposure poster.",
+    "descZh": "生成融合人物轮廓、东方水墨、叙事场景和留白的双重曝光竖版海报。",
+    "tags": [
+      "reference-template",
+      "人像摄影",
+      "传统文化",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "inplace-landmark-travel-sticker",
+    "titleEn": "In-Place Landmark Travel Sticker",
+    "titleZh": "实景建筑原位贴纸",
+    "descEn": "Upload one landmark photo; turn only its main building into an in-place travel sticker. Source preview; output and rights unverified.",
+    "descZh": "上传一张建筑实景照片，仅将核心建筑原位转绘成旅行贴纸。来源预览；效果及授权待核实。",
+    "tags": [
+      "reference-image",
+      "reference-template",
+      "图片转绘",
+      "旅行城市"
+    ]
+  },
+  {
+    "id": "inside-box-farm-ad-poster",
+    "titleEn": "Inside-Box Farm Ad Poster",
+    "titleZh": "箱内仰视农场广告海报",
+    "descEn": "Look up from inside a produce box for a playful farm advertising scene.",
+    "descZh": "生成从纸箱内部向上仰视的概念广告海报，通过强透视开口、动物探头和底部品牌文案表达新鲜直达的产品卖点。",
+    "tags": [
+      "reference-template",
+      "创意摄影",
+      "商业广告",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "inside-cup-fisheye-summer-drink-ad",
+    "titleEn": "Inside-Cup Fisheye Summer Drink Ad",
+    "titleZh": "杯内鱼眼夏日冰饮广告",
+    "descEn": "Shoot a summer drink advertisement from a fisheye viewpoint inside the cup.",
+    "descZh": "从透明饮料杯内部使用鱼眼视角拍摄人物饮用冰饮的夏日商业广告。",
+    "tags": [
+      "reference-template",
+      "创意摄影",
+      "商业广告",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "isometric-miniature-kitchen",
+    "titleEn": "Isometric Miniature Kitchen",
+    "titleZh": "等轴测微缩厨房",
+    "descEn": "Render a detailed miniature kitchen from an isometric viewpoint.",
+    "descZh": "生成等轴测视角的完整微缩厨房空间。",
+    "tags": [
+      "reference-template",
+      "建筑空间",
+      "微缩场景",
+      "等轴测"
+    ]
+  },
+  {
+    "id": "luxury-mechanical-watch-technical-guide",
+    "titleEn": "Luxury Mechanical Watch Technical Guide",
+    "titleZh": "奢华机械腕表技术图鉴",
+    "descEn": "Compare mechanical watches with technical callouts in a four-panel guide.",
+    "descZh": "生成多款高级机械腕表的透明结构、零件拆解和材质说明图鉴。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "信息图表",
+      "工业设计"
+    ]
+  },
+  {
+    "id": "miniature-city-map-travel-poster",
+    "titleEn": "Miniature City Map Travel Poster",
+    "titleZh": "城市地图微缩旅行海报",
+    "descEn": "Combine a city map and miniature streetscape in a travel poster.",
+    "descZh": "把城市地图、弯曲道路、交通工具和地标融合成写实微缩旅行海报。",
+    "tags": [
+      "reference-template",
+      "地图视觉",
+      "旅行城市",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "minimal-abstract-geometric-deconstruction-poster",
+    "titleEn": "Minimal Abstract Geometric Deconstruction Poster",
+    "titleZh": "极简抽象几何解构海报",
+    "descEn": "Transform a photograph into a restrained geometric deconstruction poster.",
+    "descZh": "把照片中的结构、色彩和记忆点解构为极简几何形体，并结合艺术出版物式微排版生成海报。",
+    "tags": [
+      "minimalist",
+      "reference-template",
+      "图片转绘",
+      "海报设计",
+      "编辑设计"
+    ]
+  },
+  {
+    "id": "minimal-conceptual-line-art-poster",
+    "titleEn": "Minimal Conceptual Line Art Poster",
+    "titleZh": "极简概念线条艺术海报",
+    "descEn": "Reinterpret an uploaded photograph as a minimal conceptual line-art poster.",
+    "descZh": "把照片重构为带有公共议题气质、强调张力与留白的极简概念线条艺术海报。",
+    "tags": [
+      "minimalist",
+      "reference-template",
+      "图片转绘",
+      "概念艺术",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "modern-art-event-flyer",
+    "titleEn": "Modern Art Event Flyer",
+    "titleZh": "现代艺术活动传单",
+    "descEn": "Compose a contemporary art-event flyer with clear editorial typography.",
+    "descZh": "生成适合展览、讲座和文化活动的现代艺术传单。",
+    "tags": [
+      "reference-template",
+      "活动物料",
+      "海报设计",
+      "编辑设计"
+    ]
+  },
+  {
+    "id": "object-word-doodle-overlay",
+    "titleEn": "Object Word Doodle Overlay",
+    "titleZh": "物体文字涂鸦原位替换",
+    "descEn": "Upload one chair-and-toy photo; replace only those objects with Chair/Cat letter doodles. Source preview; output and rights unverified.",
+    "descZh": "上传一张含椅子与玩偶的照片，仅用 Chair/Cat 文字涂鸦替换对应物体。来源预览；效果及授权待核实。",
+    "tags": [
+      "reference-image",
+      "reference-template",
+      "图片转绘",
+      "手绘插画"
+    ]
+  },
+  {
+    "id": "paper-relief-neighborhood-grid",
+    "titleEn": "Paper Relief Neighborhood Grid",
+    "titleZh": "纸雕浮雕街区网格",
+    "descEn": "Render four neighborhoods as layered paper-relief miniatures.",
+    "descZh": "生成多组统一纸雕浮雕风格的街区或社区场景。",
+    "tags": [
+      "city-street",
+      "reference-template",
+      "建筑空间",
+      "微缩场景",
+      "手工材质"
+    ]
+  },
+  {
+    "id": "pear-tart-storyboard",
+    "titleEn": "Pear Tart Four-Panel Storyboard",
+    "titleZh": "梨挞广告四镜头分镜",
+    "descEn": "Create one 2-by-2 commercial storyboard showing the same pear tart being made. Source preview; output and rights unverified.",
+    "descZh": "以同一梨挞的制作过程生成一张 2×2 四格商业分镜图。来源预览；效果及授权待核实。",
+    "tags": [
+      "reference-template",
+      "storyboard",
+      "商业广告",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "playful-ceramic-ecommerce-hero",
+    "titleEn": "Playful Ceramic E-commerce Hero",
+    "titleZh": "趣味陶瓷电商首页主视觉",
+    "descEn": "Design an e-commerce homepage hero centered on playful ceramic products.",
+    "descZh": "生成横版电商首页主视觉，用悬浮陶瓷产品、超大字标和克制网页信息结构展示一组具有统一角色语言的商品。",
+    "tags": [
+      "ecommerce",
+      "reference-template",
+      "产品视觉",
+      "编辑设计",
+      "网页界面"
+    ]
+  },
+  {
+    "id": "polaroid-clay-travel-portrait",
+    "titleEn": "Polaroid Clay Travel Portrait",
+    "titleZh": "拍立得公仔旅行打卡",
+    "descEn": "Upload one single-person travel photo; create a clay figure breaking an instant-print border. Source preview; output and rights unverified.",
+    "descZh": "上传一张单人旅行照片，将人物转为突破拍立得边框的黏土公仔。来源预览；效果及授权待核实。",
+    "tags": [
+      "3d-render",
+      "reference-image",
+      "reference-template",
+      "旅行城市"
+    ]
+  },
+  {
+    "id": "portrait-lighting-scheme-grid",
+    "titleEn": "Portrait Lighting Scheme Grid",
+    "titleZh": "人像摄影灯光方案网格",
+    "descEn": "Compare four studio lighting schemes while preserving the same portrait identity.",
+    "descZh": "生成同一人物在多种专业摄影灯光方案下的对比网格。",
+    "tags": [
+      "reference-template",
+      "人像摄影",
+      "多视角一致性",
+      "设计参考"
+    ]
+  },
+  {
+    "id": "premium-food-commercial-storyboard",
+    "titleEn": "Premium Food Commercial Storyboard",
+    "titleZh": "高端食品商业广告分镜",
+    "descEn": "Plan a premium food advertisement as a sequence of polished storyboard frames.",
+    "descZh": "生成单页高端食品广告分镜与镜头项目板。",
+    "tags": [
+      "reference-template",
+      "storyboard",
+      "商业广告",
+      "影视叙事",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "real-person-die-cut-sticker-poster",
+    "titleEn": "Real-Person Die-Cut Sticker Poster",
+    "titleZh": "真人切模贴纸海报",
+    "descEn": "Keep the person photographic and turn the background into monochrome die-cut stickers. Preview: blue-toned source tutorial example, not an OpenCreator result.",
+    "descZh": "上传人物照片，保留真人摄影质感，将环境改为带白色裁切边的黑白手绘贴纸。预览是原教程的蓝调示例，非本工具生成结果。",
+    "tags": [
+      "reference-template",
+      "图片转绘",
+      "拼贴设计",
+      "海报设计",
+      "真人贴纸"
+    ]
+  },
+  {
+    "id": "reflective-ski-gear-landing-page",
+    "titleEn": "Reflective Ski Gear Landing Page",
+    "titleZh": "反射式滑雪装备落地页",
+    "descEn": "Design a ski-gear landing-page hero with reflective product photography.",
+    "descZh": "生成高端滑雪装备品牌的横版网页主视觉，以护目镜特写和镜片内动作反射讲述产品场景。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "创意摄影",
+      "网页界面"
+    ]
+  },
+  {
+    "id": "retro-halftone-illustration",
+    "titleEn": "Retro Halftone Photo Illustration",
+    "titleZh": "复古网点插画转绘",
+    "descEn": "Turn an uploaded photo into a bold, limited-color retro halftone illustration. The preview comes from the source tutorial, not an OpenCreator generation.",
+    "descZh": "上传原照片，将主体转绘为粗黑轮廓、半色调网点与有限配色的复古插画。预览取自原教程，非本工具生成结果。",
+    "tags": [
+      "nostalgic",
+      "reference-image",
+      "reference-template",
+      "图片转绘",
+      "手绘插画"
+    ]
+  },
+  {
+    "id": "retro-scrapbook-poster",
+    "titleEn": "Retro Scrapbook Poster Layout",
+    "titleZh": "复古手账海报排版",
+    "descEn": "Draft: combine a layout reference with a subject illustration. Requires two reference images; the current single-image workflow cannot run it faithfully.",
+    "descZh": "草稿：以图一为排版参考、图二为插画主体，生成对应主题的复古海报。需要双参考图，当前单图流程不能完整执行。",
+    "tags": [
+      "multi-reference",
+      "nostalgic",
+      "reference-template",
+      "手绘插画",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "rio-travel-ticket-paper-diorama-poster",
+    "titleEn": "Rio Travel Ticket Paper Diorama Poster",
+    "titleZh": "里约旅行票据纸雕立体海报",
+    "descEn": "Build a Rio travel poster from tickets and layered paper-diorama elements.",
+    "descZh": "把旅行票据、城市地标与纸雕场景组合成具有收藏感的立体旅行海报。",
+    "tags": [
+      "reference-template",
+      "手工材质",
+      "拼贴设计",
+      "旅行城市"
+    ]
+  },
+  {
+    "id": "rubber-stamp-travel-field-notes",
+    "titleEn": "Rubber Stamp Travel Field Notes",
+    "titleZh": "橡皮章旅行田野笔记",
+    "descEn": "Mix a travel photograph with stamped field-note graphics and paper textures.",
+    "descZh": "把旅行照片与手工橡皮章、旧纸张和少量档案文字组合成旅行田野笔记。 当前草稿使用适配运行时长度限制的压缩版提示词。",
+    "tags": [
+      "condensed-source",
+      "reference-template",
+      "手工材质",
+      "拼贴设计",
+      "旅行城市"
+    ]
+  },
+  {
+    "id": "same-face-twelve-hairstyles",
+    "titleEn": "Same Face, Twelve Hairstyles",
+    "titleZh": "同一人脸十二款发型图鉴",
+    "descEn": "Compare twelve hairstyles on the same face in a numbered lookbook grid.",
+    "descZh": "保持参考人物身份、服装和光线一致，仅更换十二种发型并生成对照图鉴。",
+    "tags": [
+      "reference-template",
+      "人像摄影",
+      "多视角一致性",
+      "设计参考"
+    ]
+  },
+  {
+    "id": "six-panel-miniature-beverage-ad",
+    "titleEn": "Six-Panel Miniature Beverage Ad",
+    "titleZh": "六宫格饮料微缩广告",
+    "descEn": "Tell a miniature summer beverage campaign across six coordinated panels.",
+    "descZh": "使用严格六宫格与微缩人物，生成围绕同一饮料品牌展开的完整商业广告系列。 当前草稿使用适配运行时长度限制的压缩版提示词。",
+    "tags": [
+      "condensed-source",
+      "reference-template",
+      "商业广告",
+      "微缩场景",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "social-media-giveaway-banner",
+    "titleEn": "Social Media Giveaway Banner",
+    "titleZh": "社交媒体赠礼活动横幅",
+    "descEn": "Promote a social-media giveaway with a clear campaign banner.",
+    "descZh": "生成适合赠品、抽奖和活动发布的社交媒体宣传横幅。",
+    "tags": [
+      "reference-template",
+      "商业广告",
+      "活动物料",
+      "社交媒体"
+    ]
+  },
+  {
+    "id": "solar-terms-editorial-visual",
+    "titleEn": "Solar Terms Editorial Visual",
+    "titleZh": "二十四节气编辑视觉设计",
+    "descEn": "Design a long-form editorial composition inspired by a Chinese solar term.",
+    "descZh": "生成具有三层平面空间、跨界核心形态和现代纸印质感的二十四节气竖版编辑视觉。",
+    "tags": [
+      "reference-template",
+      "传统文化",
+      "海报设计",
+      "编辑设计"
+    ]
+  },
+  {
+    "id": "split-canvas-editorial-art-poster",
+    "titleEn": "Split-Canvas Editorial Art Poster",
+    "titleZh": "分割画布编辑艺术海报",
+    "descEn": "Turn each uploaded photograph into an independent split-canvas editorial poster.",
+    "descZh": "生成具有分割画布、人物与编辑排版关系的艺术海报。",
+    "tags": [
+      "reference-template",
+      "人像摄影",
+      "海报设计",
+      "编辑设计"
+    ]
+  },
+  {
+    "id": "street-scroll-backdrop-fashion-editorial",
+    "titleEn": "Street Scroll Backdrop Fashion Editorial",
+    "titleZh": "街头卷轴背景时尚大片",
+    "descEn": "Shoot a fashion portrait against an oversized scroll backdrop on a city street.",
+    "descZh": "生成把手工卷轴摄影背景放入真实街道的时尚广告大片，以棚拍秩序和户外环境形成视觉对照。",
+    "tags": [
+      "reference-template",
+      "人像摄影",
+      "创意摄影",
+      "商业广告"
+    ]
+  },
+  {
+    "id": "tech-product-review-thumbnail",
+    "titleEn": "Tech Product Review Thumbnail",
+    "titleZh": "科技产品评测缩略图",
+    "descEn": "Create a high-contrast tech-review thumbnail with a portrait and featured product.",
+    "descZh": "生成科技产品评测视频使用的高点击率横版缩略图。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "社交媒体",
+      "视频缩略图"
+    ]
+  },
+  {
+    "id": "travel-souvenir-enamel-pin",
+    "titleEn": "Travel Souvenir Enamel Pin",
+    "titleZh": "旅行纪念珐琅徽章",
+    "descEn": "Turn a travel photograph into a scenic enamel souvenir pin.",
+    "descZh": "将旅行照片中的地形、地标和人物比例转化为场景式珐琅纪念徽章。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "手工材质",
+      "旅行城市"
+    ]
+  },
+  {
+    "id": "vintage-city-travel-collage-portrait",
+    "titleEn": "Vintage City Travel Collage Portrait",
+    "titleZh": "人物城市旅行拼贴海报",
+    "descEn": "Upload one portrait and replace the city variables to create a vintage travel collage. Source preview; output and rights unverified.",
+    "descZh": "上传一张人像照片并替换城市变量，制作复古旅行拼贴海报。来源预览；效果及授权待核实。",
+    "tags": [
+      "portrait",
+      "reference-image",
+      "reference-template",
+      "拼贴设计",
+      "旅行城市"
+    ]
+  },
+  {
+    "id": "vintage-scientific-botanical-poster",
+    "titleEn": "Vintage Scientific Botanical Poster",
+    "titleZh": "复古科学植物学海报",
+    "descEn": "Illustrate a labeled botanical specimen on aged paper in a scientific vintage style.",
+    "descZh": "生成带解剖编号、手写注记和科学图版排版的植物学海报。",
+    "tags": [
+      "nostalgic",
+      "reference-template",
+      "手绘插画",
+      "教育科普",
+      "自然植物"
+    ]
+  },
+  {
+    "id": "vr-headset-exploded-interface-diagram",
+    "titleEn": "VR Headset Exploded Interface Diagram",
+    "titleZh": "VR 头显爆炸拆解技术图",
+    "descEn": "Show the layered components of a VR headset in a labeled technical poster.",
+    "descZh": "生成带产品部件分层、功能标注和科技视觉效果的 VR 头显爆炸拆解展示图。",
+    "tags": [
+      "reference-template",
+      "产品视觉",
+      "信息图表",
+      "工业设计",
+      "未来科技"
+    ]
+  },
+  {
+    "id": "watercolor-editorial-illustration-poster",
+    "titleEn": "Watercolor Editorial Illustration Poster",
+    "titleZh": "水彩风格编辑插画海报",
+    "descEn": "Transform each uploaded photograph into a watercolor editorial poster.",
+    "descZh": "将照片转化为上半部真实摄影、下半部复古水彩编辑插画的 3:4 分屏海报。",
+    "tags": [
+      "reference-template",
+      "watercolor",
+      "图片转绘",
+      "手绘插画",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "watercolor-travel-postcard",
+    "titleEn": "Watercolor Travel Postcard",
+    "titleZh": "水彩旅行手账明信片",
+    "descEn": "Upload one travel photo; preserve its location and viewpoint in a horizontal watercolor postcard. Source preview; output and rights unverified.",
+    "descZh": "上传一张景点照片，转绘为保留原地点和视角的横版水彩明信片。来源预览；效果及授权待核实。",
+    "tags": [
+      "reference-image",
+      "reference-template",
+      "watercolor",
+      "旅行城市"
+    ]
+  },
+  {
+    "id": "weekly-outfit-infographic",
+    "titleEn": "Weekly Outfit Infographic",
+    "titleZh": "一周穿搭信息图",
+    "descEn": "Lay out a week of coordinated outfits in a clear fashion infographic.",
+    "descZh": "生成按星期排列的七日穿搭图鉴，集中展示人物造型、服装细节、颜色和适用场景。",
+    "tags": [
+      "reference-template",
+      "信息图表",
+      "时尚美妆",
+      "系列视觉"
+    ]
+  },
+  {
+    "id": "wuhan-breakfast-food-map-infographic",
+    "titleEn": "Wuhan Breakfast Food Map Infographic",
+    "titleZh": "武汉过早美食地图信息图",
+    "descEn": "Map Wuhan breakfast specialties in a hand-drawn food infographic.",
+    "descZh": "生成一张以武汉两江交汇、三镇格局、代表性地标和“过早”美食为主体的复古手绘城市地图信息图。",
+    "tags": [
+      "reference-template",
+      "信息图表",
+      "地图视觉",
+      "食品饮料"
+    ]
+  },
+  {
+    "id": "wuhan-vintage-map-poster",
+    "titleEn": "Wuhan Vintage Map Poster",
+    "titleZh": "武汉复古地图海报",
+    "descEn": "Draw Wuhan as a vintage line-art map travel poster.",
+    "descZh": "生成一张以武汉城市地图、两江交汇和代表性地标为主体的复古羊皮纸线条艺术旅游海报，适合城市文化展示、旅行纪念和地方主题视觉创作。",
+    "tags": [
+      "nostalgic",
+      "reference-template",
+      "地图视觉",
+      "旅行城市",
+      "海报设计"
+    ]
+  },
+  {
+    "id": "y2k-streetwear-mobile-landing-page",
+    "titleEn": "Y2K Streetwear Mobile Landing Page",
+    "titleZh": "千禧街头服饰移动落地页",
+    "descEn": "Design a mobile streetwear landing page with turn-of-the-millennium styling.",
+    "descZh": "生成一张海报式 9:16 移动端街头服饰品牌落地页，融合人物主视觉、夸张字标、贴纸拼贴、商品文案和购买按钮。",
+    "tags": [
+      "reference-template",
+      "拼贴设计",
+      "时尚美妆",
+      "网页界面"
+    ]
+  },
+  {
+    "id": "y2k-virtual-try-on-game-ui",
+    "titleEn": "Y2K Virtual Try-On Game UI",
+    "titleZh": "千禧虚拟试衣游戏界面",
+    "descEn": "Present a virtual try-on landing page as a Y2K game character-selection interface.",
+    "descZh": "生成一张把虚拟试衣服务设计成千禧年主机游戏角色选择界面的横版网页视觉。",
+    "tags": [
+      "reference-template",
+      "时尚美妆",
+      "未来科技",
+      "网页界面"
+    ]
+  },
+  {
+    "id": "aerial-pullback-rise-reveal",
+    "titleEn": "Aerial Pullback and Rise Reveal",
+    "titleZh": "航拍后拉升高揭示",
+    "descEn": "Fly backward and upward along the subject axis to reveal the full vehicle or environment in one continuous move.",
+    "descZh": "让摄像机沿主体轴线同时后退和升高，从近景主体逐步揭示完整载具或大场景。",
+    "tags": [
+      "aerial",
+      "camera-motion",
+      "horizontal",
+      "image-to-video",
+      "reveal"
+    ]
+  },
+  {
+    "id": "anime-skateboard-chase-nyc",
+    "titleEn": "Anime Skateboard Chase in NYC",
+    "titleZh": "纽约街头的动漫滑板追逐",
+    "descEn": "Use a character reference to create a semi-realistic anime skateboard chase with a girl and kitten through New York streets.",
+    "descZh": "根据角色参考图生成女孩与小猫在纽约街头高速滑板追逐的半写实动漫短片。",
+    "tags": [
+      "animation",
+      "anime-style",
+      "city-street",
+      "horizontal",
+      "image-to-video",
+      "skateboard"
+    ]
+  },
+  {
+    "id": "beach-stone-stop-motion",
+    "titleEn": "Beach Stone Stop-Motion",
+    "titleZh": "海滩石像定格动画",
+    "descEn": "Create a vertical stop-motion scene in which a small figure made of beach stones dances, falls, and scatters back into stones.",
+    "descZh": "生成由天然石块组成的小型人形在潮汐池中起舞、跌倒并重新散落成石块的定格动画。",
+    "tags": [
+      "animation",
+      "stop-motion",
+      "text-to-video",
+      "vertical"
+    ]
+  },
+  {
+    "id": "bedroom-falling-book-catch",
+    "titleEn": "Bedroom Falling Book Catch",
+    "titleZh": "卧室接住落书互动",
+    "descEn": "Animate a warm bedroom interaction in which the subject catches a falling book while preserving the first-frame identity and setting.",
+    "descZh": "基于卧室人物首帧生成书籍滑落、人物及时接住并作出自然反应的连续物体交互。",
+    "tags": [
+      "architecture-interior",
+      "character-interaction",
+      "image-to-video",
+      "vertical"
+    ]
+  },
+  {
+    "id": "bioluminescent-lighthouse-keeper",
+    "titleEn": "Bioluminescent Lighthouse Keeper",
+    "titleZh": "生物发光灯塔守望者",
+    "descEn": "Create a continuous cinematic night shot of a lighthouse keeper watching luminous orbs rise from the sea.",
+    "descZh": "生成老灯塔守望者在雾夜悬崖目睹发光球体从海中升起的连续电影镜头。",
+    "tags": [
+      "cinematic",
+      "fantasy",
+      "horizontal",
+      "text-to-video"
+    ]
+  },
+  {
+    "id": "brutalist-courtyard-martial-arts",
+    "titleEn": "Brutalist Courtyard Martial Arts",
+    "titleZh": "粗野主义庭院武术动作",
+    "descEn": "Create a fast-paced martial-arts confrontation in a brutalist concrete courtyard with tense cinematic lighting.",
+    "descZh": "生成发生在粗野主义混凝土庭院中的多人武术对抗，强调快节奏摄影和高张力布光。",
+    "tags": [
+      "action",
+      "architecture-interior",
+      "horizontal",
+      "martial-arts",
+      "text-to-video"
+    ]
+  },
+  {
+    "id": "cinematic-roller-skating-action",
+    "titleEn": "Cinematic Roller-Skating Action",
+    "titleZh": "电影级动作轮滑序列",
+    "descEn": "Create a cinematic urban chase with a roller-skating protagonist, consistent identity, and physically grounded movement.",
+    "descZh": "生成一名轮滑女性穿梭城市车流并躲避警车追逐的电影级动作序列，强调角色一致性和真实运动物理。",
+    "tags": [
+      "action",
+      "cinematic",
+      "horizontal",
+      "text-to-video"
+    ]
+  },
+  {
+    "id": "cinematic-shaolin-action",
+    "titleEn": "Cinematic Shaolin Action",
+    "titleZh": "电影级少林武僧动作大片",
+    "descEn": "Create a wuxia fantasy battle between a Shaolin monk and original stone-armored creatures with choreographed action and speed changes.",
+    "descZh": "生成少林武僧与石甲生物对决的武侠奇幻动作序列，包含分段动作编排、变速和电光效果。",
+    "tags": [
+      "action",
+      "cinematic",
+      "fantasy",
+      "text-to-video"
+    ]
+  },
+  {
+    "id": "cliffside-roller-skating",
+    "titleEn": "Cliffside Roller-Skating Action",
+    "titleZh": "山崖轮滑动作",
+    "descEn": "Create a photorealistic roller-skating action sequence on a dangerous mountain path with controlled body and wheel physics.",
+    "descZh": "生成一名女性在危险山崖道路轮滑的超写实动作序列，重点控制环境尺度、身体平衡和轮滑物理。",
+    "tags": [
+      "action",
+      "cinematic",
+      "horizontal",
+      "text-to-video"
+    ]
+  },
+  {
+    "id": "dolly-zoom-space-warp",
+    "titleEn": "Dolly Zoom Space Warp",
+    "titleZh": "推拉变焦空间扭曲",
+    "descEn": "Synchronize a forward dolly with a wider field of view while keeping the subject size fixed and stretching background depth.",
+    "descZh": "同步执行摄像机前移和镜头变广，在保持主体尺寸不变的同时拉伸背景空间。",
+    "tags": [
+      "camera-motion",
+      "dolly-zoom",
+      "horizontal",
+      "image-to-video"
+    ]
+  },
+  {
+    "id": "drone-orbit-subject",
+    "titleEn": "Drone Orbit Around Subject",
+    "titleZh": "无人机环绕主体",
+    "descEn": "Orbit a subject at constant radius, height, and speed to create continuous horizon rotation and parallax.",
+    "descZh": "让无人机以固定半径和高度匀速环绕主体，利用地平线旋转和视差建立空间感。",
+    "tags": [
+      "camera-motion",
+      "drone-orbit",
+      "horizontal",
+      "image-to-video"
+    ]
+  },
+  {
+    "id": "first-person-dragon-rider",
+    "titleEn": "First-Person Dragon Rider",
+    "titleZh": "第一人称视角：龙骑士电影级画面",
+    "descEn": "Create a vertical first-person fantasy flight as a dragon launches from coastal cliffs, skims the sea, dives underwater, and emerges.",
+    "descZh": "以第一人称骑手视角生成巨龙从海岸悬崖起飞、贴海飞行、入水并再次冲出水面的奇幻镜头。",
+    "tags": [
+      "cinematic",
+      "fantasy",
+      "first-person",
+      "vertical"
+    ]
+  },
+  {
+    "id": "fixed-point-pan-right-reveal",
+    "titleEn": "Fixed-Point Pan-Right Reveal",
+    "titleZh": "固定点向右横摇揭示",
+    "descEn": "Rotate right from a fixed camera position and settle on the revealed subject without translating the camera.",
+    "descZh": "让摄像机保持原地不位移，只向右水平旋转并在结尾主体上稳定停留。",
+    "tags": [
+      "camera-motion",
+      "horizontal",
+      "image-to-video",
+      "pan-right",
+      "reveal"
+    ]
+  },
+  {
+    "id": "japanese-influencer-get-ready-ugc",
+    "titleEn": "Japanese Influencer Get-Ready UGC",
+    "titleZh": "日本网红出门准备 UGC",
+    "descEn": "Use character and room references to create a natural vertical phone video about an influencer fixing her bangs before leaving home.",
+    "descZh": "使用角色图和房间首帧生成一段日本美妆网红出门前整理刘海的自然手机口播视频。",
+    "tags": [
+      "image-to-video",
+      "multi-reference",
+      "ugc",
+      "vertical"
+    ]
+  },
+  {
+    "id": "khachapuri-overhead-cooking",
+    "titleEn": "Overhead Khachapuri Cooking",
+    "titleZh": "哈恰普里俯拍烹饪",
+    "descEn": "Generate a 10-second horizontal overhead cooking sequence with continuous food states. Source preview; output and rights unverified.",
+    "descZh": "生成 10 秒横屏俯拍哈恰普里料理片段，按提示词衔接食物状态。来源预览；效果及授权待核实。",
+    "tags": [
+      "cooking",
+      "horizontal",
+      "reference-template",
+      "text-to-video"
+    ]
+  },
+  {
+    "id": "luxury-jewelry-unboxing",
+    "titleEn": "Luxury Jewelry Unboxing Ad",
+    "titleZh": "奢华珠宝开箱广告",
+    "descEn": "Create a vertical luxury jewelry commercial with unboxing, gemstone macro details, styling, and a final product display.",
+    "descZh": "生成包含礼盒开箱、宝石微距、人物佩戴和产品陈列的竖屏珠宝商业广告。",
+    "tags": [
+      "advertising",
+      "jewelry",
+      "text-to-video",
+      "vertical"
+    ]
+  },
+  {
+    "id": "nyc-parkour-web-swing",
+    "titleEn": "NYC Parkour and Web-Swing Action",
+    "titleZh": "纽约跑酷与蛛丝摆荡动作",
+    "descEn": "Use a character reference for a continuous drone follow shot combining parkour, wall runs, and web-assisted swings through New York.",
+    "descZh": "生成一段15秒连续无人机跟拍，让角色在纽约街区完成跑酷、蹬墙和蛛丝摆荡。",
+    "tags": [
+      "action",
+      "city-street",
+      "horizontal",
+      "image-to-video",
+      "parkour"
+    ]
+  },
+  {
+    "id": "rack-focus-foreground-background",
+    "titleEn": "Rack Focus Between Foreground and Background",
+    "titleZh": "前后景转移焦点",
+    "descEn": "Lock the composition and shift focus once from a distant anchor to a near subject.",
+    "descZh": "保持机位和构图完全固定，只在远景锚点与近景主体之间进行一次平滑转焦。",
+    "tags": [
+      "camera-motion",
+      "horizontal",
+      "image-to-video",
+      "rack-focus"
+    ]
+  },
+  {
+    "id": "rainforest-mysterious-light",
+    "titleEn": "Rainforest Mysterious Light",
+    "titleZh": "雨林神秘光源短片",
+    "descEn": "Animate a rainy-forest first frame as a woman notices a distant warm light, approaches it, and watches it disappear.",
+    "descZh": "基于雨林人物首帧生成女性察觉远处暖光、靠近后光芒消失的氛围悬念短片。",
+    "tags": [
+      "cinematic",
+      "image-to-video",
+      "mystery",
+      "nature-landscape",
+      "vertical"
+    ]
+  },
+  {
+    "id": "real-person-sticker-poster-motion",
+    "titleEn": "Real-Person Sticker Poster Motion",
+    "titleZh": "真人贴纸海报动效",
+    "descEn": "Animate only the real person; freeze the camera and sticker background. 4 seconds if supported. Preview: source tutorial excerpt, not an OpenCreator result.",
+    "descZh": "上传真人贴纸海报，固定镜头与背景，只让真实人物自然活动。默认 4 秒，具体支持跟随所选服务。预览取自原教程，非本工具生成结果。",
+    "tags": [
+      "animation",
+      "image-to-video",
+      "reference-template",
+      "固定镜头",
+      "真人贴纸"
+    ]
+  },
+  {
+    "id": "recipe-infographic-cooking-sequence",
+    "titleEn": "Recipe Infographic to Cooking Sequence (Part One)",
+    "titleZh": "食谱信息图转烹饪短片（前半段）",
+    "descEn": "Draft adaptation of the first 10-second stage of a two-stage vertical cooking workflow; continuation is not supported by the current runtime.",
+    "descZh": "参考多步骤食谱信息图，生成前 10 秒的竖屏烹饪短片；当前模板不支持自动续写后半段。",
+    "tags": [
+      "cooking",
+      "reference-image",
+      "vertical"
+    ]
+  },
+  {
+    "id": "retro-illustration-micro-motion",
+    "titleEn": "Retro Illustration Micro-Motion",
+    "titleZh": "复古插画微动效",
+    "descEn": "Animate an uploaded illustration with playful local motion and a fixed camera. The preview comes from the source tutorial, not an OpenCreator generation.",
+    "descZh": "上传完成的插画或海报，以固定镜头生成轻快的局部微动效，保持主体、文字与布局稳定。预览取自原教程，非本工具生成结果。",
+    "tags": [
+      "animation",
+      "image-to-video",
+      "nostalgic",
+      "reference-template",
+      "手绘插画"
+    ]
+  },
+  {
+    "id": "sci-fi-motorcycle-action",
+    "titleEn": "Sci-Fi Motorcycle Action",
+    "titleZh": "科幻摩托车动作场面",
+    "descEn": "Create a high-energy cinematic sequence combining a futuristic motorcycle chase, an alien mothership explosion, and close combat.",
+    "descZh": "生成未来摩托车追逐、外星母舰爆炸和近身格斗组成的高能电影级科幻动作场面。",
+    "tags": [
+      "action",
+      "cinematic",
+      "sci-fi",
+      "text-to-video"
+    ]
+  },
+  {
+    "id": "seoul-sunday-dv-home-video",
+    "titleEn": "Seoul Sunday DV Home Video",
+    "titleZh": "首尔周日 DV 家庭录像",
+    "descEn": "Create an early-2000s-style Seoul home video with natural daily interaction and continuous object state.",
+    "descZh": "生成一段具有 21 世纪初手持 DV 质感、自然日常互动和连续物体状态的首尔生活记录，适合怀旧 Vlog、城市日常和人物短片。",
+    "tags": [
+      "city-street",
+      "dv",
+      "horizontal",
+      "nostalgic",
+      "text-to-video"
+    ]
+  },
+  {
+    "id": "sketch-to-real-stop-motion-cooking",
+    "titleEn": "Sketch-to-Real Stop-Motion Cooking",
+    "titleZh": "手绘变实物定格料理",
+    "descEn": "Replace the food and utensil variables to create a 10-second horizontal sketch-to-real sequence. Source preview; output and rights unverified.",
+    "descZh": "替换提示词中的食材与餐具变量，生成 10 秒横屏手绘转实物料理片段。来源预览；效果及授权待核实。",
+    "tags": [
+      "cooking",
+      "horizontal",
+      "reference-template",
+      "stop-motion",
+      "text-to-video"
+    ]
+  },
+  {
+    "id": "vertical-crane-reveal",
+    "titleEn": "Vertical Crane Reveal",
+    "titleZh": "垂直升降揭示",
+    "descEn": "Upload a low-angle first frame, then raise the camera smoothly with a continuous downward tilt to reveal the scale of the environment.",
+    "descZh": "上传低机位起始关键帧，让镜头平滑垂直升高并持续向下俯仰，逐步揭示主体周围的环境规模。",
+    "tags": [
+      "camera-motion",
+      "crane-up",
+      "horizontal",
+      "image-to-video",
+      "reveal"
+    ]
+  },
+  {
+    "id": "watercolor-sketch-parkour-chase",
+    "titleEn": "Watercolor Sketch Parkour Chase",
+    "titleZh": "水彩素描跑酷追逐",
+    "descEn": "Use multiple character and location references for a parkour chase redrawn with unstable pencil lines and watercolor on every frame.",
+    "descZh": "使用多张角色与场景参考图生成三人跑酷追逐，并把每一帧呈现为不稳定线条和水彩重新绘制的动画。",
+    "tags": [
+      "animation",
+      "horizontal",
+      "multi-reference",
+      "watercolor"
+    ]
+  },
+  {
+    "id": "wildflower-seasons-macro-timelapse",
+    "titleEn": "Wildflower Seasons Macro Time-Lapse",
+    "titleZh": "野花四季微距延时",
+    "descEn": "Create a 10-second horizontal wildflower time-lapse; text and audio need output verification. Source preview; output and rights unverified.",
+    "descZh": "生成 10 秒横屏野花四季微距延时片段；指定文字和声音均需效果验收。来源预览；效果及授权待核实。",
+    "tags": [
+      "horizontal",
+      "nature-landscape",
+      "reference-template",
+      "text-to-video"
+    ]
+  }
+]

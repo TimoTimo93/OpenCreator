@@ -28,7 +28,8 @@ const suffix = process.platform === 'win32' ? '.exe' : '';
 const cliPath = join(runtimeRoot, 'bin', `krillinai-cli${suffix}`);
 const ffmpegPath = join(runtimeRoot, 'bin', `ffmpeg${suffix}`);
 const fontManifestPath = join(runtimeRoot, 'fonts', 'manifest.json');
-const hasPackagedRuntime = [cliPath, ffmpegPath, fontManifestPath].every(existsSync);
+const hasPackagedRuntime = [cliPath, ffmpegPath, fontManifestPath].every(existsSync)
+  && spawnSync(cliPath, ['render-horizontal', '--help'], { encoding: 'utf8' }).stdout?.includes('--line-mode') === true;
 const roots: string[] = [];
 
 afterAll(() => {

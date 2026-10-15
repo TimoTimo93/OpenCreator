@@ -313,10 +313,10 @@ function resolveTtsSelection(stage: CreatorExecutorInput, config: CreatorService
   const providerConfig = config.tts[provider];
   const model = !gateway && typeof stage.job.state.ttsModel === 'string' && stage.job.state.ttsModel.trim()
     ? stage.job.state.ttsModel.trim()
-    : providerConfig.model;
+    : providerConfig?.model || '';
   const voiceId = typeof stage.job.state.voiceCode === 'string' && stage.job.state.voiceCode.trim()
     ? stage.job.state.voiceCode.trim()
-    : providerConfig.defaultVoiceId;
+    : providerConfig?.defaultVoiceId || '';
   if (!voiceId) {
     throw new CreatorExecutorError(
       'creator_tts_config_missing',

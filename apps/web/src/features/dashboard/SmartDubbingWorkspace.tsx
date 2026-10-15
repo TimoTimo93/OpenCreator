@@ -131,10 +131,22 @@ export default function SmartDubbingWorkspace(props: {
           setVoiceName('');
           return;
         }
-        const selectedConfig = response.config.tts[selectedProvider];
-        setModel(readString(session?.state.ttsModel) || selectedConfig.model);
-        setVoice(readString(session?.state.voiceCode) || selectedConfig.defaultVoiceId);
-        setVoiceName(readString(session?.state.voiceName) || selectedConfig.defaultVoiceId);
+        const selectedConfig = response.config.tts[selectedProvider as 'openai' | 'minimax' | 'aliyun' | 'volcengine'];
+        const modelFallback = selectedProvider === 'elevenlabs'
+          ? (response.config.tts.elevenlabs?.model || 'eleven_multilingual_v2')
+          : selectedProvider === 'vieneu'
+          ? (response.config.tts.vieneu?.model || 'v3turbo')
+          : (selectedConfig?.model || '');
+
+        const voiceFallback = selectedProvider === 'elevenlabs'
+          ? (response.config.tts.elevenlabs?.defaultVoiceId || 'f5q6kePPoQAjCPYG6moa')
+          : selectedProvider === 'vieneu'
+          ? (response.config.tts.vieneu?.defaultVoiceId || 'Mai Anh')
+          : (selectedConfig?.defaultVoiceId || '');
+
+        setModel(readString(session?.state.ttsModel) || modelFallback);
+        setVoice(readString(session?.state.voiceCode) || voiceFallback);
+        setVoiceName(readString(session?.state.voiceName) || voiceFallback);
       })
       .catch(cause => {
         if (!active) return;

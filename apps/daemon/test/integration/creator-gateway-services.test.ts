@@ -11,7 +11,7 @@ import { createCreatorRepository } from '../../src/creator/repository.js';
 import { CreatorProviderRequestLedger } from '../../src/creator/provider-requests.js';
 
 const close: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const callback of close.splice(0)) await callback(); });
+afterEach(async () => { for (const callback of close.splice(0).reverse()) await callback(); });
 it('reuses the persisted legacy request identity after acceptance loss and Daemon restart', async () => {
   const root = await mkdtemp(join(tmpdir(), 'oc-gateway-restart-'));
   const upstream = Fastify();

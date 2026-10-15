@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ConnectionPlatform, PlatformConnectionState } from '@opencreator/protocol';
 import { readPrivateJsonFile, writePrivateJsonFile } from '../config/private-json-file.js';
@@ -40,7 +40,7 @@ export class PlatformConnectionService<P extends ConnectionPlatform = Connection
   }
 
   private get managedLogin(): boolean {
-    return this.platform === 'youtube' && (this.input.osPlatform ?? process.platform) === 'win32';
+    return (this.platform === 'youtube' || this.platform === 'douyin') && (this.input.osPlatform ?? process.platform) === 'win32';
   }
 
   async initialize(): Promise<void> {
@@ -66,7 +66,11 @@ export class PlatformConnectionService<P extends ConnectionPlatform = Connection
         if (await this.hasAuthentication()) { await this.refreshState(); return this.publicState(); }
         const attempt: ConnectionAttempt = { controller: new AbortController(), work: Promise.resolve() };
         this.attempt = attempt;
-        this.state = { platform: this.platform, status: 'connecting', message: 'Opening the YouTube sign-in window' };
+        this.state = {
+          platform: this.platform,
+          status: 'connecting',
+          message: this.platform === 'youtube' ? 'Opening the YouTube sign-in window' : 'Opening the Douyin verification window'
+        };
         attempt.work = this.finishConnection(attempt);
         return this.publicState();
       }
@@ -89,7 +93,12 @@ export class PlatformConnectionService<P extends ConnectionPlatform = Connection
     return this.serialize(async () => {
       if (this.attempt?.completeLogin) {
         this.attempt.completeLogin();
-        this.state = { platform: this.platform, status: 'connecting', browser: 'chrome', message: 'Saving the YouTube session' };
+        this.state = {
+          platform: this.platform,
+          status: 'connecting',
+          browser: 'chrome',
+          message: this.platform === 'youtube' ? 'Saving the YouTube session' : 'Saving the Douyin session'
+        };
       }
       return this.publicState();
     });
@@ -129,8 +138,55 @@ export class PlatformConnectionService<P extends ConnectionPlatform = Connection
     if (this.context.getStore()) return operation();
     // Browser reads can prompt for keychain access. Only explicit connections
     // refresh the saved credential; background requests and tasks use snapshots.
-    const credential = await this.readCredential();
-    const cookies = filterPlatformCookies(credential?.cookies, this.platform);
+    let credential = await this.readCredential();
+    let cookies = filterPlatformCookies(credential?.cookies, this.platform);
+    if (!credential && this.platform === 'douyin') {
+      try {
+        const profiles = await (this.input.listProfiles ?? listBrowserProfiles)();
+        const candidateProfiles = [...profiles];
+        const managedChromeDefault = join(this.input.root, 'browser-chrome', 'Default');
+        const managedExists = await stat(join(managedChromeDefault, 'Network/Cookies')).catch(() =>
+          stat(join(managedChromeDefault, 'Cookies')).catch(() => undefined));
+        if (managedExists?.isFile()) {
+          candidateProfiles.unshift({
+            id: 'managed-douyin-chrome',
+            browser: 'chrome',
+            label: 'Portable Chrome',
+            directory: managedChromeDefault,
+            preferred: true
+          });
+        }
+        for (const candidateProfile of candidateProfiles) {
+          try {
+            const candidateCookies = filterPlatformCookies(await (this.input.readBrowserCookies ?? readBrowserPlatformCookies)({
+              profile: candidateProfile,
+              runtime: this.input.getRuntime(),
+              signal: AbortSignal.timeout(2_000),
+              platform: 'douyin'
+            }), 'douyin');
+            if (hasPlatformSession(candidateCookies, 'douyin')) {
+              const connectedAt = new Date().toISOString();
+              const newCredential: Credential = {
+                version: 1,
+                cookies: candidateCookies,
+                connectedAt,
+                browser: candidateProfile.browser,
+                profileId: candidateProfile.id
+              };
+              await writePrivateJsonFile(this.credentialFile, newCredential);
+              credential = newCredential;
+              cookies = candidateCookies;
+              await this.refreshState();
+              break;
+            }
+          } catch {
+            // Ignore candidate read failure and continue probing other profiles
+          }
+        }
+      } catch {
+        // Continue to operation() if profile inspection encounters errors
+      }
+    }
     if (!credential || credential.invalidated || !hasPlatformSession(cookies, this.platform)) return operation();
     const directory = await mkdtemp(join(this.input.root, 'task-'));
     if (process.platform !== 'win32') await chmod(directory, 0o700);
@@ -160,9 +216,15 @@ export class PlatformConnectionService<P extends ConnectionPlatform = Connection
     let browserClosed = false;
     try {
       if (managed) {
-        login = await (this.input.openLoginBrowser ?? openWindowsYouTubeLogin)({ root: this.input.root, signal: attempt.controller.signal });
+        login = await (this.input.openLoginBrowser ?? openWindowsYouTubeLogin)({
+          root: this.input.root,
+          signal: attempt.controller.signal,
+          ...(this.platform === 'douyin' ? { url: 'https://www.douyin.com/', platform: 'douyin' as const } : {})
+        });
         profile = login.profile;
-        let message = 'Sign in to YouTube in the Chrome window';
+        let message = this.platform === 'youtube'
+          ? 'Sign in to YouTube in the Chrome window'
+          : 'Complete website verification in the Chrome window (no sign-in required)';
         let actionRequired: 'complete-login' | 'close-login-browser' = 'complete-login';
         let watchExit = true;
         while (!browserClosed) {
@@ -170,7 +232,13 @@ export class PlatformConnectionService<P extends ConnectionPlatform = Connection
           await this.waitForLoginCompletion(attempt, login, watchExit);
           watchExit = false;
           attempt.controller.signal.throwIfAborted();
-          this.state = { platform: this.platform, status: 'connecting', browser: 'chrome', profileId: profile.id, message: 'Saving the YouTube session' };
+          this.state = {
+            platform: this.platform,
+            status: 'connecting',
+            browser: 'chrome',
+            profileId: profile.id,
+            message: this.platform === 'youtube' ? 'Saving the YouTube session' : 'Saving the Douyin session'
+          };
           try { await login.close(attempt.controller.signal); browserClosed = true; }
           catch (error) {
             if (!(error instanceof LoginBrowserCloseError)) throw error;
@@ -186,7 +254,9 @@ export class PlatformConnectionService<P extends ConnectionPlatform = Connection
       }), this.platform);
       attempt.controller.signal.throwIfAborted();
       if (!hasPlatformSession(cookies, this.platform)) throw new PublicPlatformConnectionError(managed
-        ? 'YouTube sign-in is incomplete. Reconnect and finish signing in in the sign-in window.'
+        ? (this.platform === 'youtube'
+          ? 'YouTube sign-in is incomplete. Reconnect and finish signing in in the sign-in window.'
+          : 'Douyin verification is incomplete. Reconnect and complete website verification in the window.')
         : this.platform === 'youtube'
         ? 'This browser profile is signed out of YouTube or its session expired. Sign in with this profile and reconnect.'
         : 'This browser profile has no valid Douyin session. Open the video, complete website verification, and reconnect.');

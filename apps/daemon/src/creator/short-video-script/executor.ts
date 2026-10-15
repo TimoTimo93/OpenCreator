@@ -118,7 +118,7 @@ export function createShortVideoScriptExecutor(input: {
         if (Math.abs(actualDurationSeconds - request.targetDurationSeconds) > toleranceSeconds) {
           throw new CreatorExecutorError(
             'creator_llm_upstream_error',
-      `The script duration of ${actualDurationSeconds} seconds is outside the ${request.targetDurationSeconds}-second target tolerance of ${toleranceSeconds} seconds. Generate it again.`
+            `脚本总时长 ${actualDurationSeconds} 秒偏离目标 ${request.targetDurationSeconds} 秒，允许误差为 ±${toleranceSeconds} 秒，请重新生成。`
           );
         }
         const markdown = formatScript(script, request);

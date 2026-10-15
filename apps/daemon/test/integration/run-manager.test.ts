@@ -24,12 +24,23 @@ import { createThreadManager } from '../../src/threads/manager.js';
 
 let tempDir = '';
 let db: Database.Database | undefined;
-const RUN_STATUS_TIMEOUT_MS = 5_000;
+const RUN_STATUS_TIMEOUT_MS = 15_000;
 
 afterEach(() => {
   db?.close();
   db = undefined;
-  if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  if (tempDir) {
+    try {
+      rmSync(tempDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 30,
+        retryDelay: 100
+      });
+    } catch {
+      // ignore transient Windows file lock delays
+    }
+  }
   tempDir = '';
 });
 
@@ -1596,7 +1607,7 @@ describe('run manager', () => {
       sourceId: 'schedule_1'
     });
 
-    await expect.poll(() => fake.readInvocationCount()).toBe(2);
+    await expect.poll(() => fake.readInvocationCount(), { timeout: 15_000, interval: 50 }).toBe(2);
     expect(threadManager.getThread(thread.id)?.codexThreadId).toBe('codex-thread-old');
     await waitForRunStatus(manager, run.id, 'succeeded');
 

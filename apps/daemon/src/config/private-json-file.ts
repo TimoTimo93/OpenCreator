@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   chmod,
+  copyFile,
   mkdir,
   readFile,
   rename,
@@ -11,13 +12,19 @@ import { basename, dirname, join } from 'node:path';
 
 export async function readPrivateJsonFile(path: string): Promise<unknown | undefined> {
   let source: string;
-  try {
-    source = await readFile(path, 'utf8');
-  } catch (error) {
-    if (isMissingFile(error)) return undefined;
-    throw error;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      source = await readFile(path, 'utf8');
+      return JSON.parse(source) as unknown;
+    } catch (error) {
+      if (isMissingFile(error)) return undefined;
+      if (attempt < 4 && (isWindowsFileLocked(error) || error instanceof SyntaxError)) {
+        await new Promise(resolve => setTimeout(resolve, 15));
+        continue;
+      }
+      throw error;
+    }
   }
-  return JSON.parse(source) as unknown;
 }
 
 export async function writePrivateJsonFile(
@@ -39,7 +46,27 @@ export async function writePrivateJsonFile(
       mode: 0o600
     });
     await enforceMode(temporary, 0o600);
-    await rename(temporary, path);
+    try {
+      await rename(temporary, path);
+    } catch (renameError) {
+      if (process.platform === 'win32' && isWindowsFileLocked(renameError)) {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          try {
+            await copyFile(temporary, path);
+            await rm(temporary, { force: true }).catch(() => undefined);
+            break;
+          } catch (copyError) {
+            if (attempt < 4 && isWindowsFileLocked(copyError)) {
+              await new Promise(resolve => setTimeout(resolve, 15));
+              continue;
+            }
+            throw copyError;
+          }
+        }
+      } else {
+        throw renameError;
+      }
+    }
     await enforceMode(path, 0o600);
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => undefined);
@@ -83,5 +110,14 @@ function isMissingFile(error: unknown): boolean {
     && error !== null
     && 'code' in error
     && error.code === 'ENOENT'
+  );
+}
+
+function isWindowsFileLocked(error: unknown): boolean {
+  return (
+    typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error.code === 'EPERM' || error.code === 'EBUSY' || error.code === 'EACCES')
   );
 }

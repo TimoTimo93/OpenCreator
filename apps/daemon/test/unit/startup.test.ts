@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   createProductionServerInput,
@@ -98,13 +99,13 @@ describe('daemon production startup', () => {
     expect(resolveProductionRuntimePaths({}, {
       homeDir: '/Users/demo'
     })).toEqual({
-      appHome: '/Users/demo/.opencreator',
-      dataDir: '/Users/demo/.opencreator/data',
-      configFile: '/Users/demo/.opencreator/config.toml',
-      credentialsFile: '/Users/demo/.opencreator/credentials.json',
-      runtimeDir: '/Users/demo/.opencreator/runtime',
-      creatorDir: '/Users/demo/.opencreator/creator',
-      codexHome: '/Users/demo/.opencreator/runtime/codex'
+      appHome: resolve('/Users/demo/.opencreator'),
+      dataDir: resolve('/Users/demo/.opencreator/data'),
+      configFile: resolve('/Users/demo/.opencreator/config.toml'),
+      credentialsFile: resolve('/Users/demo/.opencreator/credentials.json'),
+      runtimeDir: resolve('/Users/demo/.opencreator/runtime'),
+      creatorDir: resolve('/Users/demo/.opencreator/creator'),
+      codexHome: resolve('/Users/demo/.opencreator/runtime/codex')
     });
   });
 
@@ -113,13 +114,13 @@ describe('daemon production startup', () => {
       homeDir: '/Users/demo',
       runtimeChannel: 'development'
     })).toEqual({
-      appHome: '/Users/demo/.opencreator/development',
-      dataDir: '/Users/demo/.opencreator/development/data',
-      configFile: '/Users/demo/.opencreator/development/config.toml',
-      credentialsFile: '/Users/demo/.opencreator/development/credentials.json',
-      runtimeDir: '/Users/demo/.opencreator/development/runtime',
-      creatorDir: '/Users/demo/.opencreator/development/creator',
-      codexHome: '/Users/demo/.opencreator/development/runtime/codex'
+      appHome: resolve('/Users/demo/.opencreator/development'),
+      dataDir: resolve('/Users/demo/.opencreator/development/data'),
+      configFile: resolve('/Users/demo/.opencreator/development/config.toml'),
+      credentialsFile: resolve('/Users/demo/.opencreator/development/credentials.json'),
+      runtimeDir: resolve('/Users/demo/.opencreator/development/runtime'),
+      creatorDir: resolve('/Users/demo/.opencreator/development/creator'),
+      codexHome: resolve('/Users/demo/.opencreator/development/runtime/codex')
     });
   });
 
@@ -136,11 +137,11 @@ describe('daemon production startup', () => {
     expect(resolveProductionRuntimePaths({
       dataDir: '/tmp/opencreator-e2e/runtime'
     })).toMatchObject({
-      appHome: '/tmp/opencreator-e2e',
-      dataDir: '/tmp/opencreator-e2e/runtime',
-      configFile: '/tmp/opencreator-e2e/config.toml',
-      credentialsFile: '/tmp/opencreator-e2e/credentials.json',
-      codexHome: '/tmp/opencreator-e2e/runtime/codex'
+      appHome: resolve('/tmp/opencreator-e2e'),
+      dataDir: resolve('/tmp/opencreator-e2e/runtime'),
+      configFile: resolve('/tmp/opencreator-e2e/config.toml'),
+      credentialsFile: resolve('/tmp/opencreator-e2e/credentials.json'),
+      codexHome: resolve('/tmp/opencreator-e2e/runtime/codex')
     });
   });
 });

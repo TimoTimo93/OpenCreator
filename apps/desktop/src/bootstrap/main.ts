@@ -68,14 +68,14 @@ const selectCodex = element('select-codex');
 let currentState: BootstrapState | undefined;
 
 const labels: Record<BootstrapState['phase'], [string, string]> = {
-  idle: ['Preparing OpenCreator', 'Initializing the desktop environment'],
-  resolving_codex: ['Locating Codex', 'Reading the shell environment and saved paths'],
-  starting_daemon: ['Starting the local Runtime', 'Creating an isolated OpenCreator Runtime'],
-  probing_codex: ['Checking Codex availability', 'Checking the local Codex process'],
-  starting_runtime: ['Opening OpenCreator', 'Loading local data and Codex capabilities'],
-  ready: ['Opening OpenCreator', 'The local Runtime is ready'],
-  workspace_failed: ['Dashboard failed to load', 'The local Runtime is still running. Reload the Dashboard or restart the Runtime.'],
-  failed: ['Codex CLI is unavailable', 'OpenCreator did not receive a valid response. Check diagnostics and try again.']
+  idle: ['Đang chuẩn bị OpenCreator', 'Đang khởi tạo môi trường desktop'],
+  resolving_codex: ['Đang định vị Codex', 'Đang đọc môi trường shell và đường dẫn đã lưu'],
+  starting_daemon: ['Đang khởi động Runtime cục bộ', 'Đang tạo môi trường OpenCreator Runtime cô lập'],
+  probing_codex: ['Đang kiểm tra tính sẵn sàng của Codex', 'Đang kiểm tra tiến trình Codex cục bộ'],
+  starting_runtime: ['Đang mở OpenCreator', 'Đang tải dữ liệu cục bộ và tính năng Codex'],
+  ready: ['Đang mở OpenCreator', 'Runtime cục bộ đã sẵn sàng'],
+  workspace_failed: ['Không thể tải Bảng điều khiển', 'Runtime cục bộ vẫn đang chạy. Hãy tải lại Bảng điều khiển hoặc khởi động lại Runtime.'],
+  failed: ['Codex CLI không khả dụng', 'OpenCreator không nhận được phản hồi hợp lệ. Vui lòng kiểm tra chẩn đoán và thử lại.']
 };
 
 api.subscribeBootstrapState(render);
@@ -102,7 +102,7 @@ window.setInterval(() => {
   }
   const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(currentState.startedAt)) / 1000));
   elapsed.hidden = seconds < 3;
-  elapsed.textContent = `Waiting for ${seconds}s`;
+  elapsed.textContent = `Đang đợi ${seconds} giây...`;
 }, 500);
 
 function render(state: BootstrapState): void {
@@ -129,17 +129,17 @@ function render(state: BootstrapState): void {
 function failureLabel(state: BootstrapState): [string, string] {
   if (state.error?.code === 'CODEX_NOT_FOUND') {
     return [
-      'Codex CLI not found',
-      'Make sure codex runs in your terminal, or select the ChatGPT or Codex app.'
+      'Không tìm thấy Codex CLI',
+      'Đảm bảo codex chạy được trong terminal, hoặc chọn ứng dụng ChatGPT hoặc Codex.'
     ];
   }
   if (state.error?.code === 'CODEX_PATH_INVALID') {
-    return ['The selected Codex path is unavailable', state.error.message];
+    return ['Đường dẫn Codex đã chọn không khả dụng', state.error.message];
   }
   if (state.error?.code === 'RUNTIME_DATA_IN_USE') {
     return [
-      'OpenCreator Runtime is already running',
-      'Another instance is using the same data directory. Close the other window for this version and try again.'
+      'OpenCreator Runtime đang chạy',
+      'Một phiên bản khác đang sử dụng cùng thư mục dữ liệu. Vui lòng đóng cửa sổ khác của phiên bản này và thử lại.'
     ];
   }
   return labels.failed;

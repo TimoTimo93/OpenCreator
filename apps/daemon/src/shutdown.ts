@@ -47,7 +47,7 @@ export function installParentPortShutdown(input: {
     process as NodeJS.Process & { parentPort?: ParentPortSource }
   ).parentPort;
   let closeWork: Promise<void> | undefined;
-  parentPort?.on('message', event => {
+  const onMessage = (event: unknown) => {
     const payload = isRecord(event) && 'data' in event ? event.data : event;
     if (!isRecord(payload) || payload.type !== 'shutdown' || closeWork !== undefined) {
       return;
@@ -59,7 +59,9 @@ export function installParentPortShutdown(input: {
         input.exit(1);
       }
     );
-  });
+  };
+  parentPort?.on('message', onMessage);
+  process.on?.('message', onMessage);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

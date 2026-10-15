@@ -25,10 +25,9 @@ describe('clip executor', () => {
     mkdirSync(workdir);
     const sourcePath = join(tempDir, 'source.mp4');
     const subtitlePath = join(tempDir, 'subtitle.srt');
-    const ffprobePath = join(tempDir, 'ffprobe');
+    const ffprobe = createFfprobeMock(tempDir, 180);
     writeFileSync(sourcePath, 'source-video');
     writeFileSync(subtitlePath, '1\n00:01:05,000 --> 00:01:40,000\nProduct pricing and customer feedback\n');
-    writeExecutable(ffprobePath, `#!/bin/sh\nprintf '%s\\n' '{"format":{"duration":"180"},"streams":[{"codec_type":"video","width":1920,"height":1080},{"codec_type":"audio"}]}'\n`);
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
       expect(request.messages[0]!.content).toContain('内容类型：播客对谈');
@@ -46,7 +45,8 @@ describe('clip executor', () => {
     const executor = createClipExecutor({
       configStore: { read: async () => config },
       ffmpegPath: join(tempDir, 'unused-ffmpeg'),
-      ffprobePath
+      ffprobePath: ffprobe.path,
+      ffprobePrefixArgs: ffprobe.args
     });
 
     const currentJob = job();
@@ -83,23 +83,23 @@ describe('clip executor', () => {
     mkdirSync(workdir);
     const sourcePath = join(tempDir, 'source.mp4');
     const candidatesPath = join(tempDir, 'clip-candidates.json');
-    const ffprobePath = join(tempDir, 'ffprobe');
-    const ffmpegPath = join(tempDir, 'ffmpeg');
     const ffmpegLogPath = join(tempDir, 'ffmpeg.log');
+    const ffprobe = createFfprobeMock(tempDir, 120);
+    const ffmpeg = createFfmpegMock(tempDir, ffmpegLogPath);
     writeFileSync(sourcePath, 'source-video');
     writeFileSync(candidatesPath, JSON.stringify({ candidates: [
       candidate('clip-1', 'First clip', 0, 30),
       candidate('clip-2', 'Second clip', 40, 75)
     ] }));
-    writeExecutable(ffprobePath, `#!/bin/sh\nprintf '%s\\n' '{"format":{"duration":"120"},"streams":[{"codec_type":"video","width":1920,"height":1080},{"codec_type":"audio"}]}'\n`);
-    writeExecutable(ffmpegPath, `#!/bin/sh\nlast=''\nfor arg in "$@"; do\n  last="$arg"\n  printf '%s\\n' "$arg" >> '${ffmpegLogPath}'\ndone\nprintf '%s\\n' '---' >> '${ffmpegLogPath}'\nprintf '%s\\n' 'out_time=00:00:15.000000' >&2\nprintf '%s\\n' 'progress=continue' >&2\nprintf 'rendered-video' > "$last"\n`);
 
     const sourceArtifact = artifact('source', 'source_video', sourcePath);
     const candidateArtifact = artifact('candidates', 'clip_candidates', candidatesPath);
     const executor = createClipExecutor({
       configStore: { read: vi.fn() } as never,
-      ffmpegPath,
-      ffprobePath,
+      ffmpegPath: ffmpeg.path,
+      ffmpegPrefixArgs: ffmpeg.args,
+      ffprobePath: ffprobe.path,
+      ffprobePrefixArgs: ffprobe.args,
       preferHardwareEncoding: false
     });
     const reportProgress = vi.fn();
@@ -146,20 +146,20 @@ describe('clip executor', () => {
     mkdirSync(workdir);
     const sourcePath = join(tempDir, 'source.mp4');
     const candidatesPath = join(tempDir, 'clip-candidates.json');
-    const ffprobePath = join(tempDir, 'ffprobe');
-    const ffmpegPath = join(tempDir, 'ffmpeg');
     const ffmpegLogPath = join(tempDir, 'ffmpeg.log');
+    const ffprobe = createFfprobeMock(tempDir, 120);
+    const ffmpeg = createFfmpegMock(tempDir, ffmpegLogPath, { failHardware: true });
     writeFileSync(sourcePath, 'source-video');
     writeFileSync(candidatesPath, JSON.stringify({
       candidates: [candidate('clip-1', 'First clip', 10, 30)]
     }));
-    writeExecutable(ffprobePath, `#!/bin/sh\nprintf '%s\\n' '{"format":{"duration":"120"},"streams":[{"codec_type":"video","width":1920,"height":1080},{"codec_type":"audio"}]}'\n`);
-    writeExecutable(ffmpegPath, `#!/bin/sh\nlast=''\nhardware='false'\nfor arg in "$@"; do\n  last="$arg"\n  if [ "$arg" = 'h264_videotoolbox' ]; then hardware='true'; fi\n  printf '%s\\n' "$arg" >> '${ffmpegLogPath}'\ndone\nprintf '%s\\n' '---' >> '${ffmpegLogPath}'\nif [ "$hardware" = 'true' ]; then\n  printf '%s\\n' 'VideoToolbox is unavailable' >&2\n  exit 1\nfi\nprintf 'rendered-video' > "$last"\n`);
 
     const executor = createClipExecutor({
       configStore: { read: vi.fn() } as never,
-      ffmpegPath,
-      ffprobePath,
+      ffmpegPath: ffmpeg.path,
+      ffmpegPrefixArgs: ffmpeg.args,
+      ffprobePath: ffprobe.path,
+      ffprobePrefixArgs: ffprobe.args,
       preferHardwareEncoding: true
     });
     const reportProgress = vi.fn();
@@ -265,7 +265,46 @@ function stageRun(stageId: 'analyze' | 'render' = 'render'): CreatorStageRun {
   };
 }
 
-function writeExecutable(path: string, contents: string): void {
-  writeFileSync(path, contents);
-  chmodSync(path, 0o755);
+function createFfprobeMock(dir: string, duration: number) {
+  const scriptPath = join(dir, 'ffprobe-mock.mjs');
+  writeFileSync(
+    scriptPath,
+    `process.stdout.write(JSON.stringify({ format: { duration: "${duration}" }, streams: [{ codec_type: "video", width: 1920, height: 1080 }, { codec_type: "audio" }] }) + '\\n');\n`
+  );
+  return {
+    path: process.execPath,
+    args: [scriptPath]
+  };
+}
+
+function createFfmpegMock(dir: string, logPath: string, options?: { failHardware?: boolean }) {
+  const scriptPath = join(dir, 'ffmpeg-mock.mjs');
+  const normalizedLog = logPath.replace(/\\/g, '/');
+  writeFileSync(
+    scriptPath,
+    `import { appendFileSync, writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+let last = '';
+let hardware = false;
+for (const arg of args) {
+  last = arg;
+  if (arg === 'h264_videotoolbox') hardware = true;
+  appendFileSync(${JSON.stringify(normalizedLog)}, arg + '\\n');
+}
+appendFileSync(${JSON.stringify(normalizedLog)}, '---\\n');
+${options?.failHardware ? `if (hardware) {
+  process.stderr.write('VideoToolbox is unavailable\\n');
+  process.exit(1);
+}` : ''}
+process.stderr.write('out_time=00:00:15.000000\\n');
+process.stderr.write('progress=continue\\n');
+if (last) {
+  writeFileSync(last, 'rendered-video');
+}
+`
+  );
+  return {
+    path: process.execPath,
+    args: [scriptPath]
+  };
 }

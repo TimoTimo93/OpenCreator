@@ -39,7 +39,7 @@ describe('creator image generation', () => {
     })).statusCode).toBe(200);
     await vi.waitFor(async () => {
       const job = (await request('GET', `/creator/jobs/${initial.id}`)).json().job;
-      expect(job.stages).toContainEqual(expect.objectContaining({ status: 'failed', errorCode: 'image_generation_failed', errorMessage: expect.stringContaining('参考图') }));
+      expect(job.stages).toContainEqual(expect.objectContaining({ status: 'failed', errorCode: 'image_generation_failed', errorMessage: expect.stringMatching(/参考图|reference image/i) }));
     });
     const issues = (await request('GET', `/creator/jobs/${initial.id}/issues`)).json().issues;
     expect(issues).toContainEqual(expect.objectContaining({ code: 'image_generation_failed', publicFacts: {
@@ -279,10 +279,15 @@ describe('creator image generation', () => {
 });
 
 async function createImageCodexBin(expectedHome: string): Promise<string> {
-  const fixture = fileURLToPath(new URL('../fixtures/fake-codex-image.mjs', import.meta.url));
+  const fixture = new URL('../fixtures/fake-codex-image.mjs', import.meta.url).href;
   const bin = join(tempDir, 'fake-codex-image.mjs');
   await writeFile(bin, `#!/usr/bin/env node\nif (process.argv[2] === 'exec' && process.env.CODEX_HOME !== ${JSON.stringify(expectedHome)}) throw new Error('Image generation used the wrong Codex home');\nawait import(${JSON.stringify(fixture)});\n`);
   await chmod(bin, 0o755);
+  if (process.platform === 'win32') {
+    const cmdBin = join(tempDir, 'fake-codex-image.cmd');
+    await writeFile(cmdBin, `@echo off\r\nnode "${bin}" %*\r\n`);
+    return cmdBin;
+  }
   return bin;
 }
 

@@ -104,7 +104,7 @@ export function useRuntimeDependencies(input: {
           pageIssues.captureOperationFailure(
             operationId,
             caught,
-            'Could not read or check Runtime components. Connect the local Runtime and try again.',
+            '无法读取或检查运行组件，请确认本地 Runtime 已连接后重试。',
             { retryable: true }
           );
         }
@@ -140,7 +140,7 @@ export function useRuntimeDependencies(input: {
       pageIssues.captureOperationFailure(
         'runtime.check-yt-dlp',
         caught,
-        'Could not check Runtime component updates. Try again later.',
+        '检查运行组件更新失败，请稍后重试。',
         { retryable: true }
       );
       throw caught;
@@ -163,7 +163,7 @@ export function useRuntimeDependencies(input: {
       pageIssues.captureOperationFailure(
         'runtime.update-yt-dlp',
         caught,
-        'Runtime component update failed. Check the network and disk space before retrying.',
+        '运行组件更新失败，请检查网络和磁盘空间后重试。',
         { retryable: true }
       );
       throw caught;

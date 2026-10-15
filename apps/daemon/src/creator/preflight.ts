@@ -9,7 +9,11 @@ import type {
   CreatorServicesConfig,
   PublicErrorFacts
 } from '@opencreator/protocol';
-import { creatorPreflightFailure, imagePromptRequiresReference } from '@opencreator/protocol';
+import {
+  creatorPreflightFailure,
+  imagePromptRequiresReference,
+  resolveEffectiveTranscriptionProvider
+} from '@opencreator/protocol';
 import { access, mkdir, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
@@ -278,12 +282,13 @@ export function createCreatorPreflight(input: {
         }, { label: 'Open local component settings', deepLink: '#/settings?tab=local-components' });
       }
     }
-    if (stage.executor === 'krillinai' && (job.state.sourceType === 'file' || job.state.preferPlatformCaptions === false) && ['whisper.cpp', 'whisperkit', 'faster-whisper'].includes(config.transcription.provider)) {
-      const provider = input.readCapabilities().transcription.providers.find(candidate => candidate.provider === config.transcription.provider);
+    const effectiveCapabilityProvider = resolveEffectiveTranscriptionProvider(config.transcription);
+    if (stage.executor === 'krillinai' && (job.state.sourceType === 'file' || job.state.preferPlatformCaptions === false) && ['whisper.cpp', 'whisperkit', 'faster-whisper'].includes(effectiveCapabilityProvider)) {
+      const provider = input.readCapabilities().transcription.providers.find(candidate => candidate.provider === effectiveCapabilityProvider);
       if (provider?.available !== true) add('blocked', {
         id: 'transcription-capability',
         title: 'Speech recognition unavailable',
-        message: `${config.transcription.provider} is unavailable in this Runtime.`,
+        message: `${effectiveCapabilityProvider} is unavailable in this Runtime.`,
         executionMode: 'local'
       }, { label: 'Open AI service settings', deepLink: '#/settings?tab=ai-services&section=transcription' });
     }
@@ -425,17 +430,18 @@ async function checkProviderConfig(
     }
   }
   if (stage.executor === 'krillinai' && stage.id === 'subtitle' && (job.state.sourceType === 'file' || job.state.preferPlatformCaptions === false)) {
-    const provider = capabilities.transcription.providers.find(candidate => candidate.provider === config.transcription.provider);
+    const effectiveTranscriptionProvider = resolveEffectiveTranscriptionProvider(config.transcription);
+    const provider = capabilities.transcription.providers.find(candidate => candidate.provider === effectiveTranscriptionProvider);
     if (provider?.available !== true) return;
-    if (config.transcription.provider === 'openai' && !config.transcription.openai.apiKey.trim()) {
+    if (effectiveTranscriptionProvider === 'openai' && !config.transcription.openai.apiKey.trim()) {
       checkOpenAi(config.transcription.openai, 'transcription', 'Speech recognition', '#/settings?tab=ai-services&section=transcription', add);
-    } else if (config.transcription.provider === 'aliyun' && (!config.transcription.aliyun.speech.accessKeyId.trim() || !config.transcription.aliyun.speech.accessKeySecret.trim() || !config.transcription.aliyun.speech.appKey.trim())) {
+    } else if (effectiveTranscriptionProvider === 'aliyun' && (!config.transcription.aliyun.speech.accessKeyId.trim() || !config.transcription.aliyun.speech.accessKeySecret.trim() || !config.transcription.aliyun.speech.appKey.trim())) {
       add('blocked', { id: 'transcription-config', title: 'Speech recognition credentials missing', message: 'Complete the Aliyun speech recognition credentials.', executionMode: 'remote' }, { label: 'Open AI service settings', deepLink: '#/settings?tab=ai-services&section=transcription' });
-    } else if (config.transcription.provider === 'funasr' && (!config.transcription.funasr.baseUrl.trim() || !config.transcription.funasr.model.trim())) {
+    } else if (effectiveTranscriptionProvider === 'funasr' && (!config.transcription.funasr.baseUrl.trim() || !config.transcription.funasr.model.trim())) {
       add('blocked', { id: 'transcription-config', title: 'Speech recognition configuration missing', message: 'Complete the FunASR Base URL and model.', executionMode: 'remote' }, { label: 'Open AI service settings', deepLink: '#/settings?tab=ai-services&section=transcription' });
-    } else if (config.transcription.provider === 'volcengine' && (!config.transcription.volcengine.appId.trim() || !config.transcription.volcengine.accessToken.trim())) {
+    } else if (effectiveTranscriptionProvider === 'volcengine' && (!config.transcription.volcengine.appId.trim() || !config.transcription.volcengine.accessToken.trim())) {
       add('blocked', { id: 'transcription-config', title: 'Speech recognition credentials missing', message: 'Complete the Volcengine App ID and access token.', executionMode: 'remote' }, { label: 'Open AI service settings', deepLink: '#/settings?tab=ai-services&section=transcription' });
-    } else add('ready', { id: 'transcription-config', title: 'Speech recognition', message: `${config.transcription.provider} is configured.`, executionMode: provider.kind === 'local' ? 'local' : 'remote' });
+    } else add('ready', { id: 'transcription-config', title: 'Speech recognition', message: `${effectiveTranscriptionProvider} is configured.`, executionMode: provider.kind === 'local' ? 'local' : 'remote' });
   }
 }
 
@@ -451,11 +457,30 @@ function checkOpenAi(
 }
 
 function checkTts(config: CreatorServicesConfig, provider: Exclude<CreatorServicesConfig['tts']['provider'], 'edge-tts'>, add: Parameters<typeof checkProviderConfig>[5]) {
+  if (provider === 'vieneu') {
+    const value = config.tts.vieneu;
+    if (!value?.baseUrl?.trim() || !value?.model?.trim()) {
+      add('blocked', { id: 'tts', title: 'VieNeu-TTS configuration incomplete', message: 'Complete Base URL and model for VieNeu-TTS.', executionMode: 'local' }, { label: 'Open AI service settings', deepLink: '#/settings?tab=ai-services&section=tts' });
+    } else {
+      add('ready', { id: 'tts', title: 'Speech service', message: `VieNeu-TTS / ${value.model} is configured.`, executionMode: 'local' });
+    }
+    return;
+  }
+  if (provider === 'elevenlabs') {
+    const value = config.tts.elevenlabs;
+    const hasKeys = (value?.apiKeys?.length ?? 0) > 0;
+    if (!value?.baseUrl?.trim() || !value?.model?.trim() || !hasKeys) {
+      add('blocked', { id: 'tts', title: 'ElevenLabs configuration incomplete', message: 'Configure Base URL, model, and at least one API key for ElevenLabs.', executionMode: 'remote' }, { label: 'Open AI service settings', deepLink: '#/settings?tab=ai-services&section=tts' });
+    } else {
+      add('ready', { id: 'tts', title: 'Speech service', message: `ElevenLabs / ${value.model} (${value.apiKeys.length} keys) is configured.`, executionMode: 'remote' });
+    }
+    return;
+  }
   const credentialsReady = provider === 'volcengine'
     ? Boolean(config.tts.volcengine.appId.trim() && config.tts.volcengine.accessToken.trim())
-    : Boolean(config.tts[provider].apiKey.trim());
-  const value = config.tts[provider];
-  if (!value.baseUrl.trim() || !value.model.trim() || !credentialsReady) add('blocked', { id: 'tts', title: 'Speech service configuration incomplete', message: `Complete the Base URL, model, and credentials for ${provider}.`, executionMode: 'remote' }, { label: 'Open AI service settings', deepLink: '#/settings?tab=ai-services&section=tts' });
+    : Boolean(config.tts[provider as 'openai' | 'minimax' | 'aliyun'].apiKey.trim());
+  const value = config.tts[provider as 'openai' | 'minimax' | 'aliyun'];
+  if (!value?.baseUrl.trim() || !value?.model.trim() || !credentialsReady) add('blocked', { id: 'tts', title: 'Speech service configuration incomplete', message: `Complete the Base URL, model, and credentials for ${provider}.`, executionMode: 'remote' }, { label: 'Open AI service settings', deepLink: '#/settings?tab=ai-services&section=tts' });
   else add('ready', { id: 'tts', title: 'Speech service', message: `${provider} / ${value.model} is configured.`, executionMode: 'remote' });
 }
 

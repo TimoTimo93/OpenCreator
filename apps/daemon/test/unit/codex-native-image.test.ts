@@ -85,14 +85,22 @@ describe('ChatGPT native image execution', () => {
   it('rejects a thread directory symlink pointing to another thread', async () => {
     const generated = join(home, 'generated_images');
     await mkdir(join(generated, 'different-thread'), { recursive: true });
-    await symlink(join(generated, 'different-thread'), join(generated, 'image-test-thread'));
+    try {
+      await symlink(join(generated, 'different-thread'), join(generated, 'image-test-thread'));
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'EPERM') return;
+      throw e;
+    }
     await expect(generateCodexNativeImage({ runtime: runtime('home'), request, referenceImages: [], signal: new AbortController().signal })).rejects.toThrow('instead of exactly one');
   });
 
-  it.each([
+  const unsafeCases: Array<[string, string]> = [
     ['text-only', 'instead of exactly one'], ['old', 'existing image'], ['outside', 'does not belong to this task'],
-    ['symlink', 'does not belong to this task'], ['invalid', 'not a supported'], ['failure', 'Sign in again'], ['quota', 'quota']
-  ])('rejects unsafe or unsuccessful results (%s)', async (mode, message) => {
+    ...(process.platform === 'win32' ? [] : [['symlink', 'does not belong to this task'] as [string, string]]),
+    ['invalid', 'not a supported'], ['failure', 'Sign in again'], ['quota', 'quota']
+  ];
+
+  it.each(unsafeCases)('rejects unsafe or unsuccessful results (%s)', async (mode, message) => {
     await expect(generateCodexNativeImage({ runtime: runtime(mode), request, referenceImages: [], signal: new AbortController().signal })).rejects.toThrow(message);
   });
 

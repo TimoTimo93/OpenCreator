@@ -1,3 +1,5 @@
+import type { CreatorTtsProvider } from './creator-services.js';
+
 export type SmartDubbingVoice = string;
 
 export const smartDubbingStyles = [
@@ -25,7 +27,7 @@ export type SmartDubbingResult = {
   fileName: string;
   mime: 'audio/mpeg' | 'audio/wav';
   size: number;
-  provider: 'openai' | 'aliyun' | 'minimax' | 'volcengine';
+  provider: CreatorTtsProvider;
   model: string;
   voice: SmartDubbingVoice;
   voiceName?: string;

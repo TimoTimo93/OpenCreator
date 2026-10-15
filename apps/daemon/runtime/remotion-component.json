@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "remotion",
+  "componentVersion": "3.2.6",
+  "remotionVersion": "4.0.473",
+  "chromiumVersion": "149.0.7790.0",
+  "platform": "win32",
+  "arch": "x64",
+  "archiveUrl": "https://github.com/krillinai/OpenCreator/releases/download/v3.2.6/Remotion-3.2.6-win32-x64.tar.gz",
+  "archiveSha256": "",
+  "manifestSha256": "",
+  "bytes": 0,
+  "fileName": "Remotion-3.2.6-win32-x64.tar.gz"
+}

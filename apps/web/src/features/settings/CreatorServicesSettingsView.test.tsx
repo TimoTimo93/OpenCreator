@@ -574,18 +574,22 @@ function createService(
     saveConfig: vi.fn(async next => ({ config: structuredClone(next), configuredCredentials })),
     resetConfig: vi.fn(async () => ({ config: createDefaultCreatorServicesConfig(), configuredCredentials: [] })),
     testTranscriptionConnection: vi.fn(async () => ({ connected: true, model: 'sensevoice', models: ['sensevoice'], capabilities: ['audio.transcriptions'] })),
-    getTtsVoices: vi.fn(async (provider: CreatorTtsProvider) => ({
-      provider,
-      model: config.tts[provider === 'edge-tts' ? 'openai' : provider].model,
-      voices: provider === 'edge-tts'
-        ? []
-        : [{
-            id: config.tts[provider].defaultVoiceId,
-            name: config.tts[provider].defaultVoiceId,
-            provider,
-            kind: 'builtin' as const
-          }]
-    })),
+    testApiKey: vi.fn(async () => ({ valid: true })),
+    getTtsVoices: vi.fn(async (provider: CreatorTtsProvider) => {
+      const target = provider === 'edge-tts' ? config.tts.openai : (config.tts[provider as 'openai' | 'minimax' | 'aliyun' | 'volcengine'] ?? config.tts.openai);
+      return {
+        provider,
+        model: target.model,
+        voices: provider === 'edge-tts'
+          ? []
+          : [{
+              id: target.defaultVoiceId,
+              name: target.defaultVoiceId,
+              provider,
+              kind: 'builtin' as const
+            }]
+      };
+    }),
     previewTtsVoice: vi.fn(async () => new Response(Buffer.from('preview-audio'), {
       status: 200,
       headers: { 'Content-Type': 'audio/mpeg' }

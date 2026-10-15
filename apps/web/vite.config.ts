@@ -216,6 +216,9 @@ function opencreatorRuntimeDevPlugin(): Plugin {
   return {
     name: 'opencreator-runtime-dev',
     configureServer(server) {
+      if (process.env.OPENCREATOR_DESKTOP_DEV === '1') {
+        return;
+      }
       const daemonSourceDir = resolve(webDir, '../daemon/src');
       server.watcher.add(daemonSourceDir);
       server.watcher.on('change', changedPath => {

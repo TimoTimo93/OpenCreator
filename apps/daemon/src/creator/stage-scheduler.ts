@@ -4,6 +4,17 @@ import type { CreatorStageRunner } from './stage-runner.js';
 
 export type CreatorStageScheduler = ReturnType<typeof createCreatorStageScheduler>;
 
+function isDatabaseClosedError(error: unknown): boolean {
+  if (error instanceof Error) {
+    return (
+      error.message.includes('The database connection is not open') ||
+      error.message.includes('database is closed') ||
+      (error as { code?: string }).code === 'SQLITE_CLOSED'
+    );
+  }
+  return false;
+}
+
 export function createCreatorStageScheduler(input: {
   repository: CreatorRepository;
   runner: Pick<CreatorStageRunner, 'runStageRun'>;
@@ -24,6 +35,7 @@ export function createCreatorStageScheduler(input: {
   const active = new Map<string, Promise<void>>();
   let draining = false;
   let closed = false;
+  let currentDrainWork: Promise<void> | undefined;
   let closeWork: Promise<void> | undefined;
   const timer = setTimer(() => wake(), input.pollIntervalMs ?? 1_000);
   unrefTimer(timer);
@@ -31,26 +43,56 @@ export function createCreatorStageScheduler(input: {
   function wake(): void {
     if (closed || draining) return;
     draining = true;
-    void drain().finally(() => {
-      draining = false;
-      if (!closed && input.repository.listDispatchableStageRuns(
-        new Date(now()).toISOString(),
-        1
-      ).length) wake();
-    });
+    currentDrainWork = drain()
+      .catch(error => {
+        if (!closed && !isDatabaseClosedError(error)) {
+          // suppress non-fatal drain error during background execution
+        }
+      })
+      .finally(() => {
+        draining = false;
+        if (closed) return;
+        try {
+          if (
+            input.repository.listDispatchableStageRuns(
+              new Date(now()).toISOString(),
+              1
+            ).length
+          ) {
+            wake();
+          }
+        } catch (error) {
+          if (!closed && !isDatabaseClosedError(error)) {
+            // suppress closed db error
+          }
+        }
+      });
   }
 
   async function drain(): Promise<void> {
+    if (closed) return;
     const timestamp = new Date(now()).toISOString();
-    const candidates = input.repository.listDispatchableStageRuns(timestamp, batchSize);
+    let candidates: ReturnType<typeof input.repository.listDispatchableStageRuns> = [];
+    try {
+      candidates = input.repository.listDispatchableStageRuns(timestamp, batchSize);
+    } catch (error) {
+      if (closed || isDatabaseClosedError(error)) return;
+      throw error;
+    }
     for (const candidate of candidates) {
       if (closed || active.has(candidate.id)) continue;
-      const claimed = input.repository.claimStageRun({
-        id: candidate.id,
-        owner,
-        now: timestamp,
-        expiresAt: new Date(now() + leaseMs).toISOString()
-      });
+      let claimed: ReturnType<typeof input.repository.claimStageRun> | undefined;
+      try {
+        claimed = input.repository.claimStageRun({
+          id: candidate.id,
+          owner,
+          now: timestamp,
+          expiresAt: new Date(now() + leaseMs).toISOString()
+        });
+      } catch (error) {
+        if (closed || isDatabaseClosedError(error)) return;
+        throw error;
+      }
       if (claimed === undefined) continue;
       const work = execute(claimed.id).finally(() => active.delete(claimed.id));
       active.set(claimed.id, work);
@@ -59,18 +101,31 @@ export function createCreatorStageScheduler(input: {
 
   async function execute(stageRunId: string): Promise<void> {
     const renewTimer = setTimer(() => {
-      input.repository.renewStageRunClaim({
-        id: stageRunId,
-        owner,
-        expiresAt: new Date(now() + leaseMs).toISOString()
-      });
+      if (closed) return;
+      try {
+        input.repository.renewStageRunClaim({
+          id: stageRunId,
+          owner,
+          expiresAt: new Date(now() + leaseMs).toISOString()
+        });
+      } catch (error) {
+        if (!closed && !isDatabaseClosedError(error)) {
+          // suppress closed db error
+        }
+      }
     }, Math.max(250, Math.floor(leaseMs / 3)));
     unrefTimer(renewTimer);
     try {
       await input.runner.runStageRun(stageRunId);
     } finally {
       clearTimer(renewTimer);
-      input.repository.finishStageRunDispatch(stageRunId, owner);
+      try {
+        input.repository.finishStageRunDispatch(stageRunId, owner);
+      } catch (error) {
+        if (!closed && !isDatabaseClosedError(error)) {
+          // suppress closed db error
+        }
+      }
     }
   }
 
@@ -82,7 +137,16 @@ export function createCreatorStageScheduler(input: {
       if (closeWork !== undefined) return closeWork;
       closed = true;
       clearTimer(timer);
-      closeWork = Promise.allSettled([...active.values()]).then(() => undefined);
+      closeWork = (async () => {
+        if (currentDrainWork !== undefined) {
+          try {
+            await currentDrainWork;
+          } catch {
+            // ignore drain error during shutdown
+          }
+        }
+        await Promise.allSettled([...active.values()]);
+      })();
       await closeWork;
     }
   };

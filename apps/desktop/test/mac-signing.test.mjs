@@ -260,8 +260,8 @@ describe('macOS directory signing', () => {
     const builderConfig = readFileSync(
       new URL('../electron-builder.yml', import.meta.url),
       'utf8'
-    );
-    const pattern = builderConfig.match(/signIgnore:\n\s+- '([^']+)'/)?.[1];
+    ).replaceAll('\r\n', '\n');
+    const pattern = builderConfig.match(/signIgnore:\r?\n\s+- '([^']+)'/)?.[1];
     expect(pattern).toBeDefined();
     const shouldIgnore = new RegExp(pattern);
     const resources = '/OpenCreator.app/Contents/Resources';

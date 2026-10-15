@@ -10,7 +10,9 @@ import { analyzeClips, parseClipCandidates, type ClipGenre } from './analyzer.js
 export function createClipExecutor(input: {
   configStore: Pick<CreatorServicesConfigStore, 'read'>;
   ffmpegPath: string;
+  ffmpegPrefixArgs?: string[];
   ffprobePath: string;
+  ffprobePrefixArgs?: string[];
   preferHardwareEncoding?: boolean;
 }): CreatorExecutor {
   return {
@@ -27,7 +29,7 @@ export function createClipExecutor(input: {
         const subtitle = stage.inputArtifacts.find(artifact => artifact.kind.includes('subtitle'))?.path;
         const source = stage.inputArtifacts.find(artifact => artifact.kind === 'source_video')?.path;
         if (!subtitle || !source) throw new CreatorExecutorError('creator_stage_input_missing', 'Video and subtitle are required');
-        const media = await validateMediaFile(source, input.ffprobePath);
+        const media = await validateMediaFile(source, input.ffprobePath, input.ffprobePrefixArgs);
         const durationRange = readDurationRange(stage.job.state.duration);
         const focus = readFocus(stage.job.state.focus);
         const count = readClipCount(stage.job.state.clipCount);
@@ -79,7 +81,7 @@ export function createClipExecutor(input: {
         const candidateArtifact = stage.inputArtifacts.find(artifact => artifact.kind === 'clip_candidates');
         if (!source || !candidateArtifact?.path) throw new CreatorExecutorError('creator_stage_input_missing', 'Source and clip candidates are required');
         const raw = JSON.parse(await readFile(candidateArtifact.path, 'utf8')) as unknown;
-        const sourceMedia = await validateMediaFile(source, input.ffprobePath);
+        const sourceMedia = await validateMediaFile(source, input.ffprobePath, input.ffprobePrefixArgs);
         const duration = sourceMedia.duration;
         const candidates = parseClipCandidates(raw, duration);
         if (candidates.length === 0) throw new CreatorExecutorError('creator_clip_candidates_missing', 'No clips are available to render');
@@ -127,7 +129,7 @@ export function createClipExecutor(input: {
           try {
             await runProcess(
               input.ffmpegPath,
-              buildClipArguments(renderInput),
+              [...(input.ffmpegPrefixArgs ?? []), ...buildClipArguments(renderInput)],
               stage.signal,
               reportRenderProgress
             );
@@ -145,7 +147,7 @@ export function createClipExecutor(input: {
             });
             await runProcess(
               input.ffmpegPath,
-              buildClipArguments(renderInput),
+              [...(input.ffmpegPrefixArgs ?? []), ...buildClipArguments(renderInput)],
               stage.signal,
               reportRenderProgress
             );
@@ -156,7 +158,7 @@ export function createClipExecutor(input: {
             path: output,
             sourceArtifactIds: [candidateArtifact.id, ...candidateArtifact.sourceArtifactIds],
             metadata: {
-              ...await validateMediaFile(output, input.ffprobePath),
+              ...await validateMediaFile(output, input.ffprobePath, input.ffprobePrefixArgs),
               fileName,
               candidateId: candidate.id,
               title: candidate.title,

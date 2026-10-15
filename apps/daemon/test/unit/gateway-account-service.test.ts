@@ -281,7 +281,10 @@ it.each([
       expect(restored.peekState().activationState).toBe('ready');
       expect(close).not.toHaveBeenCalled();
     } else {
-      await vi.waitFor(async () => expect((await createGatewayConfigStore(f.root).readCredentials())?.modelAccessError).toBe(code));
+      await vi.waitFor(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+        expect((await createGatewayConfigStore(f.root).readCredentials())?.modelAccessError).toBe(code);
+      });
       await expect(restored.beginModelUse()).rejects.toMatchObject({ code });
       expect(close).toHaveBeenCalledOnce();
       await vi.advanceTimersByTimeAsync(600_000);

@@ -396,7 +396,7 @@ it.each([true, false])('reconciles both image ledgers and records usable progres
     const receipts = repository.getJob(job.id)!.providerRequests;
     expect(receipts).toHaveLength(2);
     expect(receipts.every(receipt => receipt.status === (success ? 'succeeded' : 'failed'))).toBe(true);
-    expect(f.source.isBusy()).toBe(false);
+    await vi.waitFor(() => expect(f.source.isBusy()).toBe(false));
   } finally { await f.source.revoke(); db.close(); await rm(root, { recursive: true, force: true }); }
 });
 it('uses a local Runtime capability and stateless Responses with safe upstream errors', async () => {

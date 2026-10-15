@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 import { prepareMacAppIcon, verifyMacAppIcon } from '../scripts/mac-app-icon.mjs';
@@ -14,7 +15,7 @@ afterEach(() => {
 });
 
 describe('macOS app icon without Xcode', () => {
-  const source = new URL('../resources/icon.png', import.meta.url).pathname;
+  const source = fileURLToPath(new URL('../resources/icon.png', import.meta.url));
 
   it('uses the same source image in both appearances, with a white background and black mark', async () => {
     const { data, info } = await sharp(source).ensureAlpha().raw().toBuffer({ resolveWithObject: true });

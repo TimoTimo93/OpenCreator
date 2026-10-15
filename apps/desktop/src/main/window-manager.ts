@@ -14,7 +14,7 @@ import {
   type DesktopStartupMetrics
 } from '../shared/types.js';
 
-const WORKSPACE_READY_TIMEOUT_MS = 10_000;
+const WORKSPACE_READY_TIMEOUT_MS = 30_000;
 
 export class WorkspaceLoadError extends Error {
   constructor(
@@ -314,7 +314,7 @@ export class WindowManager {
   }
 
   private workspaceUrl(): string {
-    return this.input.development
+    return process.env.OPENCREATOR_DESKTOP_DEV_SERVER === '1'
       ? 'http://127.0.0.1:19861'
       : 'opencreator-app://app/index.html';
   }

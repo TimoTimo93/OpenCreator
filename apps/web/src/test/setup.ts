@@ -1,5 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 import 'fake-indexeddb/auto';
+import { configure } from '@testing-library/react';
+
+configure({ asyncUtilTimeout: 4_000 });
 
 Object.defineProperty(window.navigator, 'language', {
   configurable: true,

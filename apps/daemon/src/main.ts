@@ -383,6 +383,13 @@ function emitParentMessage(message: Record<string, unknown>): void {
   } catch {
     // stdout remains the compatibility transport for standalone Daemon use.
   }
+  if (typeof process.send === 'function') {
+    try {
+      process.send(message);
+    } catch {
+      // stdout fallback
+    }
+  }
 }
 
 function probeErrorCode(

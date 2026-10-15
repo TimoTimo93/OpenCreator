@@ -75,7 +75,14 @@ function presetModelName(
   if (module === 'smart-dubbing') {
     const provider = isCreatorTtsProvider(defaults.ttsProvider) ? defaults.ttsProvider : config.tts.provider;
     const ttsModel = readString(defaults.ttsModel)?.trim() || undefined;
-    return provider === 'edge-tts' ? 'Edge TTS' : ttsModel ?? (config.tts[provider].model.trim() || undefined);
+    const currentModel = provider === 'elevenlabs'
+      ? config.tts.elevenlabs?.model
+      : provider === 'vieneu'
+      ? config.tts.vieneu?.model
+      : provider === 'edge-tts'
+      ? 'Edge TTS'
+      : config.tts[provider as 'openai' | 'minimax' | 'aliyun' | 'volcengine']?.model;
+    return provider === 'edge-tts' ? 'Edge TTS' : ttsModel ?? (currentModel?.trim() || undefined);
   }
   return model;
 }

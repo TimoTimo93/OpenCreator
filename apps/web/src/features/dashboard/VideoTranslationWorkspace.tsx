@@ -161,8 +161,8 @@ const steps = ['添加视频', '翻译设置', '视频与字幕'] as const;
 let componentNavigationDraft: { jobId: string | null; settings: TranslationSettingsSnapshot; source: TranslationSourceSnapshot; currentStep: WizardStep; furthestStep: WizardStep; workspacePhase: WorkspacePhase } | undefined;
 const subtitleColors = ['#FFFFFF', '#FFE45C', '#7EE7FF', '#A7F3D0', '#000000'] as const;
 const defaultSubtitleStyle: SubtitleStyleSettings = {
-  subtitleFont: 'sans',
-  subtitleWeight: 'bold',
+  subtitleFont: 'serif',
+  subtitleWeight: 'medium',
   subtitleSize: 'medium',
   subtitleColor: '#FFFFFF',
   subtitleSecondaryColor: '#D1D5DB',
@@ -838,10 +838,10 @@ function legacyResultVersionsFromArtifacts(
             : persisted?.settings.sourceLanguage ?? 'zh_cn',
           targetLanguage: typeof sourceState.targetLanguage === 'string'
             ? sourceState.targetLanguage
-            : persisted?.settings.targetLanguage ?? 'en',
+            : persisted?.settings.targetLanguage ?? 'vi',
           bilingual: typeof sourceState.bilingual === 'boolean'
             ? sourceState.bilingual
-            : persisted?.settings.bilingual ?? true,
+            : persisted?.settings.bilingual ?? false,
           subtitlePosition: sourceState.subtitlePosition === 'bottom'
             ? 'bottom'
             : persisted?.settings.subtitlePosition ?? 'top',
@@ -864,7 +864,10 @@ function legacyResultVersionsFromArtifacts(
           voiceName: typeof sourceState.voiceName === 'string'
             ? sourceState.voiceName
             : persisted?.settings.voiceName ?? '',
-          composeVideo: videoArtifacts.length > 0 || sourceState.composeVideo === true,
+          composeVideo: videoArtifacts.length > 0
+            || (typeof sourceState.composeVideo === 'boolean'
+              ? sourceState.composeVideo
+              : persisted?.settings.composeVideo ?? true),
           videoFormat: inferredVideoFormat
             ?? (sourceState.videoFormat === 'vertical' || sourceState.videoFormat === 'all'
               ? sourceState.videoFormat
@@ -952,8 +955,8 @@ function resultVersionFromSnapshot(
     },
     settings: {
       sourceLanguage: readStringSetting(sourceState, fallbackState, persisted, 'sourceLanguage', 'zh_cn'),
-      targetLanguage: readStringSetting(sourceState, fallbackState, persisted, 'targetLanguage', 'en'),
-      bilingual: readBooleanSetting(sourceState, fallbackState, persisted, 'bilingual', true),
+      targetLanguage: readStringSetting(sourceState, fallbackState, persisted, 'targetLanguage', 'vi'),
+      bilingual: readBooleanSetting(sourceState, fallbackState, persisted, 'bilingual', false),
       subtitlePosition: sourceState.subtitlePosition === 'bottom'
         ? 'bottom'
         : sourceState.subtitlePosition === 'top'
@@ -973,7 +976,7 @@ function resultVersionFromSnapshot(
       voiceCode: readStringSetting(sourceState, fallbackState, persisted, 'voiceCode', ''),
       voiceName: readStringSetting(sourceState, fallbackState, persisted, 'voiceName', ''),
       composeVideo: videoArtifacts.length > 0
-        || readBooleanSetting(sourceState, fallbackState, persisted, 'composeVideo', false),
+        || readBooleanSetting(sourceState, fallbackState, persisted, 'composeVideo', true),
       videoFormat: inferredVideoFormat
         ?? (sourceState.videoFormat === 'vertical' || sourceState.videoFormat === 'all'
           ? sourceState.videoFormat
@@ -1641,9 +1644,9 @@ export default function VideoTranslationWorkspace(props: {
   const [videoFileName, setVideoFileName] = useState<string | null>(null);
   const [videoFileSize, setVideoFileSize] = useState<number | null>(null);
   const [videoFileLastModified, setVideoFileLastModified] = useState<number | null>(null);
-  const [sourceLanguage, setSourceLanguage] = useState('en');
-  const [targetLanguage, setTargetLanguage] = useState('zh_cn');
-  const [bilingual, setBilingual] = useState(true);
+  const [sourceLanguage, setSourceLanguage] = useState('zh_cn');
+  const [targetLanguage, setTargetLanguage] = useState('vi');
+  const [bilingual, setBilingual] = useState(false);
   const [subtitlePosition, setSubtitlePosition] = useState<SubtitlePosition>('top');
   const [preferPlatformCaptions, setPreferPlatformCaptions] = useState(true);
   const [subtitleFont, setSubtitleFont] = useState<SubtitleFont>(defaultSubtitleStyle.subtitleFont);
@@ -1664,7 +1667,7 @@ export default function VideoTranslationWorkspace(props: {
   const [ttsModel, setTtsModel] = useState('gpt-4o-mini-tts');
   const [voiceCode, setVoiceCode] = useState('');
   const [voiceName, setVoiceName] = useState('');
-  const [composeVideo, setComposeVideo] = useState(false);
+  const [composeVideo, setComposeVideo] = useState(true);
   const dubbing = composeVideo && dubbingRequested;
   const [videoFormat, setVideoFormat] = useState<VideoFormat>('horizontal');
   const [sourceOrientation, setSourceOrientation] = useState<VideoOrientation>(() => (
@@ -1866,13 +1869,25 @@ export default function VideoTranslationWorkspace(props: {
           setTtsModel('');
           return;
         }
-        const providerConfig = response.config.tts[provider];
+        const providerConfig = response.config.tts[provider as 'openai' | 'minimax' | 'aliyun' | 'volcengine'];
+        const modelFallback = provider === 'elevenlabs'
+          ? (response.config.tts.elevenlabs?.model || 'eleven_multilingual_v2')
+          : provider === 'vieneu'
+          ? (response.config.tts.vieneu?.model || 'v3turbo')
+          : (providerConfig?.model || '');
+
+        const voiceFallback = provider === 'elevenlabs'
+          ? (response.config.tts.elevenlabs?.defaultVoiceId || 'f5q6kePPoQAjCPYG6moa')
+          : provider === 'vieneu'
+          ? (response.config.tts.vieneu?.defaultVoiceId || 'Mai Anh')
+          : (providerConfig?.defaultVoiceId || '');
+
         if (typeof creatorSession?.state.ttsModel !== 'string') {
-          setTtsModel(providerConfig.model);
+          setTtsModel(modelFallback);
         }
         if (typeof creatorSession?.state.voiceCode !== 'string') {
-          setVoiceCode(providerConfig.defaultVoiceId);
-          setVoiceName(providerConfig.defaultVoiceId);
+          setVoiceCode(voiceFallback);
+          setVoiceName(voiceFallback);
         }
       })
       .catch(cause => {
@@ -3495,6 +3510,7 @@ export default function VideoTranslationWorkspace(props: {
                         <div
                           style={{
                             '--subtitle-preview-aspect-ratio': `${previewWidth} / ${previewHeight}`,
+                            '--subtitle-preview-font-size': ({ small: '14px', medium: '16px', large: '18px' } as const)[subtitleSize]
                           } as CSSProperties}
                         >
                           {previewPosterUrl ? (
@@ -3543,6 +3559,15 @@ export default function VideoTranslationWorkspace(props: {
                               }
                             }}
                           />
+                          <div className="video-translation-subtitle-preview-cues" style={{ display: 'none' }}>
+                            {bilingual && subtitlePosition === 'bottom' ? (
+                              <small data-subtitle-kind="original">{l('这是一段原文字幕', 'This is an original subtitle')}</small>
+                            ) : null}
+                            <strong data-subtitle-kind="translation">{l('这是一段译文字幕', 'This is a translated subtitle')}</strong>
+                            {bilingual && subtitlePosition === 'top' ? (
+                              <small data-subtitle-kind="original">{l('这是一段原文字幕', 'This is an original subtitle')}</small>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                       <div className="video-translation-subtitle-controls">

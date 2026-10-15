@@ -22,6 +22,9 @@ import {
 } from '../creator/krillin/tts-service.js';
 import { apiError } from './errors.js';
 import { gatewayCreatorBinding } from '../gateway/creator-service-source.js';
+import { ElevenLabsTTS } from '../creator/tts/elevenlabs.js';
+import { AgnesAiManager } from '../creator/llm/agnes-ai.js';
+import { VieNeuTTS } from '../creator/tts/vieneu.js';
 
 export async function registerCreatorServicesRoutes(
   server: FastifyInstance,
@@ -159,6 +162,31 @@ export async function registerCreatorServicesRoutes(
     } catch (error) { return reply.code(502).send(apiError('SMART_DUBBING_UPSTREAM_ERROR', error instanceof Error && error.name === 'AbortError' ? 'FunASR connection timed out' : 'FunASR connection failed')); }
   });
 
+  server.post<{ Body: unknown }>('/creator-services/test-key', async (request, reply) => {
+    try {
+      const body = request.body as { provider?: string; key?: string; baseUrl?: string };
+      const provider = body?.provider;
+      const key = typeof body?.key === 'string' ? body.key.trim() : '';
+      const baseUrl = typeof body?.baseUrl === 'string' ? body.baseUrl.trim() : undefined;
+
+      if (provider === 'elevenlabs') {
+        const result = await ElevenLabsTTS.testApiKey(key, baseUrl);
+        return result;
+      }
+      if (provider === 'agnes-ai') {
+        const result = await AgnesAiManager.testApiKey(key, baseUrl);
+        return result;
+      }
+      if (provider === 'vieneu') {
+        const result = await VieNeuTTS.testConnection(baseUrl);
+        return { valid: result.available, error: result.error };
+      }
+      return reply.code(400).send(apiError('VALIDATION_FAILED', 'Unsupported provider for key testing'));
+    } catch (error) {
+      return { valid: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   server.delete('/creator-services/config', async (_request, reply) => {
     try {
       const proxy = networkStore !== store ? (await networkStore.read()).proxy : undefined;
@@ -245,7 +273,7 @@ function sendTtsError(reply: FastifyReply, error: unknown) {
 }
 
 function parseTtsProvider(value: unknown): CreatorTtsProvider | undefined {
-  if (value === 'openai' || value === 'aliyun' || value === 'minimax' || value === 'edge-tts' || value === 'volcengine') {
+  if (value === 'openai' || value === 'aliyun' || value === 'minimax' || value === 'edge-tts' || value === 'volcengine' || value === 'elevenlabs' || value === 'vieneu') {
     return value;
   }
   return undefined;

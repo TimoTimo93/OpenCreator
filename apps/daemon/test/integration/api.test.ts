@@ -54,7 +54,18 @@ afterEach(async () => {
   server = undefined;
   db?.close();
   db = undefined;
-  if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  if (tempDir) {
+    try {
+      rmSync(tempDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 30,
+        retryDelay: 100
+      });
+    } catch {
+      // ignore transient Windows file lock delays
+    }
+  }
   tempDir = '';
 });
 

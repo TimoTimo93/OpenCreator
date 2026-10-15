@@ -21,7 +21,8 @@ import type {
   ScheduleResponse,
   TaskItem,
   ThreadHistoryItem,
-  ThreadResponse
+  ThreadResponse,
+  OpenCreatorLanguagePreference
 } from '@opencreator/protocol';
 import type {
   CSSProperties,
@@ -737,7 +738,7 @@ export function AppController(props: AppControllerProps) {
         if (canceled) return;
         if (!response.configured) {
           await openCreatorSettingsService.updateUiSettings({
-            language: languagePreference,
+            language: languagePreference as OpenCreatorLanguagePreference,
             colorMode,
             accentColor,
             customAccentColor,
@@ -782,7 +783,7 @@ export function AppController(props: AppControllerProps) {
     }
     persistedLanguagePreferenceRef.current = languagePreference;
     void openCreatorSettingsService.updateUiSettings({
-      language: languagePreference
+      language: languagePreference as OpenCreatorLanguagePreference
     }).catch(() => undefined);
   }, [languagePreference, openCreatorSettingsService]);
   const visibleRuntimeThreads = useMemo(
@@ -1324,9 +1325,9 @@ export function AppController(props: AppControllerProps) {
       if (gateway?.source === 'gateway') { onGatewayStateChange(gateway); return; }
       const snapshot = { readiness, provider };
       setAgentSetupSnapshot(snapshot);
-      setAgentSetup(isAgentSetupConfirmed(snapshot) ? 'ready' : 'needed');
+      setAgentSetup('ready');
     }).catch(() => {
-      if (!canceled) setAgentSetup('needed');
+      if (!canceled) setAgentSetup('ready');
     });
     return () => { canceled = true; };
   }, [agentSetup, connectionService, connectionState.status, gatewayAccountService, onGatewayStateChange]);
@@ -4555,7 +4556,7 @@ export function AppController(props: AppControllerProps) {
               />
             </Suspense>
           ) : null}
-          {agentSetup === 'skipped' ? (
+          {agentSetup === 'skipped' && agentSetupRequested ? (
             <div className="startup-agent-banner" role="status">
               {gatewayAccountState?.source === 'gateway'
                 ? gatewayAccountState.authState === 'signed_in'
@@ -4989,7 +4990,7 @@ export function AppController(props: AppControllerProps) {
           {l('正在检查 Agent 配置…', 'Checking Agent configuration…')}
         </main>
       ) : null}
-      {agentSetup === 'needed' && connectionService !== null && !configurationPageActive ? (
+      {agentSetup === 'needed' && agentSetupRequested && connectionService !== null && !configurationPageActive ? (
         <Suspense fallback={<main className="startup-agent-setup" role="status">{l('正在加载 Agent 配置…', 'Loading Agent setup…')}</main>}>
           <StartupAgentSetup
             service={connectionService}

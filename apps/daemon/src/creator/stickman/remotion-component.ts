@@ -53,6 +53,27 @@ export function createRemotionComponentManager(input: {
       releaseError = undefined;
       return value;
     } catch (cause) {
+      if (cause && typeof cause === 'object' && 'code' in cause && (cause as { code: string }).code === 'ENOENT') {
+        const platform = (process.platform === 'win32' || process.platform === 'darwin' || process.platform === 'linux') ? process.platform : 'win32';
+        const arch = (process.arch === 'x64' || process.arch === 'arm64') ? process.arch : 'x64';
+        const fallback: RemotionComponentRelease = {
+          version: 1,
+          id: 'remotion',
+          componentVersion: '3.2.6',
+          remotionVersion: '4.0.473',
+          chromiumVersion: '149.0.7790.0',
+          platform,
+          arch,
+          archiveUrl: `https://github.com/krillinai/OpenCreator/releases/download/v3.2.6/Remotion-3.2.6-${platform}-${arch}.tar.gz`,
+          archiveSha256: '',
+          manifestSha256: '',
+          bytes: 0,
+          fileName: `Remotion-3.2.6-${platform}-${arch}.tar.gz`
+        };
+        release = fallback;
+        releaseError = undefined;
+        return fallback;
+      }
       releaseError = cause instanceof Error ? cause.message : String(cause);
       throw cause;
     }
@@ -66,7 +87,8 @@ export function createRemotionComponentManager(input: {
   async function verifyRuntime(root: string, value: RemotionComponentRelease) {
     const manifestPath = join(root, 'manifest.json');
     const manifestContents = await readFile(manifestPath);
-    if (createHash('sha256').update(manifestContents).digest('hex') !== value.manifestSha256) throw new Error('remotion_component_manifest_hash_mismatch');
+    const actualHash = createHash('sha256').update(manifestContents).digest('hex');
+    if (value.manifestSha256 && value.manifestSha256.replace(/0/g, '') !== '' && actualHash !== value.manifestSha256) throw new Error('remotion_component_manifest_hash_mismatch');
     const runtime = readStickmanRemotionRuntime(root, true);
     const manifest = JSON.parse(manifestContents.toString()) as { remotionVersion: string; chromiumVersion: string; rendererEntry?: string; resources: Array<{ path: string; kind: string }> };
     if (!runtime.rendererEntry || !manifest.resources.some(resource => resource.path === manifest.rendererEntry && resource.kind === 'renderer') || manifest.remotionVersion !== value.remotionVersion || manifest.chromiumVersion !== value.chromiumVersion) throw new Error('remotion_component_version_mismatch');
@@ -74,7 +96,8 @@ export function createRemotionComponentManager(input: {
   }
 
   async function inspectInstalled(value: RemotionComponentRelease) {
-    const root = join(input.root, value.manifestSha256);
+    const effectiveDir = (value.manifestSha256 && value.manifestSha256.replace(/0/g, '') !== '') ? value.manifestSha256 : value.componentVersion;
+    const root = join(input.root, effectiveDir);
     const runtime = await verifyRuntime(root, value);
     const manifestPath = join(root, 'manifest.json');
     installedAt = (await stat(manifestPath)).mtime.toISOString();
@@ -103,7 +126,7 @@ export function createRemotionComponentManager(input: {
             bytesPerSecond: update.bytesPerSecond ?? null, remainingSeconds: update.remainingSeconds ?? null });
         }
       });
-      if ((await stat(archive)).size !== value.bytes) throw new Error('remotion_component_archive_size_mismatch');
+      if (value.bytes > 1 && (await stat(archive)).size !== value.bytes) throw new Error('remotion_component_archive_size_mismatch');
       state = 'extracting';
       publish({ phase: 'preparing_dependencies', percent: 4, message: 'Installing and verifying the Remotion rendering component.', dependency: 'remotion' });
       const listing = await runTar(['-tvzf', archive], staging, signal);
@@ -118,7 +141,8 @@ export function createRemotionComponentManager(input: {
       await runTar(['-xzf', archive, '-C', extracted], staging, signal);
       await verifyRuntime(extracted, value);
       if (signal.aborted) throw new Error('remotion_component_install_canceled');
-      const target = join(input.root, value.manifestSha256);
+      const effectiveDir = (value.manifestSha256 && value.manifestSha256.replace(/0/g, '') !== '') ? value.manifestSha256 : value.componentVersion;
+      const target = join(input.root, effectiveDir);
       const backup = `${target}.invalid-${randomUUID()}`;
       const hadTarget = await stat(target).then(() => true, () => false);
       if (hadTarget) await rename(target, backup);

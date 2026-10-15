@@ -12,6 +12,7 @@ import { Annotation, EditorState, Compartment } from '@codemirror/state';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { useEffect, useMemo, useRef } from 'react';
+import { useLocalizedCopy } from '../../i18n/useLocalizedCopy.js';
 
 export type TextFileEditorProps = {
   path: string;
@@ -25,6 +26,8 @@ export type TextFileEditorProps = {
 const externalSyncAnnotation = Annotation.define<boolean>();
 
 export function TextFileEditor(props: TextFileEditorProps) {
+  const l = useLocalizedCopy();
+  const editorLabel = l(`${props.path} 编辑器`, `${props.path} Editor`);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(props.onChange);
@@ -125,14 +128,14 @@ export function TextFileEditor(props: TextFileEditorProps) {
       state,
       parent: host
     });
-    configureContentDom(view, props.path, Boolean(props.readonly));
+    configureContentDom(view, editorLabel, Boolean(props.readonly));
     viewRef.current = view;
 
     return () => {
       viewRef.current = null;
       view.destroy();
     };
-  }, [languageCompartment, readonlyCompartment]);
+  }, [editorLabel, languageCompartment, readonlyCompartment]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -167,8 +170,8 @@ export function TextFileEditor(props: TextFileEditorProps) {
         languageCompartment.reconfigure(languageForFile(props.path, props.kind))
       ]
     });
-    configureContentDom(view, props.path, Boolean(props.readonly));
-  }, [languageCompartment, props.kind, props.path, props.readonly, readonlyCompartment]);
+    configureContentDom(view, editorLabel, Boolean(props.readonly));
+  }, [editorLabel, languageCompartment, props.kind, props.path, props.readonly, readonlyCompartment]);
 
   return (
     <div className="text-file-editor">
@@ -177,9 +180,9 @@ export function TextFileEditor(props: TextFileEditorProps) {
   );
 }
 
-function configureContentDom(view: EditorView, path: string, readonly: boolean) {
+function configureContentDom(view: EditorView, label: string, readonly: boolean) {
   view.contentDOM.setAttribute('role', 'textbox');
-  view.contentDOM.setAttribute('aria-label', `${path} editor`);
+  view.contentDOM.setAttribute('aria-label', label);
   view.contentDOM.setAttribute('aria-multiline', 'true');
   view.contentDOM.setAttribute('aria-readonly', readonly ? 'true' : 'false');
 }

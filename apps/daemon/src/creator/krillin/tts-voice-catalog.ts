@@ -91,6 +91,27 @@ export function listBundledTtsVoices(
   if (provider === 'openai') {
     return openAiVoices.map(voice => ({ ...voice }));
   }
+  if (provider === 'elevenlabs') {
+    return [
+      { id: 'f5q6kePPoQAjCPYG6moa', name: 'Giang (Nữ)', language: 'vi-VN', gender: 'female', provider: 'elevenlabs', scenario: 'Tự nhiên, rõ ràng', kind: 'builtin', recommended: true },
+      { id: '0ggMuQ1r9f9jqBu50nJn', name: 'Thắm (Nữ)', language: 'vi-VN', gender: 'female', provider: 'elevenlabs', scenario: 'Sâu ấm, truyện đọc', kind: 'builtin' },
+      { id: 'jdlxsPOZOHdGEfcItXVu', name: 'Hiền (Nữ)', language: 'vi-VN', gender: 'female', provider: 'elevenlabs', scenario: 'Nhẹ nhàng, thân thiện', kind: 'builtin' },
+      { id: 'XBDAUT8ybuJTTCoOLSUj', name: 'Đức (Nam)', language: 'vi-VN', gender: 'male', provider: 'elevenlabs', scenario: 'Dõng dạc, thuyết minh', kind: 'builtin' },
+      { id: '3VnrjnYrskPMDsapTr8X', name: 'Tùng (Nam)', language: 'vi-VN', gender: 'male', provider: 'elevenlabs', scenario: 'Khỏe khoắn, tự nhiên', kind: 'builtin' },
+      { id: 'aN7cv9yXNrfIR87bDmyD', name: 'Ninh (Nam)', language: 'vi-VN', gender: 'male', provider: 'elevenlabs', scenario: 'Nghẹn nồng, kịch bản video', kind: 'builtin' }
+    ];
+  }
+  if (provider === 'vieneu') {
+    return [
+      { id: 'Mai Anh', name: 'Mai Anh (Nữ trẻ - v3 Turbo)', language: 'vi-VN', gender: 'female', provider: 'vieneu', scenario: 'v3 Turbo 48kHz', kind: 'builtin', recommended: true },
+      { id: 'Kim Thanh', name: 'Kim Thanh (Nữ ấm áp - v3 Turbo)', language: 'vi-VN', gender: 'female', provider: 'vieneu', scenario: 'v3 Turbo 48kHz', kind: 'builtin' },
+      { id: 'Adam', name: 'Adam (Nam trầm - v3 Turbo)', language: 'vi-VN', gender: 'male', provider: 'vieneu', scenario: 'v3 Turbo 48kHz', kind: 'builtin' },
+      { id: 'Minh Triết', name: 'Minh Triết (Nam dõng dạc - v3 Turbo)', language: 'vi-VN', gender: 'male', provider: 'vieneu', scenario: 'v3 Turbo 48kHz', kind: 'builtin' },
+      { id: 'Mỹ Duyên', name: 'Mỹ Duyên (Nữ truyền cảm - v3 Turbo)', language: 'vi-VN', gender: 'female', provider: 'vieneu', scenario: 'v3 Turbo 48kHz', kind: 'builtin' },
+      { id: 'default_female', name: 'Nữ trẻ chuẩn (v2)', language: 'vi-VN', gender: 'female', provider: 'vieneu', scenario: 'v2 24kHz', kind: 'builtin' },
+      { id: 'default_male', name: 'Nam trung niên (v2)', language: 'vi-VN', gender: 'male', provider: 'vieneu', scenario: 'v2 24kHz', kind: 'builtin' }
+    ];
+  }
   if (provider === 'volcengine') {
     return listVolcengineTtsVoices(model);
   }

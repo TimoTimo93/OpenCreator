@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { spawnCodexProcess } from '../codex/process.js';
 import type { CodexImageStatus } from '@opencreator/protocol';
 import { readLocalCodexImageConfiguration, type LocalCodexImageConfiguration } from '../codex/local-provider.js';
 import type { CodexNativeImageRuntime } from './provider.js';
@@ -33,8 +33,30 @@ export async function inspectCodexImageRuntime(runtime: CodexNativeImageRuntime 
 
 async function probeNativeImageCapability(codexBin: string, codexHome: string): Promise<{ supported: boolean; version?: string }> {
   const run = (args: string[]) => new Promise<string>((resolve, reject) => {
-    execFile(codexBin, args, { timeout: 8_000, maxBuffer: 1024 * 1024, encoding: 'utf8', env: { ...process.env, CODEX_HOME: codexHome } }, (error, stdout) => {
-      if (error) reject(new Error('Could not start Codex or read native image capabilities. Check the executable.'));
+    let stdout = '';
+    let settled = false;
+    const child = spawnCodexProcess(codexBin, args, {
+      env: { ...process.env, CODEX_HOME: codexHome },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill(); } catch {}
+      reject(new Error('Could not start Codex or read native image capabilities. Check the executable.'));
+    }, 8_000);
+    child.stdout?.on('data', (chunk: Buffer | string) => { stdout += chunk.toString(); });
+    child.on('error', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error('Could not start Codex or read native image capabilities. Check the executable.'));
+    });
+    child.on('close', code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) reject(new Error('Could not start Codex or read native image capabilities. Check the executable.'));
       else resolve(stdout);
     });
   });

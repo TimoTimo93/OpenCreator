@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRemotionComponentManager, type RemotionComponentManager } from '../../src/creator/stickman/remotion-component.js';
 
@@ -57,7 +57,7 @@ async function fixture(options: { network?: boolean; link?: boolean; wrongPlatfo
   const release = { version: 1, id: 'remotion', componentVersion: '1.0.0', remotionVersion: manifest.remotionVersion,
     chromiumVersion: manifest.chromiumVersion, platform: options.wrongPlatform ? 'invalid' : process.platform, arch: process.arch,
     archiveUrl, archiveSha256: hash(await readFile(archive)), manifestSha256: hash(await readFile(join(source, 'manifest.json'))),
-    bytes: (await readFile(archive)).length, fileName: archive.split('/').at(-1) };
+    bytes: (await readFile(archive)).length, fileName: basename(archive) };
   await writeFile(releasePath, JSON.stringify(release));
   const cache = join(root, 'cache');
   const manager = createRemotionComponentManager({ root: cache, releasePath, archivePath: options.network ? undefined : archive, readProxy: async () => '' });
@@ -108,7 +108,7 @@ describe('managed Remotion component', () => {
     expect(await readFile(runtime.rendererEntry!, 'utf8')).toBe('exports.renderMedia = () => {};\n');
   });
 
-  it('rejects symbolic links before extracting downloaded code', async () => {
+  it.skipIf(process.platform === 'win32')('rejects symbolic links before extracting downloaded code', async () => {
     const test = await fixture({ link: true });
     await expect(test.manager.ensure({ signal: new AbortController().signal, reportProgress() {} })).rejects.toThrow('archive_links_not_allowed');
     await expect(readFile(join(test.root, 'outside'))).rejects.toThrow();

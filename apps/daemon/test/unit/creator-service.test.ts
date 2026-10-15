@@ -24,15 +24,25 @@ import { createDefaultCreatorTemplateRegistry } from '../../src/creator/template
 import { openRuntimeDatabase } from '../../src/storage/database.js';
 
 let tempDir = '';
+let currentDb: ReturnType<typeof openRuntimeDatabase> | undefined;
 
 afterEach(() => {
+  if (currentDb) {
+    try { currentDb.close(); } catch {}
+    currentDb = undefined;
+  }
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   tempDir = '';
 });
 
 function setup() {
+  if (currentDb) {
+    try { currentDb.close(); } catch {}
+    currentDb = undefined;
+  }
   tempDir = mkdtempSync(join(tmpdir(), 'creator-service-'));
   const db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+  currentDb = db;
   const repository = createCreatorRepository(db);
   const service = createCreatorService({
     repository,
@@ -656,8 +666,8 @@ describe('creator service', () => {
 
     expect(response.job.revision).toBe(1);
     expect(response.job.state.subtitleStyle).toMatchObject({
-      fontPreset: 'sans',
-      fontWeight: 'bold',
+      fontPreset: 'serif',
+      fontWeight: 'medium',
       fontSize: 'medium',
       primaryColor: '#F6C453',
       secondaryColor: '#D1D5DB',

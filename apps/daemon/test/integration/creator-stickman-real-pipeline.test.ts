@@ -10,7 +10,7 @@ import {
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import type { CreatorArtifact, CreatorJob, CreatorServicesConfig } from '@opencreator/protocol';
+import type { CreatorArtifact, CreatorJob, CreatorServicesConfig, CreatorTtsProvider } from '@opencreator/protocol';
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -592,7 +592,7 @@ function inMemoryConfigStore(config: CreatorServicesConfig) {
 }
 
 function configuredTts(config: CreatorServicesConfig): {
-  provider: 'openai' | 'aliyun' | 'minimax' | 'volcengine';
+  provider: CreatorTtsProvider;
   model: string;
   voiceId: string;
 } {
@@ -600,14 +600,25 @@ function configuredTts(config: CreatorServicesConfig): {
   if (provider === 'edge-tts') {
     throw new Error('真实火柴人 E2E 必须配置真实配音服务，不能使用本地 edge-tts');
   }
-  const providerConfig = config.tts[provider];
-  if (!providerConfig.defaultVoiceId.trim()) {
+  const providerConfig = config.tts[provider as 'openai' | 'minimax' | 'aliyun' | 'volcengine'];
+  const defaultVoiceId = provider === 'elevenlabs'
+    ? (config.tts.elevenlabs?.defaultVoiceId || 'f5q6kePPoQAjCPYG6moa')
+    : provider === 'vieneu'
+    ? (config.tts.vieneu?.defaultVoiceId || 'Mai Anh')
+    : (providerConfig?.defaultVoiceId || '');
+  const model = provider === 'elevenlabs'
+    ? (config.tts.elevenlabs?.model || 'eleven_multilingual_v2')
+    : provider === 'vieneu'
+    ? (config.tts.vieneu?.model || 'v3turbo')
+    : (providerConfig?.model || '');
+
+  if (!defaultVoiceId.trim()) {
     throw new Error('真实火柴人 E2E 的配音服务必须配置默认音色');
   }
   return {
     provider,
-    model: providerConfig.model,
-    voiceId: providerConfig.defaultVoiceId
+    model,
+    voiceId: defaultVoiceId
   };
 }
 

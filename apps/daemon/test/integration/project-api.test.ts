@@ -54,7 +54,7 @@ describe('project API', () => {
     const createdProject = created.json().project as { cwd: string; name: string };
     expect(created.json().project).toMatchObject({
       name: '浏览器项目',
-      cwd: expect.stringMatching(join(tempDir, 'OpenCreator', 'project-')),
+      cwd: expect.stringMatching(new RegExp(join(tempDir, 'OpenCreator', 'project-').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))),
       directoryState: 'available'
     });
     expect(realpathSync(createdProject.cwd)).toBe(created.json().project.canonicalCwd);

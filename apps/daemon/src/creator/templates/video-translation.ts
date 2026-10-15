@@ -25,9 +25,9 @@ function createVideoTranslationTemplateDefinition(version: 1 | 2): CreatorTempla
       importedSourceSubtitleId: z.string().nullable().optional(),
       importedTargetSubtitleId: z.string().nullable().optional(),
       sourceLanguage: z.string().default('zh_cn'),
-      targetLanguage: z.string().default('en'),
+      targetLanguage: z.string().default('vi'),
       preferPlatformCaptions: z.boolean().default(true),
-      bilingual: z.boolean().default(true),
+      bilingual: z.boolean().default(false),
       subtitlePosition: z.enum(['top', 'bottom']).default('top'),
       ...(version === 2
         ? { subtitleStyle: creatorSubtitleStyleSchema }
@@ -37,7 +37,7 @@ function createVideoTranslationTemplateDefinition(version: 1 | 2): CreatorTempla
       ttsModel: z.string().optional(),
       voiceCode: z.string().optional(),
       voiceName: z.string().optional(),
-      composeVideo: z.boolean().default(false),
+      composeVideo: z.boolean().default(true),
       videoFormat: z.enum(['horizontal', 'vertical', 'all']).default('horizontal'),
       verticalTitle: z.string().max(80).default(''),
       verticalSubtitle: z.string().max(140).default(''),

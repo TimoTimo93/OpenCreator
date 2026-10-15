@@ -335,9 +335,13 @@ describe('creator template registry', () => {
 
     expect(template.version).toBe(2);
     expect(state).toMatchObject({
+      sourceLanguage: 'zh_cn',
+      targetLanguage: 'vi',
+      bilingual: false,
+      composeVideo: true,
       subtitleStyle: {
-        fontPreset: 'sans',
-        fontWeight: 'bold',
+        fontPreset: 'serif',
+        fontWeight: 'medium',
         fontSize: 'medium',
         primaryColor: '#FFFFFF',
         secondaryColor: '#D1D5DB',

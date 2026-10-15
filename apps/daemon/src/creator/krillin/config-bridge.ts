@@ -1,5 +1,9 @@
 import { stringify } from '@iarna/toml';
-import type { AliyunOssConfig, CreatorServicesConfig } from '@opencreator/protocol';
+import {
+  type AliyunOssConfig,
+  type CreatorServicesConfig,
+  resolveEffectiveTranscriptionProvider
+} from '@opencreator/protocol';
 
 export function createKrillinConfigToml(
   config: CreatorServicesConfig,
@@ -7,6 +11,10 @@ export function createKrillinConfigToml(
   officialTranscriptionModel?: string
 ): string {
   const llm = llmOverride ?? config.llm;
+  const effectiveProvider = resolveEffectiveTranscriptionProvider(
+    config.transcription,
+    officialTranscriptionModel
+  );
   const document = compact({
     app: { proxy: officialTranscriptionModel ? '' : config.proxy },
     llm: {
@@ -16,7 +24,7 @@ export function createKrillinConfigToml(
       json: config.llm.jsonMode
     },
     transcribe: {
-      provider: normalizeTranscriptionProvider(config.transcription.provider),
+      provider: normalizeTranscriptionProvider(effectiveProvider),
       enable_gpu_acceleration: config.transcription.enableGpuAcceleration,
       openai: { ...openAi(config.transcription.openai), ...(officialTranscriptionModel ? { official_model: officialTranscriptionModel } : {}) },
       fasterwhisper: config.transcription.fasterWhisper,
@@ -25,7 +33,7 @@ export function createKrillinConfigToml(
         ...config.transcription.whisperCpp,
         // Preserve the KrillinAI 2.1 compatibility bridge for legacy models,
         // while large-v3-turbo is supported by name end to end.
-        model: config.transcription.provider === 'whisper.cpp'
+        model: effectiveProvider === 'whisper.cpp'
           && config.transcription.whisperCpp.model !== 'large-v3-turbo'
           ? 'large-v2'
           : config.transcription.whisperCpp.model

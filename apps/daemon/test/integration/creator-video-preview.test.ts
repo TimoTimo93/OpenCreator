@@ -120,7 +120,7 @@ it('preflights, cancels, resumes, and serves preview media for a completed histo
     const source = after.artifacts.find(artifact => artifact.kind === 'source_video')!;
     expect(executions).toBe(2);
     expect(after.status).toBe('completed');
-    expect(after.state).toMatchObject({ resultVersion: 1, latestResultVersion: 1, sourceUrl: before.state.sourceUrl, composeVideo: false });
+    expect(after.state).toMatchObject({ resultVersion: 1, latestResultVersion: 1, sourceUrl: before.state.sourceUrl, composeVideo: true });
     expect(after.artifacts.find(artifact => artifact.id === subtitle.id)).toEqual(subtitle);
     expect(readCreatorResultSnapshots(after.state.resultSnapshots)).toEqual([
       { ...readCreatorResultSnapshots(before.state.resultSnapshots)[0], artifactRefs: { target_subtitle: [subtitle.id], source_video: [source.id] } }
