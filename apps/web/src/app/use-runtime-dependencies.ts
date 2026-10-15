@@ -1,4 +1,4 @@
-import type { CreatorRuntimeComponent, CreatorRuntimeComponentsResponse, CreatorYtDlpStatus, OpenCreatorIssue } from '@opencreator/protocol';
+import type { CreatorRuntimeComponent, CreatorRuntimeComponentsResponse, CreatorYtDlpStatus, HongguoComponentStatus, OpenCreatorIssue } from '@opencreator/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePageIssueState } from '../features/issues/page-issue-state.js';
 import type { RuntimeDependencyService } from '../services/runtime-dependency-service.js';
@@ -9,12 +9,16 @@ export type RuntimeDependencyPhase =
   | 'checking'
   | 'updating';
 
+export type HongguoActionPhase = 'idle' | 'checking' | 'updating' | 'launching';
+
 export type RuntimeDependenciesController = {
   componentsStatus?: CreatorRuntimeComponentsResponse;
   componentError?: string;
   refreshComponents?(): Promise<void>;
   downloadComponents?(componentId?: CreatorRuntimeComponent['id']): Promise<void>;
   ytDlpStatus?: CreatorYtDlpStatus;
+  hongguoStatus?: HongguoComponentStatus;
+  hongguoPhase?: HongguoActionPhase;
   phase: RuntimeDependencyPhase;
   /** @deprecated Runtime failures are exposed through issues. */
   error?: string;
@@ -22,6 +26,10 @@ export type RuntimeDependenciesController = {
   dismissIssue?(issueId: string): void;
   checkYtDlpUpdate(force?: boolean): Promise<CreatorYtDlpStatus>;
   updateYtDlp(): Promise<CreatorYtDlpStatus>;
+  /** Checks the fork channel; with force it automatically downloads and applies a newer build. */
+  checkHongguoUpdate?(force?: boolean): Promise<HongguoComponentStatus>;
+  updateHongguo?(): Promise<HongguoComponentStatus>;
+  launchHongguo?(): Promise<HongguoComponentStatus>;
 };
 
 export function useRuntimeDependencies(input: {
@@ -29,6 +37,8 @@ export function useRuntimeDependencies(input: {
   service: RuntimeDependencyService | null;
 }): RuntimeDependenciesController {
   const [ytDlpStatus, setYtDlpStatus] = useState<CreatorYtDlpStatus>();
+  const [hongguoStatus, setHongguoStatus] = useState<HongguoComponentStatus>();
+  const [hongguoPhase, setHongguoPhase] = useState<HongguoActionPhase>('idle');
   const [componentsStatus, setComponentsStatus] = useState<CreatorRuntimeComponentsResponse>();
   const [componentError, setComponentError] = useState<string>();
   const componentsRef = useRef<CreatorRuntimeComponentsResponse>();
@@ -172,13 +182,144 @@ export function useRuntimeDependencies(input: {
     }
   }, [input.connected, input.service, pageIssues.captureOperationFailure, pageIssues.resolveOperation]);
 
+  // ---------------------------------------------------------------------------
+  // Hongguo ("Phim ngắn Hồng Quả") third-party component
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    let active = true;
+    if (!input.connected || input.service === null) {
+      setHongguoStatus(undefined);
+      return () => { active = false; };
+    }
+    void input.service.getHongguoStatus()
+      .then(async response => {
+        if (!active) return;
+        setHongguoStatus(response.hongguo);
+        // Background freshness check (the manager caches it for 6 hours);
+        // it only refreshes the manifest - downloading waits for the user's
+        // explicit "Kiểm tra cập nhật" click.
+        if (!response.hongguo.checkDue) return;
+        const checked = await input.service?.checkHongguoUpdate(false);
+        if (active && checked !== undefined) setHongguoStatus(checked.hongguo);
+      })
+      .catch(() => {
+        // Older runtimes without hongguo routes simply render the card as unavailable.
+        if (active) setHongguoStatus(undefined);
+      });
+    return () => { active = false; };
+  }, [input.connected, input.service]);
+
+  const updateHongguo = useCallback(async (): Promise<HongguoComponentStatus> => {
+    if (!input.connected || input.service === null) {
+      throw new Error('runtime_dependency_unavailable');
+    }
+    setHongguoPhase('updating');
+    const token = { stopped: false };
+    const pollTimer = setInterval(() => {
+      if (token.stopped || input.service === null) return;
+      void input.service.getHongguoStatus()
+        .then(response => { if (!token.stopped) setHongguoStatus(response.hongguo); })
+        .catch(() => undefined);
+    }, 1500);
+    try {
+      const response = await input.service.updateHongguo();
+      setHongguoStatus(response.hongguo);
+      pageIssues.resolveOperation('runtime.update-hongguo');
+      pageIssues.resolveOperation('runtime.check-hongguo');
+      return response.hongguo;
+    } catch (caught) {
+      pageIssues.captureOperationFailure(
+        'runtime.update-hongguo',
+        caught,
+        'Cập nhật thành phần Hồng Quả thất bại. Vui lòng kiểm tra mạng và dung lượng đĩa rồi thử lại.',
+        { retryable: true }
+      );
+      try {
+        const failed = await input.service.getHongguoStatus();
+        setHongguoStatus(failed.hongguo);
+      } catch {
+        // keep the previous snapshot
+      }
+      throw caught;
+    } finally {
+      token.stopped = true;
+      clearInterval(pollTimer);
+      setHongguoPhase('idle');
+    }
+  }, [input.connected, input.service, pageIssues.captureOperationFailure, pageIssues.resolveOperation]);
+
+  const checkHongguoUpdate = useCallback(async (force = true): Promise<HongguoComponentStatus> => {
+    if (!input.connected || input.service === null) {
+      throw new Error('runtime_dependency_unavailable');
+    }
+    setHongguoPhase('checking');
+    try {
+      const response = await input.service.checkHongguoUpdate(force);
+      setHongguoStatus(response.hongguo);
+      pageIssues.resolveOperation('runtime.check-hongguo');
+      pageIssues.resolveOperation('runtime.auto-check-hongguo');
+      // Product requirement: when the user presses "check for updates", a newer
+      // build is downloaded and applied automatically - the artifact itself is
+      // the Vietnamese fork build, so nothing can be lost during the update.
+      if (force && response.hongguo.channelConfigured && response.hongguo.updateAvailable) {
+        return await updateHongguo();
+      }
+      return response.hongguo;
+    } catch (caught) {
+      pageIssues.captureOperationFailure(
+        'runtime.check-hongguo',
+        caught,
+        'Kiểm tra cập nhật thành phần Hồng Quả thất bại. Vui lòng thử lại.',
+        { retryable: true }
+      );
+      try {
+        const failed = await input.service.getHongguoStatus();
+        setHongguoStatus(failed.hongguo);
+      } catch {
+        // keep the previous snapshot
+      }
+      throw caught;
+    } finally {
+      setHongguoPhase('idle');
+    }
+  }, [input.connected, input.service, pageIssues.captureOperationFailure, pageIssues.resolveOperation, updateHongguo]);
+
+  const launchHongguo = useCallback(async (): Promise<HongguoComponentStatus> => {
+    if (!input.connected || input.service === null) {
+      throw new Error('runtime_dependency_unavailable');
+    }
+    setHongguoPhase('launching');
+    try {
+      const response = await input.service.launchHongguo();
+      setHongguoStatus(response.hongguo);
+      pageIssues.resolveOperation('runtime.launch-hongguo');
+      return response.hongguo;
+    } catch (caught) {
+      pageIssues.captureOperationFailure(
+        'runtime.launch-hongguo',
+        caught,
+        'Không mở được ứng dụng Hồng Quả. Vui lòng thử lại.',
+        { retryable: true }
+      );
+      throw caught;
+    } finally {
+      setHongguoPhase('idle');
+    }
+  }, [input.connected, input.service, pageIssues.captureOperationFailure, pageIssues.resolveOperation]);
+
   return {
     componentsStatus, componentError, refreshComponents, downloadComponents,
     ytDlpStatus,
+    hongguoStatus,
+    hongguoPhase,
     phase,
     issues: pageIssues.issues,
     dismissIssue: pageIssues.dismissIssue,
     checkYtDlpUpdate,
-    updateYtDlp
+    updateYtDlp,
+    checkHongguoUpdate,
+    updateHongguo,
+    launchHongguo
   };
 }

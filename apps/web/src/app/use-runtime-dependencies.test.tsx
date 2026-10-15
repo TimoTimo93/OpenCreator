@@ -1,4 +1,4 @@
-import type { CreatorRuntimeComponentsResponse, CreatorYtDlpStatus } from '@opencreator/protocol';
+import type { CreatorRuntimeComponentsResponse, CreatorYtDlpStatus, HongguoComponentStatus } from '@opencreator/protocol';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '../runtime/client.js';
@@ -14,7 +14,11 @@ describe('useRuntimeDependencies', () => {
       getComponentsStatus: vi.fn(async () => componentsStatus),
       downloadComponents: vi.fn(async () => componentsStatus),
       getYtDlpStatus: vi.fn(async () => ({ ytDlp: status() })),
-      checkYtDlpUpdate: vi.fn(), updateYtDlp: vi.fn()
+      checkYtDlpUpdate: vi.fn(), updateYtDlp: vi.fn(),
+      getHongguoStatus: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      checkHongguoUpdate: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      updateHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() }))
     };
     const { result } = renderHook(() => useRuntimeDependencies({ connected: true, service }));
     await waitFor(() => expect(result.current.componentsStatus).toEqual(componentsStatus));
@@ -41,7 +45,11 @@ describe('useRuntimeDependencies', () => {
       getComponentsStatus: vi.fn(), downloadComponents: vi.fn(),
       getYtDlpStatus,
       checkYtDlpUpdate,
-      updateYtDlp: vi.fn()
+      updateYtDlp: vi.fn(),
+      getHongguoStatus: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      checkHongguoUpdate: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      updateHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() }))
     } as RuntimeDependencyService;
 
     const { result } = renderHook(() => useRuntimeDependencies({
@@ -67,7 +75,11 @@ describe('useRuntimeDependencies', () => {
       getComponentsStatus: vi.fn(), downloadComponents: vi.fn(),
       getYtDlpStatus: vi.fn(async () => ({ ytDlp: status() })),
       checkYtDlpUpdate: vi.fn(),
-      updateYtDlp
+      updateYtDlp,
+      getHongguoStatus: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      checkHongguoUpdate: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      updateHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() }))
     } as RuntimeDependencyService;
     const { result } = renderHook(() => useRuntimeDependencies({
       connected: true,
@@ -96,7 +108,11 @@ describe('useRuntimeDependencies', () => {
       getComponentsStatus: vi.fn(), downloadComponents: vi.fn(),
       getYtDlpStatus: vi.fn(async () => ({ ytDlp: status() })),
       checkYtDlpUpdate: vi.fn(),
-      updateYtDlp
+      updateYtDlp,
+      getHongguoStatus: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      checkHongguoUpdate: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      updateHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() })),
+      launchHongguo: vi.fn(async () => ({ hongguo: hongguoStatus() }))
     } as RuntimeDependencyService;
     const { result } = renderHook(() => useRuntimeDependencies({
       connected: true,
@@ -131,6 +147,31 @@ function status(patch: Partial<CreatorYtDlpStatus> = {}): CreatorYtDlpStatus {
     lastCheckedAt: null,
     lastCheckAttemptAt: null,
     installedAt: null,
+    ...patch
+  };
+}
+
+function hongguoStatus(patch: Partial<HongguoComponentStatus> = {}): HongguoComponentStatus {
+  return {
+    installed: false,
+    currentVersion: null,
+    currentViRevision: null,
+    latestVersion: null,
+    latestViRevision: null,
+    updateAvailable: false,
+    checkDue: false,
+    channelConfigured: false,
+    channelUrl: null,
+    phase: 'idle',
+    downloadProgress: null,
+    lastCheckedAt: null,
+    lastCheckAttemptAt: null,
+    installedAt: null,
+    running: false,
+    runningPid: null,
+    dataRoot: 'runtime/hongguo-drama/user-data',
+    downloadsRoot: 'runtime/hongguo-drama/downloads',
+    error: null,
     ...patch
   };
 }

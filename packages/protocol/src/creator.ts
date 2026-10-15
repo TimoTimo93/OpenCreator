@@ -385,6 +385,47 @@ export type CreatorYtDlpStatusResponse = {
   ytDlp: CreatorYtDlpStatus;
 };
 
+export type HongguoComponentPhase =
+  | 'idle'
+  | 'checking'
+  | 'downloading'
+  | 'verifying'
+  | 'extracting'
+  | 'applying'
+  | 'launching';
+
+export type HongguoComponentDownloadProgress = {
+  downloadedBytes: number;
+  totalBytes: number | null;
+  percent: number | null;
+};
+
+export type HongguoComponentStatus = {
+  installed: boolean;
+  currentVersion: string | null;
+  currentViRevision: number | null;
+  latestVersion: string | null;
+  latestViRevision: number | null;
+  updateAvailable: boolean;
+  checkDue: boolean;
+  channelConfigured: boolean;
+  channelUrl: string | null;
+  phase: HongguoComponentPhase;
+  downloadProgress: HongguoComponentDownloadProgress | null;
+  lastCheckedAt: string | null;
+  lastCheckAttemptAt: string | null;
+  installedAt: string | null;
+  running: boolean;
+  runningPid: number | null;
+  dataRoot: string;
+  downloadsRoot: string;
+  error: string | null;
+};
+
+export type HongguoComponentStatusResponse = {
+  hongguo: HongguoComponentStatus;
+};
+
 export type CreatorRuntimeComponent = {
   id: 'whisperkit' | 'whisper.cpp' | 'faster-whisper' | 'remotion';
   name: string;

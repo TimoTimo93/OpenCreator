@@ -2,6 +2,8 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { YtDlpUpdateManager } from '../creator/yt-dlp/update-manager.js';
 import { YtDlpUpdateError } from '../creator/yt-dlp/update-manager.js';
+import type { HongguoComponentManager } from '../creator/hongguo/manager.js';
+import { HongguoUpdateError } from '../creator/hongguo/manager.js';
 import { apiError } from './errors.js';
 import type { CreatorServicesConfig } from '@opencreator/protocol';
 import type { createKrillinDependencyLoader } from '../creator/krillin/dependency-loader.js';
@@ -14,10 +16,12 @@ const componentDownloadSchema = z.object({
 export async function registerCreatorRuntimeRoutes(
   server: FastifyInstance,
   ytDlp: YtDlpUpdateManager | undefined,
-  local?: { loader: ReturnType<typeof createKrillinDependencyLoader>; readConfig(): Promise<CreatorServicesConfig>; remotion?: RemotionComponentManager }
+  local?: { loader: ReturnType<typeof createKrillinDependencyLoader>; readConfig(): Promise<CreatorServicesConfig>; remotion?: RemotionComponentManager },
+  hongguo?: HongguoComponentManager
 ): Promise<void> {
   server.addHook('preClose', () => {
     ytDlp?.close();
+    hongguo?.close();
     local?.loader.close();
     local?.remotion?.close();
   });
@@ -43,6 +47,39 @@ export async function registerCreatorRuntimeRoutes(
       return { ytDlp: await ytDlp.update() };
     } catch (error) {
       return sendUpdateError(reply, error);
+    }
+  });
+
+  server.get('/creator/hongguo/status', async (_request, reply) => {
+    if (hongguo === undefined) return hongguoUnavailable(reply);
+    return { hongguo: hongguo.status() };
+  });
+
+  server.post<{ Body: unknown }>('/creator/hongguo/check', async (request, reply) => {
+    if (hongguo === undefined) return hongguoUnavailable(reply);
+    try {
+      const force = readHongguoForce(request.body);
+      return { hongguo: await hongguo.check({ force }) };
+    } catch (error) {
+      return sendHongguoError(reply, error);
+    }
+  });
+
+  server.post('/creator/hongguo/update', async (_request, reply) => {
+    if (hongguo === undefined) return hongguoUnavailable(reply);
+    try {
+      return { hongguo: await hongguo.update() };
+    } catch (error) {
+      return sendHongguoError(reply, error);
+    }
+  });
+
+  server.post('/creator/hongguo/launch', async (_request, reply) => {
+    if (hongguo === undefined) return hongguoUnavailable(reply);
+    try {
+      return { hongguo: await hongguo.launch() };
+    } catch (error) {
+      return sendHongguoError(reply, error);
     }
   });
 
@@ -106,6 +143,31 @@ function unavailable(reply: FastifyReply) {
 
 function sendUpdateError(reply: FastifyReply, error: unknown) {
   if (error instanceof YtDlpUpdateError) {
+    return reply.code(error.statusCode).send(apiError(error.code, error.message));
+  }
+  throw error;
+}
+
+function readHongguoForce(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === 'object' && !Array.isArray(value) && 'force' in value) {
+    const force = (value as { force?: unknown }).force;
+    if (typeof force === 'boolean') return force;
+    throw new HongguoUpdateError('creator_hongguo_check_failed', 'force must be a boolean', 400);
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) return true;
+  throw new HongguoUpdateError('creator_hongguo_check_failed', 'body must be an object', 400);
+}
+
+function hongguoUnavailable(reply: FastifyReply) {
+  return reply.code(503).send(apiError(
+    'creator_hongguo_unavailable',
+    'Hongguo component management is unavailable for this Runtime'
+  ));
+}
+
+function sendHongguoError(reply: FastifyReply, error: unknown) {
+  if (error instanceof HongguoUpdateError) {
     return reply.code(error.statusCode).send(apiError(error.code, error.message));
   }
   throw error;

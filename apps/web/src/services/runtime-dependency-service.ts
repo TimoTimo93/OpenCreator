@@ -1,4 +1,9 @@
-import type { CreatorRuntimeComponent, CreatorRuntimeComponentsResponse, CreatorYtDlpStatusResponse } from '@opencreator/protocol';
+import type {
+  CreatorRuntimeComponent,
+  CreatorRuntimeComponentsResponse,
+  CreatorYtDlpStatusResponse,
+  HongguoComponentStatusResponse
+} from '@opencreator/protocol';
 
 type ClientLike = {
   get(path: string): Promise<unknown>;
@@ -24,6 +29,21 @@ export function createRuntimeDependencyService(client: ClientLike) {
     },
     updateYtDlp(): Promise<CreatorYtDlpStatusResponse> {
       return client.post('/creator/yt-dlp/update') as Promise<CreatorYtDlpStatusResponse>;
+    },
+    getHongguoStatus(): Promise<HongguoComponentStatusResponse> {
+      return client.get('/creator/hongguo/status') as Promise<HongguoComponentStatusResponse>;
+    },
+    checkHongguoUpdate(force = true): Promise<HongguoComponentStatusResponse> {
+      return client.post(
+        '/creator/hongguo/check',
+        { force }
+      ) as Promise<HongguoComponentStatusResponse>;
+    },
+    updateHongguo(): Promise<HongguoComponentStatusResponse> {
+      return client.post('/creator/hongguo/update') as Promise<HongguoComponentStatusResponse>;
+    },
+    launchHongguo(): Promise<HongguoComponentStatusResponse> {
+      return client.post('/creator/hongguo/launch') as Promise<HongguoComponentStatusResponse>;
     }
   };
 }

@@ -60,6 +60,10 @@ import {
   createYtDlpUpdateManager,
   type YtDlpUpdateManager
 } from '../creator/yt-dlp/update-manager.js';
+import {
+  createHongguoComponentManager,
+  type HongguoComponentManager
+} from '../creator/hongguo/manager.js';
 import { createCoverAnalysisExecutor } from '../creator/cover/executor.js';
 import {
   createFfmpegCoverImageNormalizer,
@@ -1581,11 +1585,20 @@ export async function buildServer(input: BuildServerInput) {
   await registerGatewayAccountRoutes(server, gatewayAccount);
   await gatewayCreatorSource.register(server);
   await registerSmartDubbingRoutes(server, smartDubbingService);
+  let creatorHongguoComponentManager: HongguoComponentManager | undefined;
+  try {
+    creatorHongguoComponentManager = await createHongguoComponentManager(
+      { root: join(runtimeDir, 'hongguo-drama') },
+      { proxy: async () => (await creatorServicesConfigStore.read()).proxy.trim() || undefined }
+    );
+  } catch (error) {
+    console.warn(`Hongguo component manager failed to start: ${formatError(error)}`);
+  }
   await registerCreatorRuntimeRoutes(server, creatorYtDlpUpdateManager, {
     loader: krillinDependencyLoader,
     remotion: remotionComponent,
     readConfig: () => creatorServicesConfigStore.read()
-  });
+  }, creatorHongguoComponentManager);
   await registerImageGenerationRoutes(server, imageGenerationService);
   await registerCreatorRoutes(server, creatorService, creatorEvents, {
     sseHeartbeatMs: input.sseHeartbeatMs,
