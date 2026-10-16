@@ -29,6 +29,7 @@ import { preflightKrillinDependencies } from './dependency-preflight.js';
 import { createKrillinCliExecutionPlan } from './execution-plan.js';
 import { readKrillinRuntimeManifest, resolveInside } from './manifest.js';
 import type { YtDlpRuntime } from '../yt-dlp/runtime.js';
+import { providerHasTtsCredentials } from '../tts-credentials.js';
 
 export function createKrillinExecutor(input: {
   resourceRoot: string;
@@ -52,6 +53,9 @@ export function createKrillinExecutor(input: {
       const ffprobe = executablePath(input.resourceRoot, /(?:^|\/)ffprobe(?:\.exe)?$/i);
       const materializedArtifacts = await writeArtifactIndex(input.jobsRoot, stage);
       const options = buildKrillinStageOptions(stage);
+      if (stage.stageRun.stageId === 'tts' && stage.job.templateId === 'video-translation') {
+        applyTtsProviderFallback(options, configured, stage);
+      }
       let artifacts: KrillinResultArtifact[];
       let captionFallbackProgress: Record<string, CreatorJson> = {};
       try {
@@ -662,4 +666,25 @@ function nonEmptyString(value: CreatorJson | undefined): string | undefined {
 
 function finiteNumber(value: CreatorJson | undefined): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Giai đoạn lồng tiếng (TTS) giai video dịch: khi provider đang chọn thiếu khóa
+ * API hợp lệ, tự chuyển sang Edge TTS (miễn phí, không cần khóa) để video vẫn
+ * có giọng đọc thay vì thất bại. Ghi chú tiến trình để người dùng biết.
+ */
+function applyTtsProviderFallback(
+  options: Record<string, unknown>,
+  config: CreatorServicesConfig,
+  stage: CreatorExecutorInput
+): void {
+  const requested = typeof options.ttsProvider === 'string' && options.ttsProvider.trim().length > 0
+    ? options.ttsProvider.trim()
+    : config.tts.provider;
+  if (providerHasTtsCredentials(config, requested)) return;
+  options.ttsProvider = 'edge-tts';
+  stage.reportProgress({
+    providerStatus: 'running',
+    message: 'Provider TTS thiếu khóa API — đã tự chuyển sang Edge TTS (miễn phí) để vẫn có lồng tiếng.'
+  });
 }

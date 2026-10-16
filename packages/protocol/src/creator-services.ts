@@ -336,7 +336,7 @@ export function createDefaultCreatorServicesConfig(): CreatorServicesConfig {
       },
       fasterWhisper: { model: 'medium' },
       whisperKit: { model: 'large-v2' },
-      whisperCpp: { model: 'tiny' },
+      whisperCpp: { model: 'medium' },
       aliyun: {
         oss: { accessKeyId: '', accessKeySecret: '', bucket: '', region: 'cn-shanghai', endpoint: '' },
         speech: { accessKeyId: '', accessKeySecret: '', appKey: '' }

@@ -2,8 +2,7 @@ import {
   parseBilibiliVideoSource,
   supportedVideoSourcePlatform,
   type CreatorJob,
-  type CreatorStageRun,
-  type CreatorTtsProvider
+  type CreatorStageRun
 } from '@opencreator/protocol';
 import type { CreatorServicesConfigStore } from '../../creator-services/config-store.js';
 import type { CreatorCommandDispatcher } from '../command-dispatcher.js';
@@ -46,18 +45,9 @@ export function createVideoTranslationWorkflow(input: {
       return;
     }
     if (stageId !== 'tts' || job.state.dubbing !== true) return;
-    const config = await input.configStore.read();
-    if (!hasTtsCredentials(config, job)) {
-      setConfigurationNeeded(input.creator, job.id, {
-        code: 'creator_tts_config_missing',
-        message: 'Configure the target-language TTS service first',
-        section: 'tts'
-      });
-      throw new VideoTranslationWorkflowError(
-        'creator_tts_config_missing',
-        'TTS configuration is incomplete'
-      );
-    }
+    // Provider thiếu khóa API không chặn job: giai đoạn TTS sẽ tự chuyển sang
+    // Edge TTS (miễn phí, không cần khóa) nên video vẫn có lồng tiếng.
+    // Người dùng có thể đổi provider chủ động trong cài đặt.
   }
 
   async function continueFrom(stage: CreatorStageRun): Promise<void> {
@@ -183,30 +173,6 @@ function isSupportedVideoUrl(value: string): boolean {
   } catch {
     return supportedVideoSourcePlatform(value) !== null;
   }
-}
-
-function hasTtsCredentials(
-  config: Awaited<ReturnType<CreatorServicesConfigStore['read']>>,
-  job: CreatorJob
-): boolean {
-  const provider = isTtsProvider(job.state.ttsProvider)
-    ? job.state.ttsProvider
-    : config.tts.provider;
-  if (provider === 'edge-tts') return true;
-  if (provider === 'openai') return config.tts.openai.apiKey.length > 0;
-  if (provider === 'minimax') return config.tts.minimax.apiKey.length > 0;
-  if (provider === 'volcengine') {
-    return config.tts.volcengine.appId.length > 0 && config.tts.volcengine.accessToken.length > 0;
-  }
-  return config.tts.aliyun.apiKey.length > 0;
-}
-
-function isTtsProvider(value: unknown): value is CreatorTtsProvider {
-  return value === 'openai'
-    || value === 'aliyun'
-    || value === 'edge-tts'
-    || value === 'minimax'
-    || value === 'volcengine';
 }
 
 function queueNextStage(

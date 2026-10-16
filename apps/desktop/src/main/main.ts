@@ -47,7 +47,7 @@ import type {
 
 registerPrivilegedSchemes();
 app.setName('OpenCreator');
-app.commandLine.appendSwitch('lang', 'zh-CN');
+app.commandLine.appendSwitch('lang', 'vi');
 const APP_ENTRY_AT = Date.now();
 const DEVELOPMENT =
   process.env.OPENCREATOR_DESKTOP_DEV === '1' || !app.isPackaged;

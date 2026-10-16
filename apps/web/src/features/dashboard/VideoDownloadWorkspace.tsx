@@ -723,9 +723,9 @@ export default function VideoDownloadWorkspace(props: {
       onBack={props.onBack}
     >
       <div className="creator-tool-stack">
-        {props.batch === undefined ? null : resultToolbar}
-        {props.batch?.editor}
-        {props.batch !== undefined && resultTab === 'formats' && probe === undefined ? props.batch.sourceList : null}
+        {props.batch === undefined || sourceTab !== 'link' ? null : resultToolbar}
+        {props.batch === undefined || sourceTab !== 'link' ? null : props.batch.editor}
+        {props.batch !== undefined && sourceTab === 'link' && resultTab === 'formats' && probe === undefined ? props.batch.sourceList : null}
         {props.batch === undefined ? <nav
           className="video-translation-steps creator-tool-steps creator-tool-steps-two"
           aria-label={l('视频下载流程', 'Video download steps')}
@@ -757,7 +757,7 @@ export default function VideoDownloadWorkspace(props: {
         </nav> : null}
 
 
-        {currentStep === 0 && props.batch === undefined ? (
+        {props.batch !== undefined || currentStep === 0 ? (
           <nav className="video-source-tabs" role="tablist" aria-label={t('dashboard.drama.tabs')}>
             <button
               type="button"
@@ -822,7 +822,7 @@ export default function VideoDownloadWorkspace(props: {
           </section>
         ) : null}
 
-        {currentStep === 0 && props.batch === undefined && sourceTab === 'browse' ? (
+        {(props.batch !== undefined || currentStep === 0) && sourceTab === 'browse' ? (
           <section className="creator-tool-panel">
             <DramaBrowsePane
               runtimeDependencies={props.runtimeDependencies}
@@ -833,7 +833,7 @@ export default function VideoDownloadWorkspace(props: {
           </section>
         ) : null}
 
-        {currentStep === 0 && props.batch === undefined && sourceTab === 'hot' ? (
+        {(props.batch !== undefined || currentStep === 0) && sourceTab === 'hot' ? (
           <section className="creator-tool-panel">
             <DramaHotPane
               runtimeDependencies={props.runtimeDependencies}
@@ -845,7 +845,7 @@ export default function VideoDownloadWorkspace(props: {
         ) : null}
 
         {(props.batch === undefined ? currentStep === 1 && probe !== undefined
-          : props.batch.hasSelectedSource || historyItems.length > 0 || resultTab === 'outputs') ? (
+          : sourceTab === 'link' && (props.batch.hasSelectedSource || historyItems.length > 0 || resultTab === 'outputs')) ? (
           <section
             className="video-result-workspace download-result-workspace"
             aria-label={l('视频下载结果', 'Video download results')}

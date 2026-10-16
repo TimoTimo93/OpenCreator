@@ -306,8 +306,8 @@ describe('video translation workflow', () => {
         async run({ stageRun }) {
           if (stageRun.stageId === 'subtitle') {
             writeFileSync(join(tempDir, 'source.mp4'), 'fixture-video');
-            writeFileSync(join(tempDir, 'target.srt'), 'fixture-target-subtitle');
-            writeFileSync(join(tempDir, 'vertical.srt'), 'fixture-vertical-subtitle');
+            writeFileSync(join(tempDir, 'target.srt'), fixtureVietnameseSrt());
+            writeFileSync(join(tempDir, 'vertical.srt'), fixtureVietnameseSrt());
             return {
               outputs: [
                 { kind: 'source_video', status: 'completed' as const, path: join(tempDir, 'source.mp4') },
@@ -377,7 +377,7 @@ describe('video translation workflow', () => {
     fixture.db.close();
   });
 
-  it('validates credentials for the provider saved in the job snapshot', async () => {
+  it('does not block the TTS stage when the snapshot provider lacks credentials', async () => {
     const fixture = setup({
       dubbing: true,
       ttsProvider: 'aliyun',
@@ -394,14 +394,13 @@ describe('video translation workflow', () => {
       configStore: { read: vi.fn(async () => config) }
     });
 
+    // Provider aliyun thiếu khóa API không chặn job nữa: executor tự chuyển
+    // sang Edge TTS (miễn phí) nên validateStage cho qua và không cần cấu hình.
     await expect(workflow.validateStage(fixture.service.getJob(fixture.jobId)!, 'subtitle'))
       .resolves.toBeUndefined();
     await expect(workflow.validateStage(fixture.service.getJob(fixture.jobId)!, 'tts'))
-      .rejects.toMatchObject({ code: 'creator_tts_config_missing' });
-    expect(fixture.service.getJob(fixture.jobId)?.state.needsInput).toMatchObject({
-      code: 'creator_tts_config_missing',
-      deepLink: '#/settings?tab=ai-services&section=tts'
-    });
+      .resolves.toBeUndefined();
+    expect(fixture.service.getJob(fixture.jobId)?.state).not.toHaveProperty('needsInput');
     fixture.db.close();
   });
 
@@ -424,7 +423,7 @@ describe('video translation workflow', () => {
     fixture.db.close();
   });
 
-  it('continues from completed subtitles after TTS configuration is saved', async () => {
+  it('continues from completed subtitles straight to TTS without extra configuration', async () => {
     const fixture = setup({
       dubbing: true,
       composeVideo: true,
@@ -446,16 +445,9 @@ describe('video translation workflow', () => {
 
     fixture.repository.updateStageRun({ id: subtitle, status: 'succeeded' });
     await workflow.handleStageChanged(fixture.repository.getStageRun(subtitle)!);
-    expect(fixture.service.getJob(fixture.jobId)).toMatchObject({
-      status: 'needs_input',
-      state: {
-        needsInput: { code: 'creator_tts_config_missing' }
-      }
-    });
 
-    config.tts.openai.apiKey = 'tts-key';
-    await workflow.resumeConfiguredJobs();
-
+    // Chưa cấu hình TTS nhưng job vẫn đi tiếp sang tts (executor tự fallback
+    // Edge TTS) thay vì dừng ở needs_input chờ cấu hình.
     expect(fixture.service.getJob(fixture.jobId)?.stages.map(stage => stage.stageId)).toEqual([
       'subtitle',
       'tts'
@@ -464,6 +456,22 @@ describe('video translation workflow', () => {
     fixture.db.close();
   });
 });
+
+// Phụ đề tiếng Việt hợp lệ. Validator đầu ra chặn bản dịch không khớp ngôn ngữ
+// đích nên fixture phải là SRT thật với đủ dấu tiếng Việt.
+function fixtureVietnameseSrt(): string {
+  const lines = [
+    'Ngày xửa ngày xưa, có một cậu bé luôn mong ước được khám phá thế giới.',
+    'Cậu ấy tin rằng mỗi chuyến đi đều mang đến một bài học mới mẻ và quý giá.',
+    'Thế là cậu lên đường, mang theo một chiếc ba lô và một trái tim tràn đầy hy vọng.'
+  ];
+  return lines
+    .map((text, index) => {
+      const start = index * 2;
+      return `${index + 1}\n00:00:0${start},000 --> 00:00:0${start + 2},000\n${text}\n`;
+    })
+    .join('\n');
+}
 
 function setup(state: Record<string, unknown>) {
   tempDir = mkdtempSync(join(tmpdir(), 'creator-video-translation-workflow-'));

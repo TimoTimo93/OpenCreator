@@ -751,7 +751,16 @@ export function AppController(props: AppControllerProps) {
         }
 
         const settings = response.settings;
-        setLanguagePreference(settings.language);
+        // Preference do người dùng đã chọn trước đó (localStorage) luôn thắng
+        // giá trị daemon khi hydrate — tránh "mỗi lần khởi động lại về tiếng Trung".
+        const localPreference = persistedLanguagePreferenceRef.current;
+        if (localPreference !== 'system' && localPreference !== settings.language) {
+          await openCreatorSettingsService.updateUiSettings({ language: localPreference });
+          if (canceled) return;
+        } else {
+          setLanguagePreference(settings.language);
+          persistedLanguagePreferenceRef.current = settings.language;
+        }
         setColorMode(settings.colorMode);
         applyColorMode(settings.colorMode);
         writeColorModePreference(settings.colorMode);
@@ -762,7 +771,6 @@ export function AppController(props: AppControllerProps) {
         writeCustomAccentColorPreference(settings.customAccentColor);
         setDefaultPermission(settings.defaultPermission);
         writeDefaultPermissionPreference(settings.defaultPermission);
-        persistedLanguagePreferenceRef.current = settings.language;
         uiSettingsHydratedRef.current = true;
       })
       .catch(() => {

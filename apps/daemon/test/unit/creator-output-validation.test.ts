@@ -37,6 +37,26 @@ describe('creator output validation', () => {
     await expect(validate(shortChinese)).resolves.toEqual([]);
   });
 
+  it('rejects an English-only translation for a Vietnamese target and accepts Vietnamese text', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'creator-output-validation-'));
+    const englishOnly = subtitle('OpenCreator keeps the original English subtitle unchanged for Vietnamese.');
+    const vietnamese = subtitle('OpenCreator giữ nguyên phụ đề tiếng Anh gốc nhưng bản dịch phải là tiếng Việt có dấu.');
+    const vietnameseNoMarks = subtitle('nguoi dan toc viet nam va truong dai hoc quoc gia ha noi');
+
+    await expect(validateForVietnamese(englishOnly)).resolves.toMatchObject([{
+      code: 'creator_translation_output_language_mismatch',
+      severity: 'blocking'
+    }]);
+    await expect(validateForVietnamese(vietnamese)).resolves.toEqual([]);
+    // Bản dịch hoàn toàn không dấu không phân biệt được với tiếng Anh chưa dịch
+    // nên validator chặn để người dùng dịch lại (bản dịch tiếng Việt thật luôn
+    // có dấu thanh nên không bị ảnh hưởng).
+    await expect(validateForVietnamese(vietnameseNoMarks)).resolves.toMatchObject([{
+      code: 'creator_translation_output_language_mismatch',
+      severity: 'blocking'
+    }]);
+  });
+
   it('rejects empty unreadable and non-file completed outputs before template validation', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'creator-output-files-'));
     const emptyPath = join(tempDir, 'empty.mp4');
@@ -157,6 +177,18 @@ async function validate(text: string) {
   writeFileSync(targetPath, text);
   return validateTranslationOutputLanguage({
     job: { state: { sourceLanguage: 'en', targetLanguage: 'zh_cn' } } as never,
+    stage: {} as never,
+    stageRun: {} as never,
+    inputArtifacts: [],
+    candidateOutputs: [{ kind: 'target_subtitle', status: 'completed', path: targetPath }]
+  });
+}
+
+async function validateForVietnamese(text: string) {
+  const targetPath = join(tempDir, `${Math.random().toString(16).slice(2)}.srt`);
+  writeFileSync(targetPath, text);
+  return validateTranslationOutputLanguage({
+    job: { state: { sourceLanguage: 'zh_cn', targetLanguage: 'vi' } } as never,
     stage: {} as never,
     stageRun: {} as never,
     inputArtifacts: [],

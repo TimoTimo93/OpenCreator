@@ -23,7 +23,7 @@ describe('Desktop deep links', () => {
     const builderConfig = readFileSync('electron-builder.yml', 'utf8');
 
     expect(mainSource).toMatch(
-      /app\.setName\('OpenCreator'\);\s*app\.commandLine\.appendSwitch\('lang', 'zh-CN'\);/
+      /app\.setName\('OpenCreator'\);\s*app\.commandLine\.appendSwitch\('lang', 'vi'\);/
     );
     expect(builderConfig).toContain('CFBundleDevelopmentRegion: zh_CN');
     expect(builderConfig).toContain('CFBundleLocalizations:');

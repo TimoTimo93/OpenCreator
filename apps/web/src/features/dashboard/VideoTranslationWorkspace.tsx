@@ -851,7 +851,7 @@ function legacyResultVersionsFromArtifacts(
           ...readSubtitleStyleSettings(sourceState, fallbackState, persisted),
           dubbing: typeof sourceState.dubbing === 'boolean'
             ? sourceState.dubbing
-            : persisted?.settings.dubbing ?? false,
+            : persisted?.settings.dubbing ?? true,
           ttsProvider: isTtsProvider(sourceState.ttsProvider)
             ? sourceState.ttsProvider
             : persisted?.settings.ttsProvider ?? 'openai',
@@ -970,7 +970,7 @@ function resultVersionFromSnapshot(
         true
       ),
       ...readSubtitleStyleSettings(sourceState, fallbackState, persisted),
-      dubbing: readBooleanSetting(sourceState, fallbackState, persisted, 'dubbing', false),
+      dubbing: readBooleanSetting(sourceState, fallbackState, persisted, 'dubbing', true),
       ttsProvider: readTtsProviderSetting(sourceState, fallbackState, persisted),
       ttsModel: readStringSetting(sourceState, fallbackState, persisted, 'ttsModel', ''),
       voiceCode: readStringSetting(sourceState, fallbackState, persisted, 'voiceCode', ''),
@@ -1662,7 +1662,7 @@ export default function VideoTranslationWorkspace(props: {
   const [subtitleShadowOffsetX, setSubtitleShadowOffsetX] = useState(defaultSubtitleStyle.subtitleShadowOffsetX);
   const [subtitleShadowOffsetY, setSubtitleShadowOffsetY] = useState(defaultSubtitleStyle.subtitleShadowOffsetY);
   const [subtitleShadowBlur, setSubtitleShadowBlur] = useState(defaultSubtitleStyle.subtitleShadowBlur);
-  const [dubbingRequested, setDubbing] = useState(false);
+  const [dubbingRequested, setDubbing] = useState(true);
   const [ttsProvider, setTtsProvider] = useState<CreatorTtsProvider>('openai');
   const [ttsModel, setTtsModel] = useState('gpt-4o-mini-tts');
   const [voiceCode, setVoiceCode] = useState('');
