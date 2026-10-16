@@ -29,7 +29,10 @@ import { preflightKrillinDependencies } from './dependency-preflight.js';
 import { createKrillinCliExecutionPlan } from './execution-plan.js';
 import { readKrillinRuntimeManifest, resolveInside } from './manifest.js';
 import type { YtDlpRuntime } from '../yt-dlp/runtime.js';
-import { providerHasTtsCredentials } from '../tts-credentials.js';
+import {
+  resolveDubbingTtsDecision,
+  type DubbingTtsProbe
+} from './tts-dubbing-provider.js';
 
 export function createKrillinExecutor(input: {
   resourceRoot: string;
@@ -40,6 +43,8 @@ export function createKrillinExecutor(input: {
   verificationCachePath?: string;
   ensureRuntimeReady?(): Promise<void>;
   getCodexLlmConfig?(): { baseUrl: string; apiKey: string; model: string } | undefined;
+  /** Xác minh provider TTS của giai đoạn lồng tiếng trước khi chạy CLI. */
+  ttsProbe?: DubbingTtsProbe;
 }): CreatorExecutor {
   return {
     id: 'krillinai',
@@ -54,7 +59,7 @@ export function createKrillinExecutor(input: {
       const materializedArtifacts = await writeArtifactIndex(input.jobsRoot, stage);
       const options = buildKrillinStageOptions(stage);
       if (stage.stageRun.stageId === 'tts' && stage.job.templateId === 'video-translation') {
-        applyTtsProviderFallback(options, configured, stage);
+        await applyDubbingTtsProvider(options, configured, stage, input.ttsProbe);
       }
       let artifacts: KrillinResultArtifact[];
       let captionFallbackProgress: Record<string, CreatorJson> = {};
@@ -669,22 +674,29 @@ function finiteNumber(value: CreatorJson | undefined): number | undefined {
 }
 
 /**
- * Giai đoạn lồng tiếng (TTS) giai video dịch: khi provider đang chọn thiếu khóa
- * API hợp lệ, tự chuyển sang Edge TTS (miễn phí, không cần khóa) để video vẫn
- * có giọng đọc thay vì thất bại. Ghi chú tiến trình để người dùng biết.
+ * Giai đoạn lồng tiếng (TTS) của Dịch video: chọn provider thực sự chạy được.
+ * Provider đang cấu hình được xác minh bằng một lần tổng hợp thử; nếu thất bại
+ * (hoặc thiếu khóa API), tự chuyển sang tuyến Edge TTS miễn phí của gateway cục
+ * bộ rồi tới Edge TTS tích hợp — video vẫn có giọng đọc thay vì thất bại.
  */
-function applyTtsProviderFallback(
+async function applyDubbingTtsProvider(
   options: Record<string, unknown>,
   config: CreatorServicesConfig,
-  stage: CreatorExecutorInput
-): void {
-  const requested = typeof options.ttsProvider === 'string' && options.ttsProvider.trim().length > 0
-    ? options.ttsProvider.trim()
-    : config.tts.provider;
-  if (providerHasTtsCredentials(config, requested)) return;
-  options.ttsProvider = 'edge-tts';
-  stage.reportProgress({
-    providerStatus: 'running',
-    message: 'Provider TTS thiếu khóa API — đã tự chuyển sang Edge TTS (miễn phí) để vẫn có lồng tiếng.'
+  stage: CreatorExecutorInput,
+  probe: DubbingTtsProbe | undefined
+): Promise<void> {
+  const decision = await resolveDubbingTtsDecision({
+    config,
+    requestedProvider: stringValue(options.ttsProvider),
+    requestedModel: stringValue(options.ttsModel),
+    requestedVoice: stringValue(options.voiceCode),
+    targetLanguage: stringValue(options.targetLanguage),
+    ...(probe === undefined ? {} : { probe })
   });
+  options.ttsProvider = decision.ttsProvider;
+  if (decision.ttsModel !== undefined) options.ttsModel = decision.ttsModel;
+  if (decision.voiceCode !== undefined) options.voiceCode = decision.voiceCode;
+  if (decision.notice !== undefined) {
+    stage.reportProgress({ providerStatus: 'running', message: decision.notice });
+  }
 }

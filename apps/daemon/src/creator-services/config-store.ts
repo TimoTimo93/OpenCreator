@@ -59,6 +59,23 @@ const aliyunSchema = z.object({
   speech: aliyunSpeechSchema
 }).strict();
 const funasrSchema = openAiCompatibleSchema.extend({ timeoutMs: z.number().int().min(1000).max(3600000) }).strict();
+const apiKeyListSchema = z.array(boundedString(4096)).max(64);
+const agnesAiSchema = z.object({
+  baseUrl: boundedString(2048),
+  apiKeys: apiKeyListSchema,
+  model: boundedString(128)
+}).strict();
+const elevenLabsTtsSchema = z.object({
+  baseUrl: boundedString(2048),
+  apiKeys: apiKeyListSchema,
+  model: boundedString(128),
+  defaultVoiceId: boundedString(256)
+}).strict();
+const vieNeuTtsSchema = z.object({
+  baseUrl: boundedString(2048),
+  model: boundedString(128),
+  defaultVoiceId: boundedString(256)
+}).strict();
 const volcengineAsrSchema = z.object({
   appId: boundedString(256),
   accessToken: boundedString(4096),
@@ -70,7 +87,9 @@ const imageConfigDefault = creatorServicesDefaults.image;
 const videoConfigDefault = creatorServicesDefaults.video;
 const llmConfigSchema = openAiCompatibleSchema.extend({
   jsonMode: z.boolean(),
-  source: z.enum(['codex', 'custom']).optional()
+  source: z.enum(['codex', 'custom', 'agnes']).optional(),
+  agnesAi: agnesAiSchema.default(creatorServicesDefaults.llm.agnesAi ?? { baseUrl: '', apiKeys: [], model: '' }),
+  failoverToAgnes: z.boolean().default(creatorServicesDefaults.llm.failoverToAgnes ?? false)
 }).strict().transform(value => ({
   ...value,
   source: value.source ?? inferLegacyTextModelSource(value)
@@ -122,14 +141,29 @@ const volcengineTtsSchema = z.object({
   appId: value.appId
 }));
 const ttsConfigSchema = z.object({
-  provider: z.enum(['openai', 'aliyun', 'edge-tts', 'minimax', 'volcengine']),
+  provider: z.enum(['openai', 'aliyun', 'edge-tts', 'minimax', 'volcengine', 'elevenlabs', 'vieneu']),
   openai: ttsProviderSchema(creatorServicesDefaults.tts.openai.defaultVoiceId),
   minimax: ttsProviderSchema(creatorServicesDefaults.tts.minimax.defaultVoiceId),
   aliyun: z.union([
     ttsProviderSchema(creatorServicesDefaults.tts.aliyun.defaultVoiceId),
     legacyAliyunTtsSchema
   ]),
-  volcengine: volcengineTtsSchema.default(creatorServicesDefaults.tts.volcengine)
+  volcengine: volcengineTtsSchema.default(creatorServicesDefaults.tts.volcengine),
+  elevenlabs: elevenLabsTtsSchema.default(
+    creatorServicesDefaults.tts.elevenlabs ?? {
+      baseUrl: 'https://api.elevenlabs.io',
+      apiKeys: [],
+      model: 'eleven_multilingual_v2',
+      defaultVoiceId: 'f5q6kePPoQAjCPYG6moa'
+    }
+  ),
+  vieneu: vieNeuTtsSchema.default(
+    creatorServicesDefaults.tts.vieneu ?? {
+      baseUrl: 'http://127.0.0.1:7860',
+      model: 'v3turbo',
+      defaultVoiceId: 'Mai Anh'
+    }
+  )
 }).strict();
 
 export const creatorServicesConfigSchema = z.object({

@@ -284,6 +284,8 @@ describe('creator preflight', () => {
     root = await mkdtemp(join(tmpdir(), 'creator-preflight-'));
     const stage = createStickmanVideoTemplate().stages.find(candidate => candidate.id === stageId)!;
     const config = createDefaultCreatorServicesConfig();
+    if (blockedId === 'llm') config.llm.apiKey = '';
+    if (blockedId === 'tts') config.tts.openai.apiKey = '';
     if (blockedId === 'image-provider') config.image.provider = 'openai';
     const result = await createCreatorPreflight({
       configStore: { read: async () => config },
@@ -299,8 +301,10 @@ describe('creator preflight', () => {
   it('checks the Cover source analysis executor instead of the image executor', async () => {
     root = await mkdtemp(join(tmpdir(), 'creator-preflight-'));
     const stage = createCoverTemplate().stages.find(candidate => candidate.id === 'analyze-source')!;
+    const config = createDefaultCreatorServicesConfig();
+    config.llm.apiKey = '';
     const result = await createCreatorPreflight({
-      configStore: { read: async () => createDefaultCreatorServicesConfig() },
+      configStore: { read: async () => config },
       readCapabilities: () => createKrillinCreatorServicesCapabilities('win32', 'x64'),
       resourceRoot: join(root, 'runtime'),
       jobsRoot: join(root, 'jobs'),

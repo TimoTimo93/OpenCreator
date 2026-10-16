@@ -988,6 +988,8 @@ async function setupServer(options: {
   if (options.llmConfigured !== false) {
     config.llm.baseUrl = 'https://api.openai.com/v1';
     config.llm.apiKey = 'test-llm-key';
+  } else {
+    config.llm.apiKey = '';
   }
   server = await buildServer({
     token: 'secret',

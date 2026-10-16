@@ -1,4 +1,5 @@
 import type { CreatorServicesConfig } from '@opencreator/protocol';
+import { hasValidOpenAiApiKey } from '@opencreator/protocol';
 import {
   loadVolcengineEnvironment,
   type VolcengineEnvironment
@@ -47,10 +48,10 @@ export function applyVolcengineEnvironmentOverrides(
 
 function shouldPreferVolcengineTranscription(config: CreatorServicesConfig): boolean {
   return config.transcription.provider === 'openai'
-    && config.transcription.openai.apiKey.trim().length === 0;
+    && !hasValidOpenAiApiKey(config.transcription.openai.apiKey);
 }
 
 function shouldPreferVolcengineTts(config: CreatorServicesConfig): boolean {
   return config.tts.provider === 'openai'
-    && config.tts.openai.apiKey.trim().length === 0;
+    && !hasValidOpenAiApiKey(config.tts.openai.apiKey);
 }

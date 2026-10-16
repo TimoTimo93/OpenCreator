@@ -42,6 +42,7 @@ import { createCreatorStageScheduler } from '../creator/stage-scheduler.js';
 import { createCreatorCommandDispatcher } from '../creator/command-dispatcher.js';
 import type { CreatorExecutor } from '../creator/executor.js';
 import { createKrillinExecutor } from '../creator/krillin/adapter.js';
+import { probeDubbingTtsProvider } from '../creator/krillin/tts-probe.js';
 import { createKrillinDependencyLoader } from '../creator/krillin/dependency-loader.js';
 import { readKrillinRuntimeManifest, resolveInside } from '../creator/krillin/manifest.js';
 import {
@@ -913,7 +914,8 @@ export async function buildServer(input: BuildServerInput) {
         configStore: creatorServicesConfigStore,
         getYtDlpRuntime,
         verificationCachePath: krillinVerificationCachePath,
-        ensureRuntimeReady: () => ensureKrillinRuntimeReady()
+        ensureRuntimeReady: () => ensureKrillinRuntimeReady(),
+        ttsProbe: candidate => probeDubbingTtsProvider(krillinTtsService, candidate)
       }));
     }
     if (

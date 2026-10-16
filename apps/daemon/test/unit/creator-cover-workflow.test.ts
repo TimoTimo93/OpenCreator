@@ -40,6 +40,7 @@ describe('cover workflow', () => {
       sourceType: 'youtube',
       sourceUrl: 'https://www.youtube.com/watch?v=cover-test'
     });
+    fixture.config.llm.apiKey = '';
 
     await expect(fixture.workflow.validateStage(
       fixture.service.getJob(fixture.jobId)!,

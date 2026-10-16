@@ -123,10 +123,20 @@ export function isCreatorTranscriptionProvider(
   return creatorTranscriptionProviders.some(provider => provider === value);
 }
 
-export function hasValidOpenAiTranscriptionApiKey(apiKey: string | undefined): boolean {
+/**
+ * Khóa API của gateway cục bộ (9router) chỉ là giá trị mặc định, không phải
+ * thông tin đăng nhập thật. Các nhà cung cấp thật phải cấu hình khóa riêng.
+ */
+const placeholderGatewayApiKeys = new Set(['9router', '9router-local']);
+
+export function hasValidOpenAiApiKey(apiKey: string | undefined): boolean {
   if (typeof apiKey !== 'string') return false;
   const trimmed = apiKey.trim();
-  return trimmed.length > 0 && trimmed !== '9router';
+  return trimmed.length > 0 && !placeholderGatewayApiKeys.has(trimmed);
+}
+
+export function hasValidOpenAiTranscriptionApiKey(apiKey: string | undefined): boolean {
+  return hasValidOpenAiApiKey(apiKey);
 }
 
 export function resolveEffectiveTranscriptionProvider(

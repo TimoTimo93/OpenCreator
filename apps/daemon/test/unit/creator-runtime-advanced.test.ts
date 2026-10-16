@@ -65,7 +65,7 @@ describe('creator runtime advanced contracts', () => {
       id: 'krillinai', async run({ inputArtifacts, workdir }) {
         expect(inputArtifacts.some(artifact => artifact.kind.endsWith('_subtitle'))).toBe(false);
         const path = join(workdir, 'fixture');
-        writeFileSync(path, 'fixture');
+        writeFileSync(path, '1\n00:00:00,000 --> 00:00:01,000\nXin chào\n');
         return { outputs: ['source_video', 'source_subtitle', 'target_subtitle'].map(kind => ({ kind, path, status: 'completed' as const })) };
       }
     }] });

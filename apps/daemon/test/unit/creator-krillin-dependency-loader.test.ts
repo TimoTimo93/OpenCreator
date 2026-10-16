@@ -211,10 +211,10 @@ describe('KrillinAI on-demand dependency loader', () => {
 
     await Promise.all([ensure(), ensure()]);
     await ensure();
-    config.transcription.whisperCpp.model = 'medium';
+    config.transcription.whisperCpp.model = 'large-v2';
     await ensure();
 
-    expect(installs).toEqual(['tiny', 'medium']);
+    expect(installs).toEqual(['medium', 'large-v2']);
     expect(phases).toContain('download');
     expect(phases).toContain('cli');
     expect(phases).toContain('model');
