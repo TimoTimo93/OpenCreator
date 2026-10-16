@@ -29,7 +29,6 @@ export type RuntimeDependenciesController = {
   /** Checks the fork channel; with force it automatically downloads and applies a newer build. */
   checkHongguoUpdate?(force?: boolean): Promise<HongguoComponentStatus>;
   updateHongguo?(): Promise<HongguoComponentStatus>;
-  launchHongguo?(): Promise<HongguoComponentStatus>;
   /** Raw runtime dependency service (drama discovery + component ops). */
   service?: RuntimeDependencyService;
 };
@@ -287,29 +286,6 @@ export function useRuntimeDependencies(input: {
     }
   }, [input.connected, input.service, pageIssues.captureOperationFailure, pageIssues.resolveOperation, updateHongguo]);
 
-  const launchHongguo = useCallback(async (): Promise<HongguoComponentStatus> => {
-    if (!input.connected || input.service === null) {
-      throw new Error('runtime_dependency_unavailable');
-    }
-    setHongguoPhase('launching');
-    try {
-      const response = await input.service.launchHongguo();
-      setHongguoStatus(response.hongguo);
-      pageIssues.resolveOperation('runtime.launch-hongguo');
-      return response.hongguo;
-    } catch (caught) {
-      pageIssues.captureOperationFailure(
-        'runtime.launch-hongguo',
-        caught,
-        'Không mở được ứng dụng Hồng Quả. Vui lòng thử lại.',
-        { retryable: true }
-      );
-      throw caught;
-    } finally {
-      setHongguoPhase('idle');
-    }
-  }, [input.connected, input.service, pageIssues.captureOperationFailure, pageIssues.resolveOperation]);
-
   return {
     componentsStatus, componentError, refreshComponents, downloadComponents,
     ytDlpStatus,
@@ -322,7 +298,6 @@ export function useRuntimeDependencies(input: {
     updateYtDlp,
     checkHongguoUpdate,
     updateHongguo,
-    launchHongguo,
     service: input.service ?? undefined
   };
 }

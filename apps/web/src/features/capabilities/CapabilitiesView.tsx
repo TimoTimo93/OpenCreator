@@ -31,7 +31,7 @@ export function CapabilitiesView(props: CapabilitiesViewProps) {
         <p>{l(`${props.mcp?.servers.length ?? 0} 个 servers`, `${props.mcp?.servers.length ?? 0} servers`)}</p>
       </section>
       <section>
-        <h3>Profiles</h3>
+        <h3>{l('Profiles', 'Profiles')}</h3>
         <p>{l(`${props.profiles?.profiles.length ?? 0} 个 profiles`, `${props.profiles?.profiles.length ?? 0} profiles`)}</p>
       </section>
     </div>

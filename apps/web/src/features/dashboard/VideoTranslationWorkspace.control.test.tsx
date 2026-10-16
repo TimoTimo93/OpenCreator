@@ -1519,8 +1519,10 @@ describe('VideoTranslationWorkspace task controls', () => {
       </LanguageProvider>
     );
 
-    // Initial step is Step 0: 拖放视频到这里
-    expect(screen.getByRole('heading', { name: '拖放视频到这里' })).toBeInTheDocument();
+    // Initial step is Step 0: two explicit source choices, link input shown first
+    expect(screen.getByRole('tab', { name: '下载新视频' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: '打开本地已有视频' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByLabelText('视频链接')).toBeInTheDocument();
 
     // Enter a video URL
     const urlInput = screen.getByLabelText('视频链接');

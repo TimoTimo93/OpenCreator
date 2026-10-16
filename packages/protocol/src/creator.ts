@@ -569,14 +569,32 @@ export type HongguoDramaBatchResponse = {
   error?: string;
 };
 
+export type HongguoDramaTaskStatus =
+  | 'pending'
+  | 'downloading'
+  | 'completed'
+  | 'stopped'
+  | 'failed';
+
 export type HongguoDramaTask = {
   id?: string;
-  status?: string;
+  status?: HongguoDramaTaskStatus | string;
   progress?: number;
+  title?: string;
+  filename?: string;
   savePath?: string;
+  downloadQuality?: string;
+  receivedBytes?: number;
+  totalBytes?: number;
   error?: string;
   startTime?: number;
   endTime?: number;
+  videoInfo?: {
+    cover?: string;
+    title?: string;
+    author?: string;
+    aweme_id?: string;
+  };
   hongguoInfo?: {
     vid?: string;
     vid_index?: number;

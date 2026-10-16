@@ -35,13 +35,13 @@ export function DiagnosticsSettingsView(props: DiagnosticsSettingsViewProps) {
       <div className="diagnostics-overview">
         <section>
           <SquareTerminal aria-hidden="true" size={18} />
-          <span>Runtime</span>
+          <span>{l('运行时', 'Runtime')}</span>
           <strong>{props.connected ? l("已连接", "Connected") : l("等待连接", "Waiting for connection")}</strong>
           <small>{props.runtimeVersion ?? l("版本未知", "Unknown version")}</small>
         </section>
         <section>
           <HardDrive aria-hidden="true" size={18} />
-          <span>Codex Home</span>
+          <span>{l('Codex 主目录', 'Codex Home')}</span>
           <strong>{status?.codexHomeWritable ? l("可写", "writable") : status ? l("只读", "Read only") : l("等待连接", "Waiting for connection")}</strong>
           <small>{status?.codexHomeMode ?? l("未知模式", "Unknown mode")}</small>
         </section>
@@ -66,8 +66,8 @@ export function DiagnosticsSettingsView(props: DiagnosticsSettingsViewProps) {
       </section>
 
       <section className="diagnostics-block" aria-labelledby="diagnostics-capabilities-title">
-        <h2 id="diagnostics-capabilities-title">Capabilities</h2>
-        <pre>{stringify(status?.capabilities ?? {})}</pre>
+        <h2 id="diagnostics-capabilities-title">{l('功能', 'Capabilities')}</h2>
+        <pre>{stringify(status?.capabilities ?? {}, l)}</pre>
       </section>
 
       <section className="diagnostics-block" aria-labelledby="diagnostics-warnings-title">
@@ -91,11 +91,11 @@ export function DiagnosticsSettingsView(props: DiagnosticsSettingsViewProps) {
   );
 }
 
-function stringify(value: unknown): string {
+function stringify(value: unknown, l: LocalizeCopy): string {
   try {
     return JSON.stringify(value, null, 2) ?? String(value);
   } catch {
-    return '[无法序列化 Capabilities]';
+    return l('[无法序列化 Capabilities]', '[Unserializable Capabilities]');
   }
 }
 

@@ -90,6 +90,55 @@ describe('KrillinAI CLI runner', () => {
       .toBe('fixture-model');
   });
 
+  it('falls back to an installed model when the configured Whisper.cpp model is missing', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'creator-krillin-whispercpp-fallback-'));
+    const resourceRoot = join(tempDir, 'runtime');
+    const dependencyRoot = join(tempDir, 'dependencies');
+    const whisperCpp = join(dependencyRoot, 'bin', 'whispercpp');
+    const models = join(dependencyRoot, 'models');
+    const launcherRoot = join(tempDir, 'launcher');
+    mkdirSync(join(resourceRoot, 'bin'), { recursive: true });
+    mkdirSync(whisperCpp, { recursive: true });
+    mkdirSync(join(models, 'whispercpp'), { recursive: true });
+    mkdirSync(launcherRoot, { recursive: true });
+    writeFileSync(join(whisperCpp, 'whisper-cli.exe'), 'fixture-whispercpp');
+    // Only `tiny` is installed, but the user configured `medium`.
+    writeFileSync(join(models, 'whispercpp', 'ggml-tiny.bin'), 'fixture-model');
+
+    await prepareCliResourceRoot({
+      resourceRoot,
+      dependencyRoot,
+      launcherRoot,
+      onDemandTranscriptionProvider: 'whisper.cpp',
+      onDemandTranscriptionModel: 'medium'
+    });
+
+    expect(readFileSync(join(launcherRoot, 'models', 'whispercpp', 'ggml-large-v2.bin'), 'utf8'))
+      .toBe('fixture-model');
+  });
+
+  it('reports a clear error when no Whisper.cpp model is installed', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'creator-krillin-whispercpp-missing-'));
+    const resourceRoot = join(tempDir, 'runtime');
+    const dependencyRoot = join(tempDir, 'dependencies');
+    const whisperCpp = join(dependencyRoot, 'bin', 'whispercpp');
+    const models = join(dependencyRoot, 'models');
+    const launcherRoot = join(tempDir, 'launcher');
+    mkdirSync(join(resourceRoot, 'bin'), { recursive: true });
+    mkdirSync(whisperCpp, { recursive: true });
+    mkdirSync(join(models, 'whispercpp'), { recursive: true });
+    mkdirSync(launcherRoot, { recursive: true });
+    writeFileSync(join(whisperCpp, 'whisper-cli.exe'), 'fixture-whispercpp');
+
+    await expect(prepareCliResourceRoot({
+      resourceRoot,
+      dependencyRoot,
+      launcherRoot,
+      onDemandTranscriptionProvider: 'whisper.cpp',
+      onDemandTranscriptionModel: 'medium'
+    })).rejects.toMatchObject({ code: 'dependency_not_packaged' });
+  });
+
   it('passes the configured OSS region and endpoint through to the runtime TOML', () => {
     const config = createDefaultCreatorServicesConfig();
     config.transcription.aliyun.oss.region = 'ap-southeast-1';

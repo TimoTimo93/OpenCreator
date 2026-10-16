@@ -87,7 +87,7 @@ export default function CreatorResizableLayout(props: {
     >
       <div className="creator-mobile-tabs" role="tablist" aria-label={l('创作视图', 'Creator views')}>
         <button type="button" role="tab" aria-selected={mobilePane === 'workspace'} onClick={() => setMobilePane('workspace')}>{l('创作', 'Workspace')}</button>
-        <button type="button" role="tab" aria-selected={mobilePane === 'agent'} onClick={() => setMobilePane('agent')}>Agent</button>
+        <button type="button" role="tab" aria-selected={mobilePane === 'agent'} onClick={() => setMobilePane('agent')}>{l('智能体', 'Agent')}</button>
       </div>
       {props.workspace}
       <div

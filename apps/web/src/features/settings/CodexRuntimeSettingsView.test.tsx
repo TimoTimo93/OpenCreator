@@ -12,9 +12,9 @@ describe('CodexRuntimeSettingsView', () => {
       </LanguageProvider>
     );
 
-    expect(await screen.findByLabelText('Base URL')).toHaveValue('https://api.example.test/v1');
-    expect(screen.getByLabelText('Model')).toHaveValue('gpt-test');
-    expect(screen.getByLabelText('API Key')).toBeInTheDocument();
+    expect(await screen.findByLabelText('基础 URL')).toHaveValue('https://api.example.test/v1');
+    expect(screen.getByLabelText('模型')).toHaveValue('gpt-test');
+    expect(screen.getByLabelText('API 密钥')).toBeInTheDocument();
     expect(screen.getByText('API Key 已配置')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument();
 
@@ -39,13 +39,13 @@ describe('CodexRuntimeSettingsView', () => {
       </LanguageProvider>
     );
 
-    fireEvent.change(await screen.findByLabelText('Base URL'), {
+    fireEvent.change(await screen.findByLabelText('基础 URL'), {
       target: { value: 'https://gateway.example.test/v1' }
     });
-    fireEvent.change(screen.getByLabelText('Model'), {
+    fireEvent.change(screen.getByLabelText('模型'), {
       target: { value: 'gpt-custom' }
     });
-    fireEvent.change(screen.getByLabelText('API Key'), {
+    fireEvent.change(screen.getByLabelText('API 密钥'), {
       target: { value: 'sk-secret' }
     });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -56,7 +56,7 @@ describe('CodexRuntimeSettingsView', () => {
       apiKey: 'sk-secret'
     }));
     expect(await screen.findByText('API Key 已配置')).toBeInTheDocument();
-    expect(screen.getByLabelText('API Key')).toHaveValue('');
+    expect(screen.getByLabelText('API 密钥')).toHaveValue('');
     expect(screen.getByRole('status')).toHaveTextContent('Codex Agent 配置已保存');
   });
 
@@ -68,7 +68,7 @@ describe('CodexRuntimeSettingsView', () => {
     );
 
     expect(screen.getByRole('status')).toHaveTextContent('无法读取 Codex Agent 配置');
-    expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('基础 URL')).not.toBeInTheDocument();
   });
 });
 

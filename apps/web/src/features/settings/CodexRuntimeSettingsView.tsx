@@ -151,9 +151,9 @@ export function CodexRuntimeSettingsView(props: {
           </header>
           <div className="settings-form-grid">
             <label className="settings-form-wide">
-              Base URL
+              {l('基础 URL', 'Base URL')}
               <input
-                aria-label="Base URL"
+                aria-label={l('基础 URL', 'Base URL')}
                 type="url"
                 value={baseUrl}
                 placeholder="https://api.openai.com/v1"
@@ -165,9 +165,9 @@ export function CodexRuntimeSettingsView(props: {
               )}</small>
             </label>
             <label>
-              Model
+              {l('模型', 'Model')}
               <input
-                aria-label="Model"
+                aria-label={l('模型', 'Model')}
                 required
                 type="text"
                 value={model}
@@ -176,9 +176,9 @@ export function CodexRuntimeSettingsView(props: {
               />
             </label>
             <label>
-              API Key
+              {l('API 密钥', 'API Key')}
               <input
-                aria-label="API Key"
+                aria-label={l('API 密钥', 'API Key')}
                 type="password"
                 value={apiKey}
                 autoComplete="new-password"

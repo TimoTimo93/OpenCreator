@@ -5,7 +5,6 @@ import {
   Download,
   Film,
   LoaderCircle,
-  Play,
   RefreshCw
 } from 'lucide-react';
 import type { RuntimeDependenciesController } from '../../app/use-runtime-dependencies.js';
@@ -88,7 +87,6 @@ export function RuntimeComponentsSettingsView(props: {
               'runtime.check-hongguo': async () => { await props.controller.checkHongguoUpdate?.(true); },
               'runtime.auto-check-hongguo': async () => { await props.controller.checkHongguoUpdate?.(false); },
               'runtime.update-hongguo': async () => { await props.controller.updateHongguo?.(); },
-              'runtime.launch-hongguo': async () => { await props.controller.launchHongguo?.(); }
             } }}
             onDismiss={props.controller.dismissIssue}
           />
@@ -222,7 +220,6 @@ export function RuntimeComponentsSettingsView(props: {
             'runtime.check-hongguo': async () => { await props.controller.checkHongguoUpdate?.(true); },
             'runtime.auto-check-hongguo': async () => { await props.controller.checkHongguoUpdate?.(false); },
             'runtime.update-hongguo': async () => { await props.controller.updateHongguo?.(); },
-            'runtime.launch-hongguo': async () => { await props.controller.launchHongguo?.(); }
           } }}
           onDismiss={props.controller.dismissIssue}
         />
@@ -263,15 +260,15 @@ function HongguoComponentCard(props: { controller: RuntimeDependenciesController
         : t('settings.runtimeComponents.checking')
     : status.error !== null
       ? t('settings.runtimeComponents.hongguoFailed')
-      : !status.channelConfigured
-        ? t('settings.runtimeComponents.hongguoNotConfigured')
-        : status.updateAvailable
-          ? t('settings.runtimeComponents.updateAvailable')
-          : !status.installed
+      : status.updateAvailable
+        ? t('settings.runtimeComponents.updateAvailable')
+        : !status.installed
+          ? status.channelConfigured
             ? t('settings.runtimeComponents.hongguoNotInstalled')
-            : status.running
-              ? t('settings.runtimeComponents.hongguoRunning')
-              : t('settings.runtimeComponents.hongguoReady');
+            : t('settings.runtimeComponents.hongguoNotConfigured')
+          : status.running
+            ? t('settings.runtimeComponents.hongguoRunning')
+            : t('settings.runtimeComponents.hongguoReady');
   const latestLabel = status.latestVersion === null
     ? t('settings.runtimeComponents.notChecked')
     : `v${status.latestVersion} · vi.${status.latestViRevision ?? 0}`;
@@ -364,24 +361,6 @@ function HongguoComponentCard(props: { controller: RuntimeDependenciesController
                   : t('settings.runtimeComponents.hongguoInstall', { version: latestLabel })}
             </button>
           ) : null}
-          {status.installed ? (
-            <button
-              className="settings-primary-button"
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                const launch = props.controller.launchHongguo;
-                if (launch !== undefined) void launch().catch(() => undefined);
-              }}
-            >
-              {phase === 'launching'
-                ? <LoaderCircle className="settings-spin" size={15} aria-hidden="true" />
-                : <Play size={15} aria-hidden="true" />}
-              {phase === 'launching'
-                ? t('settings.runtimeComponents.hongguoOpening')
-                : t('settings.runtimeComponents.hongguoOpen')}
-            </button>
-          ) : null}
         </div>
       </footer>
 
@@ -403,7 +382,7 @@ function HongguoComponentCard(props: { controller: RuntimeDependenciesController
         </dl>
       </details>
 
-      {!status.channelConfigured ? (
+      {!status.channelConfigured && !status.installed ? (
         <p className="settings-notice" role="status">{t('settings.runtimeComponents.hongguoChannelMissing')}</p>
       ) : null}
       {status.error !== null && !busy ? (

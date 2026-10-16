@@ -305,7 +305,7 @@ function ProjectEditForm(props: {
         <input value={name} onChange={event => setName(event.currentTarget.value)} />
       </label>
       <label>
-        <span>Profile</span>
+        <span>{l('配置文件', 'Profile')}</span>
         <input value={profile} onChange={event => setProfile(event.currentTarget.value)} />
       </label>
       <label>

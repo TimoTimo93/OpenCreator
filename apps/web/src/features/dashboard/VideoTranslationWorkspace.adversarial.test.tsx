@@ -46,8 +46,9 @@ describe('VideoTranslationWorkspace Adversarial & Empirical Stress Suite (Milest
       </LanguageProvider>
     );
 
-    // Initial step is Step 0: 添加视频
-    expect(screen.getByRole('heading', { name: '拖放视频到这里' })).toBeInTheDocument();
+    // Initial step is Step 0: two explicit source choices, link input shown first
+    expect(screen.getByRole('tab', { name: '下载新视频' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('视频链接')).toBeInTheDocument();
 
     // Input URL to advance through wizard
     fireEvent.change(screen.getByLabelText('视频链接'), {

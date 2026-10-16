@@ -13,6 +13,7 @@ import { useEffect } from 'react';
 import { LanguageProvider } from '../../i18n/LanguageProvider.js';
 import { CreatorSessionProvider, useOptionalCreatorSession } from './creator-session-store.js';
 import VideoDownloadWorkspace from './VideoDownloadWorkspace.js';
+import { peekPendingTranslationSource, takePendingTranslationSource } from './pending-translation-source.js';
 import type { RuntimeDependenciesController } from '../../app/use-runtime-dependencies.js';
 
 const createObjectURL = vi.fn();
@@ -859,6 +860,72 @@ describe('VideoDownloadWorkspace', () => {
     expect(screen.getByText(
       'yt-dlp 已更新到 2026.08.31.120000，任务已重新提交'
     )).toBeInTheDocument();
+  });
+
+  it('shows the Hongguo download queue tab with live task progress', async () => {
+    const getDramaDownloadTasks = vi.fn(async () => ({
+      tasks: [
+        {
+          id: 'task-1',
+          status: 'downloading',
+          progress: 42,
+          title: 'PHIM A - Tập 001',
+          downloadQuality: '720p',
+          receivedBytes: 1024,
+          totalBytes: 4096
+        }
+      ]
+    }));
+    const getDramaStatus = vi.fn(async () => ({
+      hongguo: { installed: true, downloadsRoot: 'D:\\downloads' },
+      drama: { ready: true, port: 1, installed: true, running: true, error: null }
+    }));
+    renderWorkspace(job(), {
+      applyAction: vi.fn(),
+      runtimeDependencies: {
+        service: { getDramaStatus, getDramaDownloadTasks } as never
+      }
+    });
+
+    fireEvent.click(await screen.findByRole('tab', { name: '下载队列' }));
+
+    expect(await screen.findByText('PHIM A - Tập 001')).toBeInTheDocument();
+    expect(await screen.findByText('42%')).toBeInTheDocument();
+    expect(getDramaDownloadTasks).toHaveBeenCalled();
+  });
+
+  it('offers to translate a completed Hongguo download from the queue', async () => {
+    takePendingTranslationSource();
+    const savePath = 'D:\\downloads\\PHIM B - Tập 002.mp4';
+    const getDramaDownloadTasks = vi.fn(async () => ({
+      tasks: [
+        {
+          id: 'task-done',
+          status: 'completed',
+          progress: 100,
+          title: 'PHIM B - Tập 002',
+          filename: 'PHIM B - Tập 002.mp4',
+          savePath
+        }
+      ]
+    }));
+    const getDramaStatus = vi.fn(async () => ({
+      hongguo: { installed: true, downloadsRoot: 'D:\\downloads' },
+      drama: { ready: true, port: 1, installed: true, running: true, error: null }
+    }));
+    renderWorkspace(job(), {
+      applyAction: vi.fn(),
+      runtimeDependencies: {
+        service: { getDramaStatus, getDramaDownloadTasks } as never
+      }
+    });
+
+    fireEvent.click(await screen.findByRole('tab', { name: '下载队列' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '加入视频翻译' }));
+
+    expect(peekPendingTranslationSource()).toEqual({ path: savePath, title: 'PHIM B - Tập 002' });
+    expect(window.location.hash).toBe('#/workbench?tool=video-translation');
   });
 });
 

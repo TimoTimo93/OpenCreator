@@ -5,21 +5,24 @@ import type {
   HongguoDramaItem,
   HongguoDramaSource,
   HongguoDramaStatusResponse,
-  HongguoDramaSeriesDetail
+  HongguoDramaSeriesDetail,
+  HongguoDramaTask
 } from '@opencreator/protocol';
 import {
   Download,
   Film,
+  Languages,
   LoaderCircle,
   Lock,
   RefreshCw,
   Search,
   X
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAppLanguage } from '../../i18n/LanguageProvider.js';
 import type { RuntimeDependenciesController } from '../../app/use-runtime-dependencies.js';
 import type { RuntimeDependencyService } from '../../services/runtime-dependency-service.js';
+import { setPendingTranslationSource } from './pending-translation-source.js';
 import './drama-panes.css';
 
 /**
@@ -573,6 +576,9 @@ export function DramaBrowsePane(props: DramaPaneProps) {
                     setGenre('');
                     setPage(1);
                     setSearchActive(false);
+                    // Sources such as Hà Mã / Tây Phạn do not report completion
+                    // status, so keep the filter from hiding every card.
+                    setCompletion('all');
                   }}
                 >
                   {sources.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -703,12 +709,12 @@ export function DramaBrowsePane(props: DramaPaneProps) {
           ))}
         </div>
 
-        {!searchActive && totalPages > 1 ? (
+        {!searchActive && (totalPages > 1 || hasMore) ? (
           <div className="drama-pager">
             <button type="button" className="drama-pager-btn" disabled={page <= 1 || loading} onClick={() => setPage(Math.max(1, page - 1))}>
               {t('dashboard.drama.prevPage')}
             </button>
-            <span className="drama-pager-info">{page} / {totalPages}</span>
+            <span className="drama-pager-info">{totalPages > 1 ? `${page} / ${totalPages}` : `${page}`}</span>
             <button
               type="button"
               className="drama-pager-btn"
@@ -727,6 +733,206 @@ export function DramaBrowsePane(props: DramaPaneProps) {
             {...(downloadsRoot === undefined ? {} : { downloadsRoot })}
             onClose={() => setDetailId(null)}
           />
+        ) : null}
+      </section>
+    </BackendGate>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Hàng đợi tải (tác vụ tải tập do Hồng Quả thực thi)
+// ---------------------------------------------------------------------------
+
+function formatBytes(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+  const rounded = unit === 0 ? String(Math.round(size)) : size.toFixed(size >= 100 ? 0 : 1);
+  return `${rounded} ${units[unit]}`;
+}
+
+function queueStatusKey(status: string | undefined): 'pending' | 'downloading' | 'completed' | 'failed' | 'stopped' {
+  switch (status) {
+    case 'downloading': return 'downloading';
+    case 'completed': return 'completed';
+    case 'failed': return 'failed';
+    case 'stopped': return 'stopped';
+    default: return 'pending';
+  }
+}
+
+export function DramaQueuePane(props: DramaPaneProps) {
+  const { t } = useAppLanguage();
+  const { service, phase, failure, downloadsRoot, probe } = useDramaBackend(props.runtimeDependencies);
+  const [tasks, setTasks] = useState<HongguoDramaTask[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async (showSpinner: boolean): Promise<void> => {
+    if (service === null) return;
+    if (showSpinner) setLoading(true);
+    try {
+      const response = await service.getDramaDownloadTasks();
+      setTasks(response.tasks ?? []);
+      setError('');
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      if (showSpinner) setLoading(false);
+    }
+  }, [service]);
+
+  useEffect(() => {
+    if (service === null) return;
+    void probe();
+  }, [probe]);
+
+  useEffect(() => {
+    if (phase === 'ready') void load(true);
+  }, [load, phase]);
+
+  // Còn tác vụ đang chạy: làm mới hàng đợi mỗi 2 giây (giống poll trạng thái tập).
+  const active = tasks.some(task => task.status === 'downloading' || task.status === 'pending');
+  useEffect(() => {
+    if (phase !== 'ready' || !active) return;
+    const timer = setInterval(() => { void load(false); }, 2000);
+    return () => clearInterval(timer);
+  }, [active, load, phase]);
+
+  const summary = useMemo(() => tasks.reduce(
+    (acc, task) => {
+      const key = queueStatusKey(task.status);
+      if (key === 'completed') acc.done += 1;
+      else if (key === 'failed' || key === 'stopped') acc.failed += 1;
+      else acc.active += 1;
+      return acc;
+    },
+    { active: 0, done: 0, failed: 0 }
+  ), [tasks]);
+
+  const statusLabel = useCallback((status: string | undefined): string => {
+    switch (queueStatusKey(status)) {
+      case 'downloading': return t('dashboard.drama.statusDownloading');
+      case 'completed': return t('dashboard.drama.statusCompleted');
+      case 'failed': return t('dashboard.drama.queueStatusFailed');
+      case 'stopped': return t('dashboard.drama.queueStatusStopped');
+      default: return t('dashboard.drama.statusPending');
+    }
+  }, [t]);
+
+  const openInTranslation = useCallback((task: HongguoDramaTask, title: string) => {
+    const path = task.savePath;
+    if (path === undefined || path === '') return;
+    setPendingTranslationSource({ path, title });
+    window.location.hash = '#/workbench?tool=video-translation';
+  }, []);
+
+  return (
+    <BackendGate phase={phase} failure={failure} onRetry={() => void probe()} {...(props.onOpenRuntimeComponents === undefined ? {} : { onOpenRuntimeComponents: props.onOpenRuntimeComponents })}>
+      <section className="drama-pane" aria-label={t('dashboard.drama.queueTitle')}>
+        <div className="drama-pane-head">
+          <div>
+            <h2>{t('dashboard.drama.queueTitle')}</h2>
+            <p className="drama-subtitle">{t('dashboard.drama.queueSubtitle')}</p>
+          </div>
+          <div className="drama-pane-actions">
+            <button type="button" className="drama-btn" disabled={loading} onClick={() => void load(true)}>
+              <RefreshCw size={14} aria-hidden="true" />
+              {t('dashboard.drama.refresh')}
+            </button>
+          </div>
+        </div>
+
+        {tasks.length > 0 ? (
+          <p className="drama-queue-summary" aria-live="polite">
+            {t('dashboard.drama.queueSummary', { total: tasks.length, active: summary.active, done: summary.done })}
+          </p>
+        ) : null}
+
+        {loading && tasks.length === 0 ? <DramaSpinner label={t('dashboard.drama.loading')} /> : null}
+
+        {!loading && error !== '' ? (
+          <DramaNotice
+            tone="error"
+            title={t('dashboard.drama.queueLoadFailed')}
+            hint={error}
+            actionLabel={t('dashboard.drama.retry')}
+            onAction={() => void load(true)}
+          />
+        ) : null}
+
+        {!loading && error === '' && tasks.length === 0 ? (
+          <DramaNotice
+            tone="info"
+            title={t('dashboard.drama.queueEmpty')}
+            hint={t('dashboard.drama.queueEmptyHint')}
+          />
+        ) : null}
+
+        {tasks.length > 0 ? (
+          <ul className="drama-queue-list">
+            {tasks.map((task, index) => {
+              const key = queueStatusKey(task.status);
+              const percent = Math.max(0, Math.min(100, Math.round(Number(task.progress) || 0)));
+              const cover = task.videoInfo?.cover ?? '';
+              const title = task.title ?? task.videoInfo?.title ?? task.filename ?? t('dashboard.drama.queueUntitled');
+              const size = task.receivedBytes !== undefined && task.totalBytes !== undefined && task.totalBytes > 0
+                ? `${formatBytes(task.receivedBytes)} / ${formatBytes(task.totalBytes)}`
+                : '';
+              const meta = [
+                task.downloadQuality !== undefined && task.downloadQuality !== ''
+                  ? t('dashboard.drama.queueQuality', { quality: task.downloadQuality })
+                  : undefined,
+                size
+              ].filter(Boolean).join(' · ');
+              return (
+                <li className="drama-queue-item" key={task.id ?? `${title}-${index}`}>
+                  <div className="drama-queue-cover">
+                    {cover !== ''
+                      ? <img src={cover} alt="" loading="lazy" />
+                      : <div className="drama-cover-ph"><Film size={16} aria-hidden="true" /></div>}
+                  </div>
+                  <div className="drama-queue-body">
+                    <p className="drama-queue-title" title={title}>{title}</p>
+                    {meta !== '' ? <p className="drama-queue-meta">{meta}</p> : null}
+                    <div
+                      className={`drama-queue-bar drama-queue-bar-${key}`}
+                      role="progressbar"
+                      aria-label={title}
+                      aria-valuenow={percent}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    >
+                      <span style={{ width: `${percent}%` }} />
+                    </div>
+                    {key === 'failed' && task.error !== undefined && task.error !== '' ? (
+                      <p className="drama-queue-error">{task.error}</p>
+                    ) : null}
+                    {key === 'completed' && task.savePath !== undefined && task.savePath !== '' ? (
+                      <button
+                        type="button"
+                        className="drama-btn drama-btn-sm drama-queue-translate"
+                        onClick={() => openInTranslation(task, title)}
+                      >
+                        <Languages size={14} aria-hidden="true" />
+                        {t('dashboard.drama.queueTranslate')}
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="drama-queue-side">
+                    <span className={`drama-queue-status drama-queue-status-${key}`}>{statusLabel(task.status)}</span>
+                    {key === 'downloading' || key === 'pending' ? <span className="drama-queue-percent">{percent}%</span> : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+
+        {downloadsRoot !== undefined ? (
+          <p className="drama-foot-note">{t('dashboard.drama.downloadsNote', { path: downloadsRoot })}</p>
         ) : null}
       </section>
     </BackendGate>

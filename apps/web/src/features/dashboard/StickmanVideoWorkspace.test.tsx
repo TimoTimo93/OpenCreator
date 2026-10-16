@@ -193,6 +193,7 @@ describe('StickmanVideoWorkspace', () => {
 
   it('prompts for TTS configuration instead of showing a default voice without credentials', async () => {
     const config = createDefaultCreatorServicesConfig();
+    config.tts.openai.apiKey = '';
     const creatorServicesService = {
       getConfig: vi.fn(async () => ({ config, configuredCredentials: [] })),
       getTtsVoices: vi.fn(),

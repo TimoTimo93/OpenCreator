@@ -121,17 +121,17 @@ export function McpSettingsView(props: {
     if (props.service === null) return;
     const removeConfirmed = action !== 'remove'
       || (props.confirmRemove?.(server) ?? await confirm({
-        title: '删除 MCP',
-        description: `确认删除“${server.name}”？相关连接将立即停用。`,
-        confirmLabel: '删除',
+        title: l('删除 MCP', 'Delete MCP'),
+        description: l(`确认删除“${server.name}”？相关连接将立即停用。`, `Confirm deleting "${server.name}"? The related connections will be disabled immediately.`),
+        confirmLabel: l('删除', 'Delete'),
         destructive: true
       }));
     if (!removeConfirmed) return;
     const confirmed = !data?.requiresWriteConfirmation
       || (props.confirmWrite?.() ?? (action === 'remove' ? true : await confirm({
-        title: '确认修改全局配置',
-        description: '此操作会修改全局 CODEX_HOME，并影响使用同一配置目录的其他会话。',
-        confirmLabel: '继续'
+        title: l('确认修改全局配置', 'Confirm changing global configuration'),
+        description: l('此操作会修改全局 CODEX_HOME，并影响使用同一配置目录的其他会话。', 'This operation modifies the global CODEX_HOME and affects other sessions that share the same configuration directory.'),
+        confirmLabel: l('继续', 'Continue')
       })));
     if (!confirmed) return;
 
@@ -148,11 +148,12 @@ export function McpSettingsView(props: {
       }
       pageIssues.resolveOperation(operationId);
     } catch (reason) {
-      pageIssues.captureOperationFailure(
-        operationId,
-        reason,
-        l(`MCP ${action === 'login' ? '登录' : action === 'logout' ? '退出' : '删除'}操作未完成，请检查诊断信息后重试。`, `The MCP ${action === 'login' ? '登录' : action === 'logout' ? '退出' : '删除'} operation is not completed. Please check the diagnostic information and try again.`)
-      );
+      const failureCopy: [string, string] = action === 'login'
+        ? ['MCP 登录操作未完成，请检查诊断信息后重试。', 'The MCP sign-in operation was not completed. Please check the diagnostics and try again.']
+        : action === 'logout'
+          ? ['MCP 退出操作未完成，请检查诊断信息后重试。', 'The MCP sign-out operation was not completed. Please check the diagnostics and try again.']
+          : ['MCP 删除操作未完成，请检查诊断信息后重试。', 'The MCP remove operation was not completed. Please check the diagnostics and try again.'];
+      pageIssues.captureOperationFailure(operationId, reason, l(...failureCopy));
     } finally {
       setBusyName(undefined);
     }
@@ -203,9 +204,9 @@ export function McpSettingsView(props: {
             if (props.service === null) return;
             const confirmed = !data?.requiresWriteConfirmation
               || (props.confirmWrite?.() ?? await confirm({
-                title: '确认修改全局配置',
-                description: '此操作会修改全局 CODEX_HOME，并影响使用同一配置目录的其他会话。',
-                confirmLabel: '继续'
+                title: l('确认修改全局配置', 'Confirm changing global configuration'),
+                description: l('此操作会修改全局 CODEX_HOME，并影响使用同一配置目录的其他会话。', 'This operation modifies the global CODEX_HOME and affects other sessions that share the same configuration directory.'),
+                confirmLabel: l('继续', 'Continue')
               }));
             if (!confirmed) return;
             try {
@@ -327,7 +328,7 @@ export function McpEditor(props: {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmedName = name.trim();
-    if (trimmedName.length === 0) return setFormError('请输入 MCP 名称');
+    if (trimmedName.length === 0) return setFormError(l('请输入 MCP 名称', 'Please enter the MCP name'));
     const env = Object.fromEntries(
       envEntries
         .map(entry => [entry.key.trim(), entry.value] as const)
@@ -335,7 +336,7 @@ export function McpEditor(props: {
     );
     let input: AddCodexMcpRequest;
     if (transport === 'stdio') {
-      if (command.trim().length === 0) return setFormError('请输入启动命令');
+      if (command.trim().length === 0) return setFormError(l('请输入启动命令', 'Please enter the start command'));
       input = {
         name: trimmedName,
         transport,
@@ -344,7 +345,7 @@ export function McpEditor(props: {
         ...(Object.keys(env).length > 0 ? { env } : {})
       };
     } else {
-      if (url.trim().length === 0) return setFormError('请输入 MCP URL');
+      if (url.trim().length === 0) return setFormError(l('请输入 MCP URL', 'Please enter the MCP URL'));
       input = {
         name: trimmedName,
         transport,

@@ -51,9 +51,6 @@ export function createRuntimeDependencyService(client: ClientLike) {
     updateHongguo(): Promise<HongguoComponentStatusResponse> {
       return client.post('/creator/hongguo/update') as Promise<HongguoComponentStatusResponse>;
     },
-    launchHongguo(): Promise<HongguoComponentStatusResponse> {
-      return client.post('/creator/hongguo/launch') as Promise<HongguoComponentStatusResponse>;
-    },
     // -------------------------------------------------------------------------
     // Drama discovery (Khám phá phim / Gợi ý hot) - proxied to the component's
     // loopback API; the daemon launches the component on the first call.

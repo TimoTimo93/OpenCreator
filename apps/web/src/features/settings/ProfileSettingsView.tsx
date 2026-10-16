@@ -132,9 +132,9 @@ export function ProfileSettingsView(props: {
   async function deleteProfile(profile: CodexProfileResponse) {
     if (props.service === null) return;
     const confirmed = props.confirmDelete?.(profile) ?? await confirm({
-      title: '删除 Profile',
-      description: `确认删除“${profile.name}”？删除后无法恢复。`,
-      confirmLabel: '删除',
+      title: l('删除 Profile', 'Delete Profile'),
+      description: l(`确认删除“${profile.name}”？删除后无法恢复。`, `Confirm deleting "${profile.name}"? This cannot be undone.`),
+      confirmLabel: l('删除', 'Delete'),
       destructive: true
     });
     if (!confirmed) return;
@@ -244,7 +244,7 @@ export function ProfileSettingsView(props: {
                     <h2>{profile.name}</h2>
                     <span data-status={profile.status}>{profile.status === 'valid' ? l("有效", "Valid") : l("无效", "Invalid")}</span>
                   </div>
-                  <p>{profileSummary(profile)}</p>
+                  <p>{profileSummary(profile, l)}</p>
                   {profile.diagnostics.map(diagnostic => (
                     <p className="settings-inline-warning" key={diagnostic}>{diagnostic}</p>
                   ))}
@@ -303,11 +303,11 @@ function ProfileEditor(props: {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (name.trim().length === 0) return setFormError('请输入 Profile 名称');
+    if (name.trim().length === 0) return setFormError(l('请输入 Profile 名称', 'Please enter the Profile name'));
     if (!/^[A-Za-z0-9_.-]+$/.test(name.trim())) {
-      return setFormError('Profile 名称只能包含字母、数字、下划线、点和短横线');
+      return setFormError(l('Profile 名称只能包含字母、数字、下划线、点和短横线', 'Profile names may only contain letters, numbers, underscores, dots, and hyphens'));
     }
-    const parsed = parseAdvancedConfig(advanced);
+    const parsed = parseAdvancedConfig(advanced, l);
     if (!parsed.ok) return setFormError(parsed.message);
     const config: CodexProfileConfig = { ...parsed.config };
     if (model.trim()) config.model = model.trim();
@@ -406,20 +406,20 @@ function advancedConfig(config: CodexProfileConfig | undefined): CodexProfileCon
   );
 }
 
-function parseAdvancedConfig(value: string):
+function parseAdvancedConfig(value: string, l: ReturnType<typeof useLocalizedCopy>):
   | { ok: true; config: CodexProfileConfig }
   | { ok: false; message: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value || '{}');
   } catch {
-    return { ok: false, message: '高级配置必须是有效 JSON' };
+    return { ok: false, message: l('高级配置必须是有效 JSON', 'Advanced configuration must be valid JSON') };
   }
-  if (!isPlainObject(parsed)) return { ok: false, message: '高级配置必须是 JSON 对象' };
+  if (!isPlainObject(parsed)) return { ok: false, message: l('高级配置必须是 JSON 对象', 'Advanced configuration must be a JSON object') };
   for (const [key, entry] of Object.entries(parsed)) {
-    if (knownKeys.has(key)) return { ok: false, message: `${key} 请使用上方专用字段配置` };
-    if (isSensitiveKey(key)) return { ok: false, message: `${key} 属于敏感配置，不能在 Web 页面中编辑` };
-    if (!isProfileValue(entry)) return { ok: false, message: `${key} 不是支持的 Profile 配置值` };
+    if (knownKeys.has(key)) return { ok: false, message: l(`${key} 请使用上方专用字段配置`, `${key} must be configured using the dedicated field above`) };
+    if (isSensitiveKey(key)) return { ok: false, message: l(`${key} 属于敏感配置，不能在 Web 页面中编辑`, `${key} is a sensitive setting and cannot be edited in the web page`) };
+    if (!isProfileValue(entry)) return { ok: false, message: l(`${key} 不是支持的 Profile 配置值`, `${key} is not a supported Profile configuration value`) };
   }
   return { ok: true, config: parsed as CodexProfileConfig };
 }
@@ -451,12 +451,12 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-function profileSummary(profile: CodexProfileResponse): string {
-  const model = readString(profile.config.model) || '默认模型';
-  const reasoning = readString(profile.config.model_reasoning_effort) || '默认推理';
-  const sandbox = readString(profile.config.sandbox_mode) || '默认 Sandbox';
+function profileSummary(profile: CodexProfileResponse, l: ReturnType<typeof useLocalizedCopy>): string {
+  const model = readString(profile.config.model) || l('默认模型', 'Default model');
+  const reasoning = readString(profile.config.model_reasoning_effort) || l('默认推理', 'Default reasoning');
+  const sandbox = readString(profile.config.sandbox_mode) || l('默认 Sandbox', 'Default Sandbox');
   const advancedCount = Object.keys(profile.config).filter(key => !knownKeys.has(key)).length;
-  return [model, reasoning, sandbox, advancedCount > 0 ? `${advancedCount} 项高级配置` : '']
+  return [model, reasoning, sandbox, advancedCount > 0 ? l(`${advancedCount} 项高级配置`, `${advancedCount} advanced settings`) : '']
     .filter(Boolean)
     .join(' · ');
 }

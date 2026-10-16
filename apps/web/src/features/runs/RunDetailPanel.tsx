@@ -68,7 +68,7 @@ export function RunDetailPanel(props: {
       <div className="run-detail-card">
         <header className="run-detail__header">
           <div>
-            <h2>Run {props.runId}</h2>
+            <h2>{l('运行', 'Run')} {props.runId}</h2>
             <p>{l("诊断文件由 daemon 脱敏后返回。", "The diagnostic file is desensitized and returned by the daemon.")}</p>
           </div>
           <button
@@ -133,7 +133,7 @@ export function RunDetailPanel(props: {
           )}
         </section>
         <section>
-          <h3>Diagnostics</h3>
+          <h3>{l('诊断', 'Diagnostics')}</h3>
           {diagnosticFiles.length === 0 ? (
             <p>{l("暂无诊断文件", "No diagnostic files yet")}</p>
           ) : (
@@ -146,7 +146,7 @@ export function RunDetailPanel(props: {
           )}
         </section>
         <section>
-          <h3>Warnings</h3>
+          <h3>{l('警告', 'Warnings')}</h3>
           {warnings.length === 0 ? (
             <p>{l("暂无诊断警告", "No diagnostic warnings yet")}</p>
           ) : (
@@ -162,20 +162,20 @@ export function RunDetailPanel(props: {
         </section>
         {codexStatusSnapshot ? (
           <section>
-            <h3>Codex Status</h3>
+            <h3>{l('Codex 状态', 'Codex Status')}</h3>
             <dl>
-              <dt>Version</dt>
+              <dt>{l('版本', 'Version')}</dt>
               <dd>{codexStatusSnapshot.codexVersion}</dd>
-              <dt>Binary</dt>
+              <dt>{l('二进制', 'Binary')}</dt>
               <dd>{codexStatusSnapshot.codexBin}</dd>
-              <dt>Home</dt>
+              <dt>{l('主目录', 'Home')}</dt>
               <dd>{codexStatusSnapshot.codexHome}</dd>
-              <dt>Home writable</dt>
+              <dt>{l('主目录可写', 'Home writable')}</dt>
               <dd>{String(codexStatusSnapshot.codexHomeWritable)}</dd>
-              <dt>Diagnostics</dt>
+              <dt>{l('诊断', 'Diagnostics')}</dt>
               <dd>
                 {codexDiagnostics.length === 0 ? (
-                  '暂无 Codex 诊断'
+                  l('暂无 Codex 诊断', 'No Codex diagnostics yet')
                 ) : (
                   <ul>
                     {codexDiagnostics.map((diagnostic) => (
@@ -184,7 +184,7 @@ export function RunDetailPanel(props: {
                   </ul>
                 )}
               </dd>
-              <dt>Capabilities</dt>
+              <dt>{l('功能', 'Capabilities')}</dt>
               <dd>
                 <pre>{stringifyDiagnosticValue(codexStatusSnapshot.capabilities)}</pre>
               </dd>

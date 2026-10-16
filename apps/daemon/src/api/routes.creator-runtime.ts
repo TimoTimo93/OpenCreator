@@ -74,15 +74,6 @@ export async function registerCreatorRuntimeRoutes(
     }
   });
 
-  server.post('/creator/hongguo/launch', async (_request, reply) => {
-    if (hongguo === undefined) return hongguoUnavailable(reply);
-    try {
-      return { hongguo: await hongguo.launch() };
-    } catch (error) {
-      return sendHongguoError(reply, error);
-    }
-  });
-
   server.get('/creator/components/status', async (_request, reply) => {
     if (local === undefined) return reply.code(503).send(apiError('creator_components_unavailable', 'Local components are unavailable'));
     const status = await local.loader.status(await local.readConfig());

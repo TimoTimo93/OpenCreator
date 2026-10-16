@@ -420,8 +420,8 @@ describe('CreatorServicesSettingsView', () => {
     expect(screen.getByRole('button', { name: '本地 Whisper' })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: '本地 Whisper' }));
     expect(screen.getByRole('combobox', { name: '语音识别服务' })).toHaveTextContent('Whisper.cpp');
-    expect(screen.getByText('tiny')).toBeInTheDocument();
-    expect(screen.getByText(/预计占用磁盘 74 MiB/)).toBeInTheDocument();
+    expect(screen.getByText('medium')).toBeInTheDocument();
+    expect(screen.getByText(/预计占用磁盘 1.43 GiB/)).toBeInTheDocument();
     expect(screen.queryByText('WhisperKit')).not.toBeInTheDocument();
     expect(screen.queryByText('FasterWhisper')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '保存配置' }));

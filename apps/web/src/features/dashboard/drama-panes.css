@@ -11,6 +11,15 @@
   align-self: flex-start;
 }
 
+/* Gộp tab nguồn và nút Formats/Works về cùng một hàng */
+.video-download-tab-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .video-source-tabs button {
   height: var(--control-compact-md, 32px);
   padding: 0 14px;
@@ -757,4 +766,142 @@
   box-shadow: var(--shadow-popover);
   cursor: pointer;
   z-index: 5;
+}
+
+/* ----- hàng đợi tải ----- */
+
+.drama-queue-summary {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.drama-queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drama-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+
+.drama-queue-cover {
+  flex: 0 0 auto;
+  width: 54px;
+  height: 72px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-3);
+}
+
+.drama-queue-cover img,
+.drama-queue-cover .drama-cover-ph {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.drama-queue-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.drama-queue-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drama-queue-meta {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.drama-queue-translate {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.drama-queue-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.drama-queue-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.drama-queue-bar-completed > span {
+  background: var(--status-connected);
+}
+
+.drama-queue-bar-failed > span {
+  background: var(--destructive);
+}
+
+.drama-queue-bar-stopped > span {
+  background: var(--subtle);
+}
+
+.drama-queue-error {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--destructive);
+}
+
+.drama-queue-side {
+  flex: 0 0 auto;
+  min-width: 78px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.drama-queue-status {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.drama-queue-status-downloading {
+  color: var(--accent);
+}
+
+.drama-queue-status-completed {
+  color: var(--status-connected);
+}
+
+.drama-queue-status-failed {
+  color: var(--destructive);
+}
+
+.drama-queue-percent {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }

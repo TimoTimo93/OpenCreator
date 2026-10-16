@@ -660,13 +660,26 @@ export async function prepareCliResourceRoot(input: {
     const sourceModels = join(dependencyModels, 'whispercpp');
     const mountedModels = join(input.launcherRoot, 'models', 'whispercpp');
     await mkdir(mountedModels, { recursive: true });
-    await linkDirectoryEntries(sourceModels, mountedModels);
-    if (model !== 'large-v2' && model !== 'large-v3-turbo') {
-      await linkFile(
-        join(sourceModels, `ggml-${model}.bin`),
-        join(mountedModels, 'ggml-large-v2.bin'),
-        true
+    if (!await isDirectory(sourceModels)) {
+      throw new CreatorExecutorError(
+        'dependency_not_packaged',
+        'Whisper.cpp model directory is missing. Install a transcription model in Settings and retry.'
       );
+    }
+    await linkDirectoryEntries(sourceModels, mountedModels);
+    // KrillinAI 2.1 still loads the legacy `ggml-large-v2.bin` name unless
+    // large-v3-turbo is selected. Source that name from whatever model file is
+    // actually installed so a configured model that failed to download (for
+    // example while offline) does not abort the stage with ENOENT.
+    if (model !== 'large-v3-turbo') {
+      const sourceModel = await resolveWhisperCppModelFile(sourceModels, model);
+      if (sourceModel === undefined) {
+        throw new CreatorExecutorError(
+          'dependency_not_packaged',
+          `Whisper.cpp ${model} model is not installed. Install a transcription model in Settings and retry.`
+        );
+      }
+      await linkFile(sourceModel, join(mountedModels, 'ggml-large-v2.bin'), true);
     }
   } else {
     await symlink(dependencyModels, join(input.launcherRoot, 'models'), type);
@@ -878,6 +891,36 @@ async function linkFile(
   } catch (error) {
     if (!isWindowsLinkFallbackError(error)) throw error;
     await copyFile(source, target);
+  }
+}
+
+async function resolveWhisperCppModelFile(
+  sourceModels: string,
+  model: 'tiny' | 'medium' | 'large-v2' | 'large-v3-turbo'
+): Promise<string | undefined> {
+  const preferred = join(sourceModels, `ggml-${model}.bin`);
+  if (await isFile(preferred)) return preferred;
+  // Fall back to any installed model, preferring larger (higher quality) files.
+  for (const candidate of ['large-v3-turbo', 'large-v2', 'medium', 'tiny'] as const) {
+    const path = join(sourceModels, `ggml-${candidate}.bin`);
+    if (await isFile(path)) return path;
+  }
+  return undefined;
+}
+
+async function isFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
   }
 }
 

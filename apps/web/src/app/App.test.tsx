@@ -118,15 +118,13 @@ describe('App', () => {
   });
 
   it.each(['browser', 'desktop'] as const)(
-    'guides unauthenticated users in the %s host and restores Agent input after configuration',
+    'enters the local-first workspace directly in the %s host without an Agent setup gate',
     async hostKind => {
-    const user = userEvent.setup();
     const hostBridge = createHostBridge();
     hostBridge.kind = hostKind;
     hostBridge.readConnectionConfig = async () => ({
       baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token'
     });
-    let authenticated = false;
     const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const projectResponse = handleDefaultProjectApiRequest(url, init);
@@ -138,60 +136,29 @@ describe('App', () => {
         account: null, bindingVersion: null, models: [], activationError: null
       });
       if (url.endsWith('/codex/readiness')) return jsonResponse({
-        state: authenticated ? 'ready' : 'degraded',
-        account: { status: authenticated ? 'ready' : 'not_authenticated', accountStatus: authenticated ? 'signed_in' : 'signed_out' },
+        state: 'degraded',
+        account: { status: 'not_authenticated', accountStatus: 'signed_out' },
         binary: { status: 'ready' }, protocol: { status: 'ready' }, models: { status: 'ready' }, diagnostics: []
       });
-      if (url.endsWith('/codex/provider') && init?.method === 'PATCH') {
-        authenticated = true;
-        return jsonResponse({ baseUrl: 'https://api.openai.com/v1', model: 'gpt-test', apiKeyConfigured: true, authentication: 'api_key' });
-      }
-      if (url.endsWith('/codex/provider')) return jsonResponse({ baseUrl: authenticated ? 'https://api.openai.com/v1' : '', model: 'gpt-test', apiKeyConfigured: authenticated, authentication: authenticated ? 'api_key' : 'none' });
+      if (url.endsWith('/codex/provider')) return jsonResponse({ baseUrl: '', model: 'gpt-test', apiKeyConfigured: false, authentication: 'none' });
       if (url.includes('/threads?')) return jsonResponse({ threads: [] });
       throw new Error(`Unexpected request ${url}`);
     };
 
     render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
-    expect(await screen.findByRole('heading', { name: 'OpenCreator' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('OpenCreator 导航')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '稍后配置，进入本地模式' }));
-    expect(await screen.findByText('Agent 尚未配置，暂时无法发送任务。')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '配置 Agent' }));
-    await user.click(screen.getByRole('button', { name: '本地模式' }));
-    expect(await screen.findByRole('combobox', { name: '供应商' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '使用 ChatGPT 登录' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '稍后配置，进入本地模式' }));
-    await user.click(screen.getByRole('button', { name: '设置' }));
-    await user.click(await screen.findByRole('button', { name: /AI 服务/ }, { timeout: 4_000 }));
-    await user.click(await screen.findByRole('button', { name: '配置 Agent' }));
-    await user.click(screen.getByRole('button', { name: '本地模式' }));
-    await user.selectOptions(await screen.findByRole('combobox', { name: '供应商' }), 'openai');
-    expect(screen.getByLabelText('模型名称')).toHaveValue('gpt-5.6-sol');
-    await user.type(screen.getByLabelText('API Key'), 'secret');
-    await user.click(screen.getByRole('button', { name: '保存并开始使用' }));
-    await waitFor(() => {
-      expect(screen.queryByRole('heading', { name: 'OpenCreator' })).not.toBeInTheDocument();
-      expect(window.location.hash).toBe('#/new');
-    });
-    expect(screen.queryByText('Agent 尚未配置，暂时无法发送任务。')).not.toBeInTheDocument();
-
-    cleanup();
-    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
-    await waitFor(() => {
-      expect(screen.queryByText('正在检查 Agent 配置…')).not.toBeInTheDocument();
-      expect(screen.getByLabelText('OpenCreator 导航')).toBeInTheDocument();
-    });
+    expect(await screen.findByLabelText('OpenCreator 导航')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'OpenCreator' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '稍后配置，进入本地模式' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Agent 尚未配置，暂时无法发送任务。')).not.toBeInTheDocument();
     }
   );
 
-  it.each(['ready', 'blocked', 'loading'] as const)('enters the application after gateway sign-in with %s activation and never asks for provider credentials', async activationState => {
+  it.each(['ready', 'blocked', 'loading'] as const)('enters the local-first workspace with %s gateway activation and never asks for provider credentials', async activationState => {
     window.localStorage.clear();
     writeCachedModelCatalog({ models: [{ ...createCodexModelListResponse().models[0]!, id: 'personal-model', model: 'personal-model', displayName: 'Personal cached model', isDefault: true }] });
-    const user = userEvent.setup();
     const hostBridge = createHostBridge();
     hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
-    let gateway: GatewayAccountState = { source: 'manual', authState: 'signed_out', activationState: 'inactive', account: null, bindingVersion: null, models: [], activationError: null };
+    const gateway: GatewayAccountState = { source: 'gateway', authState: 'signed_in', activationState, bindingVersion: activationState === 'ready' ? 'a:1' : null, account: { id: 'a', email: 'a@example.test', verified: true }, models: [{ id: 'gateway-text', modality: 'text', capabilities: ['responses'] }, { id: 'chat-only', modality: 'text', capabilities: ['chat'] }], activationError: null };
     const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const projectResponse = handleDefaultProjectApiRequest(url, init);
@@ -201,43 +168,22 @@ describe('App', () => {
       if (url.endsWith('/codex/readiness')) return jsonResponse({ state: 'degraded', account: { status: 'not_authenticated', accountStatus: 'signed_out' }, binary: { status: 'ready' }, protocol: { status: 'ready' }, models: { status: 'ready' }, diagnostics: [] });
       if (url.endsWith('/codex/provider')) return jsonResponse({ baseUrl: '', model: '', apiKeyConfigured: false, authentication: 'none' });
       if (url.endsWith('/gateway/account')) return jsonResponse(gateway);
-      if (url.endsWith('/gateway/auth/start') && init?.method === 'POST') {
-        gateway = { ...gateway, source: 'gateway', authState: 'signed_in', activationState, bindingVersion: activationState === 'ready' ? 'a:1' : null, account: { id: 'a', email: 'a@example.test', verified: true }, models: [{ id: 'gateway-text', modality: 'text', capabilities: ['responses'] }, { id: 'chat-only', modality: 'text', capabilities: ['chat'] }] };
-        return jsonResponse({ attemptId: 'a', authorizationUrl: 'https://gateway.example/device?attempt=a', expiresAt: '2026-10-05T01:00:00Z' });
-      }
       if (url.endsWith('/codex/models')) return jsonResponse({ models: gateway.models.map(model => ({ id: model.id, model: model.id, displayName: model.id, description: '', supportedReasoningEfforts: [], defaultReasoningEffort: null, inputModalities: ['text'], isDefault: true })) });
       if (url.includes('/threads?')) return jsonResponse({ threads: [] });
       throw new Error(`Unexpected request ${url}`);
     };
     render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch}/>);
-    await user.click(await screen.findByRole('button', { name: '登录模式' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '登录 OpenCreator' })).toBeEnabled());
+    expect(await screen.findByLabelText('OpenCreator 导航')).toBeInTheDocument();
     expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '登录 OpenCreator' }));
-    await waitFor(() => expect(screen.getByLabelText('OpenCreator 导航')).toBeInTheDocument());
-    expect(screen.queryByRole('region', { name: '开始使用 Agent' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'OpenCreator' })).not.toBeInTheDocument();
     expect(screen.queryByText('Agent 尚未配置，暂时无法发送任务。')).not.toBeInTheDocument();
-    if (activationState === 'ready') {
-      await waitFor(() => expect(screen.getByRole('textbox', { name: '输入任务' })).toBeEnabled());
-      await user.click(await screen.findByRole('button', { name: '选择模型 gateway-text' }));
-      expect(screen.queryByText('Personal cached model')).not.toBeInTheDocument();
-      expect(screen.queryByText('chat-only')).not.toBeInTheDocument();
-    }
-    if (activationState === 'blocked') {
-      expect(screen.getByText('已登录，模型服务暂不可用。')).toBeInTheDocument();
-      await user.click(within(screen.getByText('已登录，模型服务暂不可用。').parentElement!).getByRole('button', { name: '账户' }));
-      await waitFor(() => expect(window.location.hash).toBe('#/account'));
-    }
-    if (activationState === 'loading') {
-      expect(screen.getByText('已登录，正在连接模型服务…')).toBeInTheDocument();
-      expect(screen.getByRole('textbox', { name: '输入任务' })).toBeDisabled();
-    }
+    const composer = await screen.findByRole('textbox', { name: '输入任务' });
+    await waitFor(() => expect(composer).toHaveAttribute('placeholder', '请先添加项目'));
   });
 
-  it('asks to confirm an existing ChatGPT login on first run, then remembers that choice while it remains valid', async () => {
+  it('enters the local-first workspace with or without a signed-in local Codex', async () => {
     window.localStorage.clear();
-    const user = userEvent.setup();
     let signedIn = true;
     const hostBridge = createHostBridge();
     hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
@@ -260,23 +206,16 @@ describe('App', () => {
     };
 
     render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
-    await user.click(await screen.findByRole('button', { name: '本地模式' }));
-    expect(await screen.findByText('已找到本机 Codex')).toBeInTheDocument();
-    expect(screen.queryByLabelText('OpenCreator 导航')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '使用本机 Codex，继续' }));
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'OpenCreator' })).not.toBeInTheDocument());
-
-    cleanup();
-    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
-    await waitFor(() => expect(screen.getByLabelText('OpenCreator 导航')).toBeInTheDocument());
+    expect(await screen.findByLabelText('OpenCreator 导航')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'OpenCreator' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '本地模式' })).not.toBeInTheDocument();
 
     cleanup();
     signedIn = false;
     render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
-    expect(await screen.findByRole('heading', { name: 'OpenCreator' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '本地模式' }));
-    expect(screen.getByRole('combobox', { name: '供应商' })).toBeInTheDocument();
+    expect(await screen.findByLabelText('OpenCreator 导航')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'OpenCreator' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '本地模式' })).not.toBeInTheDocument();
   });
 
   it('maps valid skills and configured MCP servers into Composer commands', () => {
@@ -1515,6 +1454,7 @@ describe('App', () => {
       type: 'video/webm',
       lastModified: 123
     });
+    await user.click(screen.getByRole('tab', { name: 'Open an existing video file' }));
     await user.upload(screen.getByLabelText('Upload a local video'), file);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.click(screen.getByRole('button', { name: 'Continue' }));

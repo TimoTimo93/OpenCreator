@@ -53,6 +53,8 @@ import {
   createCreatorArtifactObjectUrl,
   useOptionalCreatorSession
 } from './creator-session-store.js';
+import { fileFromLocalPath } from './local-media-file.js';
+import { takePendingTranslationSource } from './pending-translation-source.js';
 import {
   readCreatorResultSnapshots,
   parseBilibiliVideoSource,
@@ -1691,6 +1693,7 @@ export default function VideoTranslationWorkspace(props: {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [agentFocus, setAgentFocus] = useState<AgentFocus>();
   const cancelConfirmRef = useRef<HTMLButtonElement>(null);
+  const localSourceRef = useRef<{ path: string; status: 'loading' | 'loaded' | 'failed' }>();
   const parsedVideoSource = useMemo(() => parseVideoSource(videoUrl), [videoUrl]);
   const currentUrlMetadata = sourceType === 'url' && urlMetadata?.url === videoUrl ? urlMetadata.value : undefined;
   const sourceSelectionReady = sourceType !== 'url' || (parsedVideoSource.kind !== 'invalid'
@@ -1738,15 +1741,17 @@ export default function VideoTranslationWorkspace(props: {
     if (creatorSession === null) return;
     skipPersistRef.current = true;
     const persisted = creatorSession.state;
-    if (persisted.sourceType === 'url' || persisted.sourceType === 'file') setSourceType(persisted.sourceType);
-    if (typeof persisted.sourceUrl === 'string') setVideoUrl(persisted.sourceUrl);
-    setVideoFileName(typeof persisted.sourceFileName === 'string' ? persisted.sourceFileName : null);
-    setVideoFileSize(typeof persisted.sourceFileSize === 'number' ? persisted.sourceFileSize : null);
-    setVideoFileLastModified(
-      typeof persisted.sourceFileLastModified === 'number'
-        ? persisted.sourceFileLastModified
-        : null
-    );
+    if (localSourceRef.current === undefined) {
+      if (persisted.sourceType === 'url' || persisted.sourceType === 'file') setSourceType(persisted.sourceType);
+      if (typeof persisted.sourceUrl === 'string') setVideoUrl(persisted.sourceUrl);
+      setVideoFileName(typeof persisted.sourceFileName === 'string' ? persisted.sourceFileName : null);
+      setVideoFileSize(typeof persisted.sourceFileSize === 'number' ? persisted.sourceFileSize : null);
+      setVideoFileLastModified(
+        typeof persisted.sourceFileLastModified === 'number'
+          ? persisted.sourceFileLastModified
+          : null
+      );
+    }
     if (typeof persisted.sourceLanguage === 'string') setSourceLanguage(persisted.sourceLanguage);
     if (typeof persisted.targetLanguage === 'string') setTargetLanguage(persisted.targetLanguage);
     if (typeof persisted.bilingual === 'boolean') setBilingual(persisted.bilingual);
@@ -1842,6 +1847,36 @@ export default function VideoTranslationWorkspace(props: {
         ? 'result' : 'configure');
     }
   }, [creatorSession?.job.id, creatorSession?.job.revision]);
+
+  // Consume a video handed over by the download queue: read it from disk through
+  // the desktop shell and use it as the translation source.
+  useEffect(() => {
+    const pending = takePendingTranslationSource();
+    if (pending === undefined) return;
+    if (localSourceRef.current !== undefined) return;
+    localSourceRef.current = { path: pending.path, status: 'loading' };
+    let cancelled = false;
+    void (async () => {
+      try {
+        const file = await fileFromLocalPath(pending.path);
+        if (cancelled) return;
+        localSourceRef.current = { path: pending.path, status: 'loaded' };
+        chooseVideo(file);
+        setCurrentStep(0);
+        setWorkspacePhase('configure');
+        setResultNotice('');
+      } catch {
+        if (cancelled) return;
+        localSourceRef.current = { path: pending.path, status: 'failed' };
+        setResultNotice(l(
+          '无法读取已下载的视频，请手动选择文件。',
+          'Could not read the downloaded video from disk. Choose the file manually.'
+        ));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!composeVideo) return;
@@ -3325,6 +3360,7 @@ export default function VideoTranslationWorkspace(props: {
             <>
             <VideoSourceInput
               showSupportedPlatforms
+              showSourceMode
               file={videoFile}
               registeredFile={registeredSourceFile}
               sourceType={sourceType}

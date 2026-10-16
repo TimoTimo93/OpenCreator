@@ -1,5 +1,5 @@
 import { open, stat } from 'node:fs/promises';
-import { extname, resolve, sep } from 'node:path';
+import { extname, isAbsolute, resolve, sep } from 'node:path';
 import { protocol } from 'electron';
 import { fetchDesktopRequest } from './desktop-network.js';
 import type { DaemonConnection } from '../shared/types.js';
@@ -62,6 +62,9 @@ export async function installProtocolHandler(input: {
         input.onTransportFailure
       );
     }
+    if (url.hostname === 'app' && url.pathname === '/__local-media') {
+      return await localMediaResponse(url);
+    }
     if (url.hostname === 'app') {
       return await staticResponse(input.webRoot, request, true);
     }
@@ -80,6 +83,39 @@ export async function installProtocolHandler(input: {
       runtimeSuspended = false;
     }
   };
+}
+
+const localMediaExtensions = new Set([
+  '.mp4', '.m4v', '.mov', '.webm', '.mkv', '.avi',
+  '.mp3', '.m4a', '.wav', '.aac', '.flac', '.ogg'
+]);
+
+/**
+ * Streams a local media file to the renderer so the Translate & Dub workspace can
+ * pull a video that was downloaded to disk (for example a finished drama episode
+ * from the download queue) without a native file picker. Only media extensions are
+ * allowed so the route cannot be abused to read arbitrary local files.
+ */
+export async function localMediaResponse(url: URL): Promise<Response> {
+  const path = url.searchParams.get('path') ?? '';
+  if (!isAbsolute(path) || !localMediaExtensions.has(extname(path).toLowerCase())) {
+    return new Response('Forbidden', { status: 403 });
+  }
+  let info: Awaited<ReturnType<typeof stat>>;
+  try {
+    info = await stat(path);
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
+  if (!info.isFile() || info.size === 0) return new Response('Not found', { status: 404 });
+  const headers = new Headers({
+    'Content-Type': contentType(path),
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Accept-Ranges': 'bytes',
+    'Content-Length': String(info.size)
+  });
+  return new Response(await fileRangeStream(path, 0, info.size - 1), { status: 200, headers });
 }
 
 async function proxyRuntimeRequest(
@@ -292,7 +328,7 @@ export async function staticResponse(
         "default-src 'self'",
         "script-src 'self'",
         "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data: blob: https://i.ytimg.com",
+        "img-src 'self' data: blob: https:",
         "font-src 'self' data:",
         "connect-src 'self' blob:",
         "worker-src 'self' blob:",
@@ -401,6 +437,17 @@ function contentType(path: string): string {
     case '.jpeg': return 'image/jpeg';
     case '.webp': return 'image/webp';
     case '.mp4': return 'video/mp4';
+    case '.m4v': return 'video/x-m4v';
+    case '.mov': return 'video/quicktime';
+    case '.webm': return 'video/webm';
+    case '.mkv': return 'video/x-matroska';
+    case '.avi': return 'video/x-msvideo';
+    case '.mp3': return 'audio/mpeg';
+    case '.m4a': return 'audio/mp4';
+    case '.wav': return 'audio/wav';
+    case '.aac': return 'audio/aac';
+    case '.flac': return 'audio/flac';
+    case '.ogg': return 'audio/ogg';
     case '.svg': return 'image/svg+xml';
     case '.woff': return 'font/woff';
     case '.woff2': return 'font/woff2';

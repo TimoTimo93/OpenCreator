@@ -6,6 +6,8 @@ import type { VideoMetadataService } from '../../services/video-metadata-service
 import VideoSourcePreview, { type SourcePlaybackPreview } from './VideoSourcePreview.js';
 import SupportedVideoSources from './SupportedVideoSources.js';
 
+type SourceMode = 'url' | 'file';
+
 export default function VideoSourceInput(props: {
   file: File | null;
   registeredFile?: { name: string; size: number; mime: string };
@@ -14,6 +16,12 @@ export default function VideoSourceInput(props: {
   hasSource: boolean;
   invalid?: boolean;
   showSupportedPlatforms?: boolean;
+  /**
+   * Renders an explicit two-choice source selector (download a new video vs.
+   * open an existing file) and shows a single input at a time. Enabled only on
+   * the Translate & Dub page so the other workspaces keep the combined input.
+   */
+  showSourceMode?: boolean;
   metadataService?: VideoMetadataService;
   metadata?: VideoMetadataResponse;
   previewEnabled?: boolean;
@@ -27,6 +35,7 @@ export default function VideoSourceInput(props: {
   const l = useLocalizedCopy();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [mode, setMode] = useState<SourceMode>('url');
 
   function openFilePicker() {
     if (!fileInputRef.current) return;
@@ -40,62 +49,95 @@ export default function VideoSourceInput(props: {
     props.onFileChange(event.dataTransfer.files[0] ?? null);
   }
 
+  const showDropzone = props.hasSource || props.showSourceMode !== true || mode === 'file';
+  const showUrlField = !props.hasSource && (props.showSourceMode !== true || mode === 'url');
+  const showSourceModes = props.showSourceMode === true && !props.hasSource;
+
   return (
     <section
       className="video-translation-step-panel video-translation-source-step"
       aria-label={props.hasSource ? l('视频预览', 'Video preview') : undefined}
-      aria-labelledby={props.hasSource ? undefined : 'add-video-title'}
+      aria-labelledby={!props.hasSource && showDropzone ? 'add-video-title' : undefined}
     >
-      <div
-        className={props.hasSource ? 'video-translation-preview-drop-target' : 'video-translation-dropzone'}
-        data-dragging={dragActive}
-        onDragEnter={event => { event.preventDefault(); setDragActive(true); }}
-        onDragOver={event => event.preventDefault()}
-        onDragLeave={event => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false);
-        }}
-        onDrop={dropVideo}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="video/*,audio/*"
-          onChange={event => props.onFileChange(event.target.files?.[0] ?? null)}
-          aria-label={l('上传本地视频', 'Upload a local video')}
-        />
-        {props.hasSource ? (
-          <VideoSourcePreview
-            file={props.file}
-            registeredFile={props.registeredFile}
-            sourceType={props.sourceType}
-            url={props.url}
-            metadataService={props.metadataService}
-            metadata={props.metadata}
-            previewEnabled={props.previewEnabled}
-            playbackPreview={props.playbackPreview}
-            onChooseFile={openFilePicker}
-            onClear={props.onClear}
-            onDimensions={props.onDimensions}
-            onMetadata={props.onMetadata}
+      {showSourceModes ? (
+        <div
+          className="video-translation-source-modes"
+          role="tablist"
+          aria-label={l('视频来源', 'Video source')}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'url'}
+            className={mode === 'url' ? 'is-active' : undefined}
+            onClick={() => setMode('url')}
+          >
+            <Link2 size={16} strokeWidth={1.7} aria-hidden="true" />
+            {l('下载新视频', 'Download a new video')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'file'}
+            className={mode === 'file' ? 'is-active' : undefined}
+            onClick={() => setMode('file')}
+          >
+            <UploadCloud size={16} strokeWidth={1.7} aria-hidden="true" />
+            {l('打开本地已有视频', 'Open an existing video file')}
+          </button>
+        </div>
+      ) : null}
+
+      {showDropzone ? (
+        <div
+          className={props.hasSource ? 'video-translation-preview-drop-target' : 'video-translation-dropzone'}
+          data-dragging={dragActive}
+          onDragEnter={event => { event.preventDefault(); setDragActive(true); }}
+          onDragOver={event => event.preventDefault()}
+          onDragLeave={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false);
+          }}
+          onDrop={dropVideo}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="video/*,audio/*"
+            onChange={event => props.onFileChange(event.target.files?.[0] ?? null)}
+            aria-label={l('上传本地视频', 'Upload a local video')}
           />
-        ) : (
-          <>
-            <span className="video-translation-dropzone-icon" aria-hidden="true">
-              <UploadCloud size={25} strokeWidth={1.6} />
-            </span>
-            <h2 id="add-video-title">{l('拖放视频到这里', 'Drop a video here')}</h2>
-            <p>{l('支持常见视频与音频格式', 'Supports common video and audio formats')}</p>
-            <button className="video-translation-browse" type="button" onClick={openFilePicker}>
-              {l('选择本地视频', 'Choose a local video')}
-            </button>
-          </>
-        )}
-      </div>
+          {props.hasSource ? (
+            <VideoSourcePreview
+              file={props.file}
+              registeredFile={props.registeredFile}
+              sourceType={props.sourceType}
+              url={props.url}
+              metadataService={props.metadataService}
+              metadata={props.metadata}
+              previewEnabled={props.previewEnabled}
+              playbackPreview={props.playbackPreview}
+              onChooseFile={openFilePicker}
+              onClear={props.onClear}
+              onDimensions={props.onDimensions}
+              onMetadata={props.onMetadata}
+            />
+          ) : (
+            <>
+              <span className="video-translation-dropzone-icon" aria-hidden="true">
+                <UploadCloud size={25} strokeWidth={1.6} />
+              </span>
+              <h2 id="add-video-title">{l('拖放视频到这里', 'Drop a video here')}</h2>
+              <p>{l('支持常见视频与音频格式', 'Supports common video and audio formats')}</p>
+              <button className="video-translation-browse" type="button" onClick={openFilePicker}>
+                {l('选择本地视频', 'Choose a local video')}
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
 
-      {!props.hasSource ? (
+      {showUrlField ? (
         <>
-          <div className="video-translation-or"><span>{l('或', 'or')}</span></div>
-
           <label className="video-translation-field video-translation-url-field">
             <span>{l('视频链接', 'Video link')}</span>
             <div>

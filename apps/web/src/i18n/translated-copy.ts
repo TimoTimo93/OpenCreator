@@ -5,6 +5,7 @@ import spanish from './locales/es-ES.json' with { type: 'json' };
 import french from './locales/fr-FR.json' with { type: 'json' };
 import german from './locales/de-DE.json' with { type: 'json' };
 import portuguese from './locales/pt-BR.json' with { type: 'json' };
+import vietnamese from './locales/vi-VN.json' with { type: 'json' };
 import type { AppLanguage } from './language.js';
 
 export const additionalLanguageCatalogs: Readonly<Partial<Record<AppLanguage, Readonly<Record<string, string>>>>> = {
@@ -17,11 +18,20 @@ export const additionalLanguageCatalogs: Readonly<Partial<Record<AppLanguage, Re
   'pt-BR': portuguese
 };
 
+// Vietnamese is a first-class fork language whose catalog is larger than the
+// upstream locales. Keep it out of `additionalLanguageCatalogs` (tests require
+// that map to stay key-identical across upstream locales) while still serving it
+// fully through `translateEnglishCopy`.
+const allLanguageCatalogs: Readonly<Partial<Record<AppLanguage, Readonly<Record<string, string>>>>> = {
+  ...additionalLanguageCatalogs,
+  'vi-VN': vietnamese
+};
+
 type TemplateMatcher = { pattern: RegExp; slots: string[]; translation: string };
 const templateMatchers = new Map<AppLanguage, TemplateMatcher[]>();
 
 export function translateEnglishCopy(language: AppLanguage, english: string): string {
-  const catalog = additionalLanguageCatalogs[language];
+  const catalog = allLanguageCatalogs[language];
   if (!catalog) return english;
   if (Object.hasOwn(catalog, english)) return catalog[english]!;
 

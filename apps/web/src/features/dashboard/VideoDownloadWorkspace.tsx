@@ -31,7 +31,7 @@ import { useAppLanguage } from '../../i18n/LanguageProvider.js';
 import NativeSelect from '../../components/forms/NativeSelect.js';
 import CreatorTaskSummary from './CreatorTaskSummary.js';
 import CreatorToolShell from './CreatorToolShell.js';
-import { DramaBrowsePane, DramaHotPane } from './DramaPanes.js';
+import { DramaBrowsePane, DramaHotPane, DramaQueuePane } from './DramaPanes.js';
 import SupportedVideoSources from './SupportedVideoSources.js';
 import VideoDownloadThumbnail from './VideoDownloadThumbnail.js';
 import {
@@ -74,8 +74,8 @@ export default function VideoDownloadWorkspace(props: {
     () => readString(session?.state.selectedOptionId) ?? ''
   );
   const [currentStep, setCurrentStep] = useState<DownloadStep>(0);
-  // Nguồn nội dung ở bước 0: liên kết / Khám phá phim / Gợi ý hot (thành phần Hồng Quả).
-  const [sourceTab, setSourceTab] = useState<'link' | 'browse' | 'hot'>('link');
+  // Nguồn nội dung ở bước 0: liên kết / Khám phá phim / Gợi ý hot / Hàng đợi tải (thành phần Hồng Quả).
+  const [sourceTab, setSourceTab] = useState<'link' | 'browse' | 'hot' | 'queue'>('link');
   const [resultTab, setResultTab] = useState<DownloadResultTab>('formats');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -723,7 +723,45 @@ export default function VideoDownloadWorkspace(props: {
       onBack={props.onBack}
     >
       <div className="creator-tool-stack">
-        {props.batch === undefined || sourceTab !== 'link' ? null : resultToolbar}
+        {props.batch !== undefined || currentStep === 0 ? (
+          <div className="video-download-tab-row">
+            <nav className="video-source-tabs" role="tablist" aria-label={t('dashboard.drama.tabs')}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={sourceTab === 'link'}
+                onClick={() => setSourceTab('link')}
+              >
+                {t('dashboard.drama.tabLink')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={sourceTab === 'browse'}
+                onClick={() => setSourceTab('browse')}
+              >
+                {t('dashboard.drama.title')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={sourceTab === 'hot'}
+                onClick={() => setSourceTab('hot')}
+              >
+                {t('dashboard.drama.hotTitle')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={sourceTab === 'queue'}
+                onClick={() => setSourceTab('queue')}
+              >
+                {t('dashboard.drama.tabQueue')}
+              </button>
+            </nav>
+            {props.batch === undefined || sourceTab !== 'link' ? null : resultToolbar}
+          </div>
+        ) : null}
         {props.batch === undefined || sourceTab !== 'link' ? null : props.batch.editor}
         {props.batch !== undefined && sourceTab === 'link' && resultTab === 'formats' && probe === undefined ? props.batch.sourceList : null}
         {props.batch === undefined ? <nav
@@ -756,35 +794,6 @@ export default function VideoDownloadWorkspace(props: {
           </ol>
         </nav> : null}
 
-
-        {props.batch !== undefined || currentStep === 0 ? (
-          <nav className="video-source-tabs" role="tablist" aria-label={t('dashboard.drama.tabs')}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sourceTab === 'link'}
-              onClick={() => setSourceTab('link')}
-            >
-              {t('dashboard.drama.tabLink')}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sourceTab === 'browse'}
-              onClick={() => setSourceTab('browse')}
-            >
-              {t('dashboard.drama.title')}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sourceTab === 'hot'}
-              onClick={() => setSourceTab('hot')}
-            >
-              {t('dashboard.drama.hotTitle')}
-            </button>
-          </nav>
-        ) : null}
 
         {currentStep === 0 && props.batch === undefined && sourceTab === 'link' ? (
           <section
@@ -836,6 +845,17 @@ export default function VideoDownloadWorkspace(props: {
         {(props.batch !== undefined || currentStep === 0) && sourceTab === 'hot' ? (
           <section className="creator-tool-panel">
             <DramaHotPane
+              runtimeDependencies={props.runtimeDependencies}
+              {...(props.onOpenRuntimeComponents === undefined
+                ? {}
+                : { onOpenRuntimeComponents: props.onOpenRuntimeComponents })}
+            />
+          </section>
+        ) : null}
+
+        {(props.batch !== undefined || currentStep === 0) && sourceTab === 'queue' ? (
+          <section className="creator-tool-panel">
+            <DramaQueuePane
               runtimeDependencies={props.runtimeDependencies}
               {...(props.onOpenRuntimeComponents === undefined
                 ? {}

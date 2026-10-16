@@ -4585,7 +4585,7 @@ export function AppController(props: AppControllerProps) {
   const conversationWorkspace = fileWorkspaceOpen ? (
     <section
       className="conversation-file-layout"
-      aria-label="会话和文件工作区"
+      aria-label={l('会话和文件工作区', 'Conversation and file workspace')}
       ref={conversationFileLayoutRef}
       style={conversationFileLayoutStyle}
     >
@@ -4593,7 +4593,7 @@ export function AppController(props: AppControllerProps) {
       <div
         className="pane-resize-handle conversation-file-resize-handle"
         role="separator"
-        aria-label="调整会话和文件区域宽度"
+        aria-label={l('调整会话和文件区域宽度', 'Resize conversation and file area')}
         aria-orientation="vertical"
         aria-valuenow={conversationPaneWidth}
         tabIndex={0}
@@ -5021,7 +5021,7 @@ export function AppController(props: AppControllerProps) {
       {projectDropActive ? (
         <div className="project-drop-overlay" role="status" aria-live="polite">
           <FolderInput aria-hidden="true" size={30} />
-          <strong>松开以添加项目文件夹</strong>
+          <strong>{l('松开以添加项目文件夹', 'Release to add the project folder')}</strong>
         </div>
       ) : null}
       {projectManagementOpen ? (
@@ -5083,7 +5083,7 @@ export function AppController(props: AppControllerProps) {
       return (
         <DetailPanel
           mode="run"
-          title="运行详情"
+          title={l('运行详情', 'Run details')}
           subtitle={state.selectedRunId}
           content={
             <RunDetailPanel
@@ -5102,7 +5102,7 @@ export function AppController(props: AppControllerProps) {
       return (
         <DetailPanel
           mode="change"
-          title="已编辑 docs/atoms.md"
+          title={l('已编辑 docs/atoms.md', 'Edited docs/atoms.md')}
           subtitle="+903 -0"
           content="docs/atoms.md"
           onClose={() => dispatch({ type: 'close_detail' })}

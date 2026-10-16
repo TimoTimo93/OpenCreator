@@ -921,7 +921,7 @@ function TranscriptionSettings(props: SettingsGroupProps & {
       {provider === 'funasr' ? (
         <OpenAiFields id="transcription-funasr" credential="transcription.funasr.apiKey" configuredCredentials={props.configuredCredentials} value={props.config.transcription.funasr} modelPlaceholder="sensevoice" onChange={value => props.update(config => { config.transcription.funasr = { ...value, timeoutMs: config.transcription.funasr.timeoutMs }; })} />
       ) : null}
-      {provider === 'funasr' ? <button type="button" className="secondary" onClick={() => { setFunasrTest('Testing…'); void props.service?.testTranscriptionConnection?.(props.config.transcription.funasr).then(result => setFunasrTest(`Connected · ${result.models.join(', ') || result.model}`)).catch(error => setFunasrTest(error instanceof Error ? error.message : 'Connection failed')); }}>Test connection</button> : null}
+      {provider === 'funasr' ? <button type="button" className="secondary" onClick={() => { setFunasrTest('Testing…'); void props.service?.testTranscriptionConnection?.(props.config.transcription.funasr).then(result => setFunasrTest(`Connected · ${result.models.join(', ') || result.model}`)).catch(error => setFunasrTest(error instanceof Error ? error.message : 'Connection failed')); }}>{l('测试连接', 'Test connection')}</button> : null}
       {funasrTest ? <p className="creator-services-inline-note" role="status">{funasrTest}</p> : null}
       {provider === 'volcengine' ? (
         <>
@@ -1098,7 +1098,7 @@ function TtsSettings(props: SettingsGroupProps) {
               />
             </label>
             <label className="creator-services-field">
-              <span>{l('Phiên bản mô hình', 'Model Version')}</span>
+              <span>{l('模型版本', 'Model version')}</span>
               <select
                 value={props.config.tts.vieneu?.model || 'v3turbo'}
                 onChange={e => props.update(config => {
