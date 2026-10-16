@@ -34,7 +34,7 @@ it('opens the website through a one-time account handoff without an app checkout
   expect(value.getCreditGrants).not.toHaveBeenCalled();
 });
 
-it.each([['账单与充值记录', 'account'], ['积分用量估算', 'usage'], ['FAQ', 'faq']])('opens %s at its website destination', async (label, destination) => {
+it.each([['账单与充值记录', 'account'], ['积分用量估算', 'usage'], ['常见问题', 'faq']])('opens %s at its website destination', async (label, destination) => {
   const value = service(); const open = vi.fn(); render(page(value, open));
   expect(await screen.findByText('413.937')).toBeInTheDocument();
   await userEvent.setup().click(screen.getByRole('button', { name: label }));

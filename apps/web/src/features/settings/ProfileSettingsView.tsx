@@ -162,7 +162,7 @@ export function ProfileSettingsView(props: {
     <section className="settings-section settings-management" aria-labelledby="settings-profiles-title">
       <header className="settings-management__header">
         <div>
-          <h1 id="settings-profiles-title">Profiles</h1>
+          <h1 id="settings-profiles-title">{l("配置档案", "Profiles")}</h1>
           <p>{l("维护会话和计划任务可复用的 Codex 配置。", "Maintain reusable Codex configuration for sessions and scheduled tasks.")}</p>
         </div>
         <button
@@ -368,8 +368,8 @@ function ProfileEditor(props: {
           </select>
         </label>
         <label>
-          <span>Sandbox</span>
-          <select aria-label="Sandbox" value={sandbox} onChange={event => setSandbox(event.target.value)}>
+          <span>{l("沙箱", "Sandbox")}</span>
+          <select aria-label={l("沙箱", "Sandbox")} value={sandbox} onChange={event => setSandbox(event.target.value)}>
             <option value="">{l("使用默认值", "Use default value")}</option>
             <option value="read-only">{l("只读", "Read only")}</option>
             <option value="workspace-write">{l("工作区可写", "Workspace write access")}</option>

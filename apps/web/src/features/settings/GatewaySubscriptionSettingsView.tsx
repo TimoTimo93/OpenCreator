@@ -185,7 +185,7 @@ export function GatewaySubscriptionSettingsView(props: {
     <nav className="account-credits__links" aria-label={l('账户与帮助', 'Account and help')}>
       <button type="button" disabled={!!opening || !plansURL} onClick={() => void openWeb('account')}><ReceiptText size={17}/><span>{l('账单与充值记录', 'Billing and recharge history')}</span><ExternalLink size={14}/></button>
       <button type="button" disabled={!!opening || !plansURL} onClick={() => void openWeb('usage')}><Sparkles size={17}/><span>{l('积分用量估算', 'Estimate credit usage')}</span><ExternalLink size={14}/></button>
-      <button type="button" disabled={!!opening || !plansURL} onClick={() => void openWeb('faq')}><HelpCircle size={17}/><span>FAQ</span><ExternalLink size={14}/></button>
+      <button type="button" disabled={!!opening || !plansURL} onClick={() => void openWeb('faq')}><HelpCircle size={17}/><span>{l('常见问题', 'FAQ')}</span><ExternalLink size={14}/></button>
       <a href="https://github.com/krillinai/OpenCreator/issues" target="_blank" rel="noreferrer" onClick={props.openExternal ? event => { event.preventDefault(); void Promise.resolve(props.openExternal!('https://github.com/krillinai/OpenCreator/issues')).catch(() => setWebError(true)); } : undefined}><MessageSquare size={17}/><span>{l('问题反馈', 'Report an issue')}</span><ExternalLink size={14}/></a>
     </nav>
   </section>;

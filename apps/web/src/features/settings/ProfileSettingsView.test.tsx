@@ -29,7 +29,7 @@ describe('ProfileSettingsView', () => {
     await user.type(screen.getByLabelText('Profile 名称'), 'review');
     await user.type(screen.getByLabelText('模型'), 'gpt-5.3-codex');
     await user.selectOptions(screen.getByLabelText('推理级别'), 'high');
-    await user.selectOptions(screen.getByLabelText('Sandbox'), 'workspace-write');
+    await user.selectOptions(screen.getByLabelText('沙箱'), 'workspace-write');
     await user.click(screen.getByRole('button', { name: '保存 Profile' }));
 
     expect(createProfile).toHaveBeenCalledWith({

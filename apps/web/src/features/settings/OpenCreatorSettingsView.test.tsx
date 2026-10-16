@@ -553,7 +553,7 @@ describe('OpenCreatorSettingsView', () => {
       .not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Profiles' }));
-    expect(screen.getByRole('heading', { name: 'Profiles' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '配置档案' })).toBeInTheDocument();
     expect(screen.getByText('本地服务连接后可以管理 Profile。')).toBeInTheDocument();
   });
 
