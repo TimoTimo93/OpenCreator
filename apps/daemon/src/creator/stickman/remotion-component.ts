@@ -29,7 +29,13 @@ export function createRemotionComponentManager(input: {
   root: string;
   releasePath: string;
   archivePath?: string;
-  developmentArchiveRoot?: string;
+  /**
+   * Thư mục chứa sẵn gói Remotion (ví dụ `resources/daemon/runtime` của bản đóng
+   * gói). Bản dựng cục bộ tạo descriptor theo gói của chính nó nên gói đi kèm luôn
+   * khớp mã băm, tránh phải tải lại và tránh lỗi SHA-256 khi bản phát hành thượng
+   * nguồn khác một chút.
+   */
+  archiveRoots?: string[];
   readProxy(): Promise<string>;
 }) {
   let release: RemotionComponentRelease | undefined;
@@ -113,7 +119,8 @@ export function createRemotionComponentManager(input: {
     await mkdir(staging, { recursive: true, mode: 0o700 });
     try {
       const archive = await configuredOrDownloadedFile({
-        configured: input.archivePath ?? (input.developmentArchiveRoot ? join(input.developmentArchiveRoot, value.fileName) : undefined), name: 'Remotion rendering component',
+        configured: input.archivePath ?? await firstExistingArchive(input.archiveRoots, value.fileName),
+        name: 'Remotion rendering component',
         url: value.archiveUrl, sha256: value.archiveSha256, path: join(staging, value.fileName),
         proxy: await input.readProxy(), signal,
         onProgress(update) {
@@ -224,6 +231,17 @@ export type RemotionComponentManager = ReturnType<typeof createRemotionComponent
 
 function canceled() { return Object.assign(new Error('Creator stage was canceled'), { code: 'creator_stage_canceled' }); }
 function numeric(value: CreatorJson | undefined) { return typeof value === 'number' && Number.isFinite(value) ? value : null; }
+
+async function firstExistingArchive(
+  roots: string[] | undefined,
+  fileName: string
+): Promise<string | undefined> {
+  for (const root of roots ?? []) {
+    const candidate = join(root, fileName);
+    if (await stat(candidate).then(info => info.isFile(), () => false)) return candidate;
+  }
+  return undefined;
+}
 
 async function runTar(args: string[], cwd: string, signal: AbortSignal): Promise<string> {
   return new Promise((resolvePromise, reject) => {

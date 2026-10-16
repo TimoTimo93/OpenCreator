@@ -18,7 +18,7 @@ afterEach(async () => {
 
 const hash = (contents: Buffer | string) => createHash('sha256').update(contents).digest('hex');
 
-async function fixture(options: { network?: boolean; link?: boolean; wrongPlatform?: boolean } = {}) {
+async function fixture(options: { network?: boolean; link?: boolean; wrongPlatform?: boolean; bundled?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'remotion-component-'));
   roots.push(root);
   const source = join(root, 'source');
@@ -60,7 +60,20 @@ async function fixture(options: { network?: boolean; link?: boolean; wrongPlatfo
     bytes: (await readFile(archive)).length, fileName: basename(archive) };
   await writeFile(releasePath, JSON.stringify(release));
   const cache = join(root, 'cache');
-  const manager = createRemotionComponentManager({ root: cache, releasePath, archivePath: options.network ? undefined : archive, readProxy: async () => '' });
+  let archiveRoots: string[] | undefined;
+  if (options.bundled) {
+    const bundledRoot = join(root, 'bundled');
+    await mkdir(bundledRoot, { recursive: true });
+    await writeFile(join(bundledRoot, basename(archive)), await readFile(archive));
+    archiveRoots = [join(root, 'missing'), bundledRoot];
+  }
+  const manager = createRemotionComponentManager({
+    root: cache,
+    releasePath,
+    archivePath: options.network || options.bundled ? undefined : archive,
+    ...(archiveRoots ? { archiveRoots } : {}),
+    readProxy: async () => ''
+  });
   managers.push(manager);
   return { root, source, archive, releasePath, release, cache, manager, requests: () => requests };
 }
@@ -71,6 +84,14 @@ describe('managed Remotion component', () => {
     expect(await test.manager.status()).toMatchObject({ id: 'remotion', available: true, state: 'not_installed', version: null, model: null, models: [] });
     expect(test.requests()).toBe(0);
     await expect(readFile(join(test.cache, test.release.manifestSha256, 'manifest.json'))).rejects.toThrow();
+  });
+
+  it('installs the archive bundled next to the descriptor without downloading', async () => {
+    const test = await fixture({ network: true, bundled: true });
+    const runtime = await test.manager.ensure({ signal: new AbortController().signal, reportProgress() {} });
+    expect(test.requests()).toBe(0);
+    expect(await readFile(join(runtime.root, 'bundle', 'index.html'), 'utf8')).toBe('<html></html>');
+    expect(await test.manager.status()).toMatchObject({ state: 'ready', version: '4.0.473' });
   });
 
   it('shares manual downloads and render tasks, preserves progress, and reuses verified resources', async () => {

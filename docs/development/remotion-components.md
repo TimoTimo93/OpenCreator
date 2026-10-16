@@ -24,6 +24,8 @@ Desktop 打包只嵌入兼容性描述和轻量资源。构建清单绑定完整
 
 正式 Release 必须将独立组件压缩包与安装器一起上传同一个版本的 GitHub Release；发布附件整理与校验流程包含 macOS arm64、macOS x64、Windows x64 的组件产物。未上传对应组件时，安装器的远端下载不能成功，不得仅发布安装器。
 
+自行构建（未上传对应 Release 附件）时，安装器会把本次构建的组件压缩包放在兼容性描述旁边（`resources/daemon/runtime/`）。Daemon 按“显式 `OPENCREATOR_REMOTION_COMPONENT_ARCHIVE` → 描述同级目录 → 开发目录”的顺序查找压缩包，找到后直接校验并使用，因此本地构建的 App 不必依赖远端附件，也不会因为附件与本地描述不一致而报 SHA-256 校验失败。
+
 macOS Developer ID 打包先独立签名组件中的所有 Mach-O，再生成资源哈希和下载压缩包。正式 Release 对组件执行独立公证。使用仅由 Electron Builder 临时导入的签名证书时，需要为组件准备可用的签名 keychain，或设置 `OPENCREATOR_REMOTION_SIGNING_IDENTITY`；无法独立签名时发布必须失败。
 
 ## 安装与更新

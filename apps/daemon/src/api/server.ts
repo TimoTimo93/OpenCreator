@@ -788,7 +788,15 @@ export async function buildServer(input: BuildServerInput) {
     root: stickmanRuntimeRoot,
     releasePath: remotionReleasePath,
     archivePath: process.env.OPENCREATOR_REMOTION_COMPONENT_ARCHIVE,
-    developmentArchiveRoot: !existsSync(packagedRemotionReleasePath) && process.env.OPENCREATOR_RUNTIME_CHANNEL === 'development' ? dirname(remotionReleasePath) : undefined,
+    archiveRoots: [
+      dirname(remotionReleasePath),
+      ...(
+        process.env.OPENCREATOR_RUNTIME_CHANNEL === 'development'
+        || !existsSync(packagedRemotionReleasePath)
+          ? [dirname(developmentRemotionReleasePath)]
+          : []
+      )
+    ],
     readProxy: async () => (await creatorServicesConfigStore.read()).proxy.trim()
   });
   const packagedStickmanAssetsRoot = process.env.OPENCREATOR_STICKMAN_ASSETS_ROOT

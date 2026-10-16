@@ -55,6 +55,10 @@ extraResources:
     to: daemon/runtime/stickman-assets
   - from: .pack/components/remotion-component.json
     to: daemon/runtime/remotion-component.json
+  - from: .pack/components
+    to: daemon/runtime
+    filter:
+      - "Remotion-*.tar.gz"
   - from: ../web/dist
     to: web
   - from: resources
