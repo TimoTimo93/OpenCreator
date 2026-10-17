@@ -32,6 +32,8 @@ const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1_000;
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
 const USER_AGENT = 'OpenCreator-Hongguo-Component/1';
+/** Số lần thử khởi động lại tiến trình thành phần khi API chưa phản hồi. */
+const API_LAUNCH_ATTEMPTS = 3;
 
 const manifestSchema = z.object({
   version: z.string().regex(/^\d+(\.\d+){1,3}/, 'version must be numeric'),
@@ -119,7 +121,8 @@ export type HongguoComponentManager = {
   status(): HongguoComponentStatus;
   check(input: { force: boolean }): Promise<HongguoComponentStatus>;
   update(): Promise<HongguoComponentStatus>;
-  launch(): Promise<HongguoComponentStatus>;
+  /** Starts the component GUI/API; `credential` reuses a port+token already chosen. */
+  launch(credential?: { port: number; token: string }): Promise<HongguoComponentStatus>;
   /** Health-checks the component's loopback API without spawning anything. */
   probeDramaApi(): Promise<HongguoDramaApiStatus>;
   /**
@@ -141,6 +144,9 @@ export async function createHongguoComponentManager(
   const channelFilePath = join(rootDir, 'channel.json');
   const dataRoot = join(rootDir, 'user-data');
   const downloadsRoot = join(rootDir, 'downloads');
+  // Thành phần ghi cổng/token đang phục vụ thật vào file này (xem drama-api.js),
+  // để daemon dò lại được khi state.json lệch với tiến trình đang chạy.
+  const apiDescriptorPath = join(dataRoot, 'drama-api.json');
 
   const now = deps.now ?? (() => new Date());
   const isProcessAlive = deps.isProcessAlive ?? defaultIsProcessAlive;
@@ -469,7 +475,7 @@ export async function createHongguoComponentManager(
     }
   };
 
-  const launch = async (): Promise<HongguoComponentStatus> => {
+  const launch = async (credential?: { port: number; token: string }): Promise<HongguoComponentStatus> => {
     ensureIdle();
     const active = state.active;
     if (active === undefined) {
@@ -484,7 +490,7 @@ export async function createHongguoComponentManager(
       await mkdir(downloadsRoot, { recursive: true });
       // Cổng + token loopback: mọi tiến trình do OpenCreator mở đều phục vụ
       // drama API để màn hình Khám phá phim/Gợi ý hot đọc dữ liệu.
-      const api = await resolveApiPortAndToken();
+      const api = credential ?? await resolveApiPortAndToken();
       const proc = spawnProcess(exePath, {
         ...process.env,
         HONGGUO_USER_DATA_DIR: dataRoot,
@@ -507,6 +513,7 @@ export async function createHongguoComponentManager(
         fatalError = messageOf(error);
       });
       runningPid = proc.pid ?? null;
+      fatalError = null;
       return status();
     } catch (error) {
       fatalError = messageOf(error);
@@ -526,17 +533,30 @@ export async function createHongguoComponentManager(
   /**
    * Cổng + token được lưu trong state.json để daemon khởi động lại vẫn nói
    * chuyện được với tiến trình Hồng Quả đang chạy (token/ cổng không đổi).
+   *
+   * Thứ tự chọn: state.json đang phản hồi -> descriptor do thành phần ghi ra
+   * (tiến trình đang chạy có thể dùng cổng khác) -> cấp cổng loopback mới.
+   * `force` dùng khi cần chắc chắn một cổng mới (lần khởi động trước thoát ngay).
    */
-  const resolveApiPortAndToken = async (): Promise<{ port: number; token: string }> => {
+  const resolveApiPortAndToken = async (
+    options: { force?: boolean } = {}
+  ): Promise<{ port: number; token: string }> => {
     const existing = state.api;
     if (
-      existing !== undefined
-      && Number.isInteger(existing.port)
-      && existing.port > 0
-      && typeof existing.token === 'string'
-      && existing.token.length >= 8
+      options.force !== true
+      && existing !== undefined
+      && isApiCredential(existing)
+      && (apiReady || await probeApi(existing.port, existing.token, 800))
     ) {
       return existing;
+    }
+    if (options.force !== true) {
+      const discovered = await readApiDescriptor();
+      if (discovered !== null) {
+        state.api = discovered;
+        await persist().catch(() => undefined);
+        return discovered;
+      }
     }
     const api = { port: await findFreePort(), token: randomUUID() };
     state.api = api;
@@ -544,12 +564,47 @@ export async function createHongguoComponentManager(
     return api;
   };
 
+  /**
+   * Đọc descriptor của thành phần; chỉ nhận khi cổng đó thật sự phục vụ API
+   * loopback với đúng token (tiến trình cũ còn sót lại sẽ bị bỏ qua).
+   */
+  const readApiDescriptor = async (): Promise<{ port: number; token: string } | null> => {
+    let payload: unknown;
+    try {
+      payload = await readPrivateJsonFile(apiDescriptorPath);
+    } catch {
+      return null;
+    }
+    if (typeof payload !== 'object' || payload === null) return null;
+    const descriptor = payload as { port?: unknown; token?: unknown };
+    if (!isApiCredential(descriptor)) return null;
+    const candidate = { port: descriptor.port as number, token: descriptor.token as string };
+    return (await probeApi(candidate.port, candidate.token, 800)) ? candidate : null;
+  };
+
+  /** Dò cổng API không cần token (healthcheck công khai của thành phần). */
   const probeHealth = async (port: number, timeoutMs: number): Promise<boolean> => {
     try {
       const response = await implFetch()(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(timeoutMs) });
       if (!response.ok) return false;
       const payload = (await response.json()) as { ok?: unknown; name?: unknown };
       return payload?.ok === true && payload?.name === 'hongguo-drama-api';
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * Dò API kèm token: một tiến trình cũ còn sót có thể chiếm cổng nhưng trả 401
+   * với token hiện tại, khi đó phải coi như chưa sẵn sàng và cấp cổng mới.
+   */
+  const probeApi = async (port: number, token: string, timeoutMs: number): Promise<boolean> => {
+    try {
+      const response = await implFetch()(`http://127.0.0.1:${port}/api/v1/browse-categories`, {
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      return response.ok;
     } catch {
       return false;
     }
@@ -577,8 +632,8 @@ export async function createHongguoComponentManager(
   const ensureApi = async (timeoutMs: number): Promise<{ port: number; token: string }> => {
     if (ensureInFlight !== null) return ensureInFlight;
     const run = (async (): Promise<{ port: number; token: string }> => {
-      const api = await resolveApiPortAndToken();
-      if (await probeHealth(api.port, 800)) {
+      let api = await resolveApiPortAndToken();
+      if (await probeApi(api.port, api.token, 800)) {
         apiReady = true;
         apiLastError = null;
         return api;
@@ -591,20 +646,27 @@ export async function createHongguoComponentManager(
       if (phase !== 'idle') {
         throw new HongguoUpdateError('creator_hongguo_unavailable', 'Another Hongguo component operation is already running', 503);
       }
-      if (runningPid === null) await launch();
       const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        if (await probeHealth(api.port, 600)) {
-          apiReady = true;
-          apiLastError = null;
-          return api;
+      // Tối đa vài lượt: tiến trình có thể thoát ngay sau khi spawn (khoá
+      // single-instance của một bản Hồng Quả khác), khi đó cấp cổng mới rồi thử lại.
+      for (let attempt = 0; attempt < API_LAUNCH_ATTEMPTS; attempt += 1) {
+        if (runningPid === null) await launch(api);
+        while (Date.now() < deadline) {
+          if (await probeApi(api.port, api.token, 800)) {
+            apiReady = true;
+            apiLastError = null;
+            return api;
+          }
+          refreshRunning();
+          if (runningPid === null) break;
+          if (fatalError !== null) {
+            apiLastError = fatalError;
+            throw new HongguoUpdateError('creator_hongguo_launch_failed', fatalError, 502);
+          }
+          await delay(400);
         }
-        refreshRunning();
-        if (runningPid === null && fatalError !== null) {
-          apiLastError = fatalError;
-          throw new HongguoUpdateError('creator_hongguo_launch_failed', fatalError, 502);
-        }
-        await delay(400);
+        if (Date.now() >= deadline) break;
+        api = await resolveApiPortAndToken({ force: true });
       }
       apiReady = false;
       apiLastError = 'Ứng dụng Hồng Quả không phản hồi API. Nếu ứng dụng đang mở từ ngoài OpenCreator, hãy đóng nó và mở lại từ OpenCreator.';
@@ -656,6 +718,8 @@ export async function createHongguoComponentManager(
         );
       }
     } catch (error) {
+      // Lần gọi sau dò lại cổng/token: tiến trình thành phần có thể vừa thoát.
+      apiReady = false;
       if (error instanceof HongguoUpdateError) throw error;
       const message = error instanceof Error && error.name === 'AbortError'
         ? `Hongguo drama API request timed out after ${timeoutMs}ms`
@@ -682,6 +746,19 @@ function versionKey(version: string, viRevision: number): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Cổng/token hợp lệ để nói chuyện với drama API của thành phần. */
+function isApiCredential(value: unknown): value is { port: number; token: string } {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as { port?: unknown; token?: unknown };
+  return (
+    Number.isInteger(candidate.port)
+    && (candidate.port as number) > 0
+    && (candidate.port as number) < 65_536
+    && typeof candidate.token === 'string'
+    && candidate.token.length >= 8
+  );
 }
 
 /** Cổng loopback trống do OS cấp (dùng cho drama API của component). */

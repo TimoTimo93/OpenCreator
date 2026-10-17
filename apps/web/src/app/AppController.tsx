@@ -47,6 +47,7 @@ import {
   creatorWorkspaceForTemplate,
   type CreatorSkillLaunch
 } from '../features/dashboard/creator-workspace.js';
+import { prefetchDramaPanes } from '../features/dashboard/DramaPanes.js';
 import { ConversationHeader } from '../features/conversation/ConversationHeader.js';
 import { ApprovalPanel } from '../features/approvals/ApprovalPanel.js';
 import { useThreadHistory } from '../features/conversation/use-thread-history.js';
@@ -275,7 +276,6 @@ const StartupAgentSetup = lazy(async () => {
   const module = await import('../features/settings/StartupAgentSetup.js');
   return { default: module.StartupAgentSetup };
 });
-const PersonalCenterPage = lazy(() => import('../features/account/PersonalCenterPage.js'));
 const TaskCenterPage = lazy(() => import('../features/tasks/TaskCenterPage.js'));
 const DetailPanel = lazy(async () => {
   const module = await import('../features/details/DetailPanel.js');
@@ -522,9 +522,6 @@ export function AppController(props: AppControllerProps) {
   const settingsReturnRouteRef = useRef<AppRoute>(
     props.route.view === 'settings' ? { view: 'home' } : props.route
   );
-  const accountReturnRouteRef = useRef<AppRoute>(
-    props.route.view === 'account' || props.route.view === 'subscription' ? { view: 'home' } : props.route
-  );
   const skipNextHistoryLoadForThreadRef = useRef<string>();
   const skillMarketMutationInFlightRef = useRef(false);
   const skillMarketUseInFlightRef = useRef(false);
@@ -685,25 +682,13 @@ export function AppController(props: AppControllerProps) {
     service: runtimeDependencyService
   });
   // Tải trước dữ liệu Hồng Quả (Khám phá phim / Gợi ý hot) ngay khi app khởi
-  // động: lời gọi đầu tiên đánh thức thành phần, các trang sau đó mở ra là có
-  // sẵn danh sách thay vì phải chờ khởi động lại từ đầu.
+  // động: lời gọi đầu tiên đánh thức thành phần, kết quả được giữ trong bộ đệm
+  // cấp module nên trang tải video mở ra là có sẵn danh sách.
   useEffect(() => {
     if (connectionState.status !== 'connected' || runtimeDependencyService === null) return;
-    let canceled = false;
-    void (async () => {
-      try {
-        const status = await runtimeDependencyService.getDramaStatus();
-        if (canceled || status.hongguo?.installed !== true) return;
-        await Promise.allSettled([
-          runtimeDependencyService.getDramaCategories(),
-          runtimeDependencyService.getDramaMediaSources(),
-          runtimeDependencyService.browseDrama({ source: 'hongguo', category: 'real-drama', page: 1 })
-        ]);
-      } catch {
-        // Chưa cài thành phần hoặc mạng lỗi: trang tải video sẽ tự thử lại.
-      }
-    })();
-    return () => { canceled = true; };
+    void prefetchDramaPanes(runtimeDependencyService).catch(() => {
+      // Chưa cài thành phần hoặc mạng lỗi: trang tải video sẽ tự thử lại.
+    });
   }, [connectionState.status, runtimeDependencyService]);
   const memoryService = useMemo(
     () => runtimeClient === null ? null : createMemoryService(runtimeClient),
@@ -3016,12 +3001,19 @@ export function AppController(props: AppControllerProps) {
       case 'dashboard':
       case 'plugins':
       case 'settings':
-      case 'account':
-      case 'subscription':
         closeMobileSidebar();
         dispatch({
           type: 'set_active_view',
           activeView: route.view
+        });
+        return;
+      case 'account':
+      case 'subscription':
+        // Trang tài khoản đám mây đã bị bỏ — ứng dụng chạy cục bộ hoàn toàn.
+        closeMobileSidebar();
+        dispatch({
+          type: 'set_active_view',
+          activeView: 'dashboard'
         });
         return;
       case 'files':
@@ -3041,7 +3033,6 @@ export function AppController(props: AppControllerProps) {
   }
 
   function openPrimaryView(activeView: ActiveView) {
-    if ((activeView === 'account' || activeView === 'subscription') && props.route.view !== 'account' && props.route.view !== 'subscription') accountReturnRouteRef.current = props.route;
     closeMobileSidebar();
     if (activeView === 'files') {
       followedFileWorkspaceThreadIdRef.current = undefined;
@@ -4590,10 +4581,18 @@ export function AppController(props: AppControllerProps) {
               {gatewayAccountState?.source === 'gateway'
                 ? gatewayAccountState.authState === 'signed_in'
                   ? gatewayAccountState.activationState === 'loading' ? l('已登录，正在连接模型服务…', 'Signed in; connecting to model service…') : l('已登录，模型服务暂不可用。', 'Signed in; model service is unavailable.')
-                  : l('请登录 OpenCreator 后继续创作。', 'Sign in to OpenCreator to continue creating.')
+                  : l('请在“配置 API”中填写服务密钥后继续创作。', 'Add your service keys in Configure API to continue creating.')
                 : l('Agent 尚未配置，暂时无法发送任务。', 'Agent is not configured; you cannot send tasks yet.')}
-              <button type="button" onClick={() => gatewayAccountState?.source === 'gateway' ? openPrimaryView('account') : setAgentSetup('needed')}>
-                {gatewayAccountState?.source === 'gateway' ? l('账户', 'Account') : l('配置 Agent', 'Set up Agent')}
+              <button type="button" onClick={() => {
+                if (gatewayAccountState?.source === 'gateway') {
+                  settingsReturnRouteRef.current = props.route;
+                  dispatch({ type: 'open_settings' });
+                  navigateToRoute({ view: 'settings', tab: 'ai-services', section: 'text' });
+                  return;
+                }
+                setAgentSetup('needed');
+              }}>
+                {gatewayAccountState?.source === 'gateway' ? l('配置 API', 'Configure API') : l('配置 Agent', 'Set up Agent')}
               </button>
             </div>
           ) : null}
@@ -4638,8 +4637,7 @@ export function AppController(props: AppControllerProps) {
       />
     </section>
   ) : conversationPage;
-  const accountPageActive = state.activeView === 'account' || state.activeView === 'subscription';
-  const configurationPageActive = accountPageActive || (state.activeView === 'settings' && !agentSetupRequested);
+  const configurationPageActive = state.activeView === 'settings' && !agentSetupRequested;
   const main = props.capabilitiesView !== undefined ? (
     <CapabilitiesPage {...props.capabilitiesView} />
   ) : state.activeView === 'projects' ? (
@@ -4761,22 +4759,6 @@ export function AppController(props: AppControllerProps) {
         handleScheduleChanged(updated);
       }}
     />
-  ) : state.activeView === 'account' || state.activeView === 'subscription' ? (
-    <PersonalCenterPage
-      view={state.activeView}
-      service={gatewayAccountService}
-      accountState={gatewayAccountState}
-      billingOrderId={props.route.view === 'account' ? props.route.billingOrderId : undefined}
-      billingReturnUrl={hostBridge.billingReturnUrl}
-      prepareExternalNavigation={hostBridge.prepareExternalNavigation}
-      onStateChange={onGatewayStateChange}
-      openExternal={url => hostBridge.openExternal(url)}
-      onOpenModelSettings={() => navigateToRoute({ view: 'settings', tab: 'ai-services' })}
-      onBack={() => {
-        applyRouteFromLocation(accountReturnRouteRef.current);
-        navigateToRoute(accountReturnRouteRef.current);
-      }}
-    />
   ) : state.activeView === 'settings' ? (
     <SettingsPage
       runtimeStatus={runtimeStatus}
@@ -4840,7 +4822,6 @@ export function AppController(props: AppControllerProps) {
       gatewayAccountService={gatewayAccountService}
       gatewayAccountState={gatewayAccountState}
       onGatewayStateChange={onGatewayStateChange}
-      onOpenPersonalCenter={() => openPrimaryView('account')}
       openExternal={url => hostBridge.openExternal(url)}
       codexRuntimeService={connectionService}
       agentSetupNeeded={agentSetup === 'skipped' || agentSetup === 'needed'}
@@ -4948,8 +4929,6 @@ export function AppController(props: AppControllerProps) {
           currentProjectId={state.currentProjectId}
           selectedConversationId={state.selectedThreadId}
           activeView={state.activeView}
-          gatewayAccountState={gatewayAccountState}
-          loadAccountAvatar={gatewayAccountService?.getAvatar}
           homeActive={state.activeView === 'conversation' && props.route.view === 'home'}
           projectNavigationMode={props.projectNavigationMode}
           collapsed={effectiveSidebarCollapsed}
@@ -4987,6 +4966,15 @@ export function AppController(props: AppControllerProps) {
             settingsReturnRouteRef.current = props.route;
             dispatch({ type: 'open_settings' });
             navigateToRoute({ view: 'settings' });
+          }}
+          onOpenApiSettings={() => {
+            closeMobileSidebar();
+            settingsReturnRouteRef.current = props.route;
+            dispatch({ type: 'open_settings' });
+            navigateToRoute({ view: 'settings', tab: 'ai-services', section: 'text' });
+            // Trang cài đặt có thể đã mở sẵn ở đúng mục nên route không đổi:
+            // phát sự kiện để trang cuộn tới khối khoá API và nhấp nháy viền.
+            window.dispatchEvent(new Event('opencreator:open-api-configuration'));
           }}
           onToggleCollapsed={() => setSidebarCollapsed((currentValue) => !currentValue)}
         />
@@ -5284,11 +5272,17 @@ function createInitialState(
     case 'dashboard':
     case 'plugins':
     case 'settings':
-    case 'account':
-    case 'subscription':
       return {
         ...persistedState,
         activeView: route.view,
+        rightPanelMode: 'closed'
+      };
+    case 'account':
+    case 'subscription':
+      // Trang tài khoản đám mây đã bị bỏ — ứng dụng chạy cục bộ hoàn toàn.
+      return {
+        ...persistedState,
+        activeView: 'dashboard',
         rightPanelMode: 'closed'
       };
     case 'files':
@@ -5323,10 +5317,6 @@ function routeForActiveView(activeView: ActiveView, selectedThreadId?: string): 
       return { view: 'plugins' };
     case 'settings':
       return { view: 'settings' };
-    case 'account':
-      return { view: 'account' };
-    case 'subscription':
-      return { view: 'subscription' };
     case 'files':
       return {
         view: 'files',

@@ -47,11 +47,15 @@ type DramaFixture = {
   manager: HongguoComponentManager;
   spawnCalls: Array<{ exePath: string; env: NodeJS.ProcessEnv }>;
   apiCalls: ApiCall[];
+  probeCalls: ApiCall[];
   setApiUp: (value: boolean) => void;
   setApiStatus: (status: number) => void;
+  /** Cổng/token đang phục vụ thật (giống tiến trình thành phần đang chạy). */
+  serving: () => { port: number; token: string };
+  setServing: (value: { port: number; token: string }) => void;
 };
 
-async function createDramaFixture(): Promise<DramaFixture> {
+async function createDramaFixture(options: { exitFirstSpawn?: boolean } = {}): Promise<DramaFixture> {
   root = await mkdtemp(join(tmpdir(), 'creator-hongguo-drama-'));
   process.env.OPENCREATOR_HONGGUO_UPDATE_MANIFEST_URL = CHANNEL_URL;
   const manifest: Record<string, unknown> = {
@@ -63,22 +67,46 @@ async function createDramaFixture(): Promise<DramaFixture> {
     upstream: 'jackotom/hongguo-drama',
     launch: { exe: EXE_NAME }
   };
+  // Chỉ cổng của tiến trình thành phần đang chạy mới phản hồi; cổng khác coi như
+  // không có gì lắng nghe (giống máy thật khi state.json trỏ sai cổng).
   let apiUp = false;
   let apiStatus = 200;
+  let serving = { port: 0, token: '' };
   const apiCalls: ApiCall[] = [];
+  const probeCalls: ApiCall[] = [];
+  const headersOf = (init?: RequestInit): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    for (const [key, value] of Object.entries((init?.headers ?? {}) as Record<string, string>)) {
+      headers[key.toLowerCase()] = String(value);
+    }
+    return headers;
+  };
   const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url === CHANNEL_URL) return jsonResponse(manifest);
     if (url === ARTIFACT_URL) return new Response(ARTIFACT_BYTES, { status: 200 });
-    if (url.endsWith('/healthz')) {
-      if (!apiUp) return new Response('connection refused', { status: 502 });
+    const parsed = new URL(url);
+    if (!apiUp || Number(parsed.port) !== serving.port) {
+      return new Response('connection refused', { status: 502 });
+    }
+    if (parsed.pathname === '/healthz') {
       return jsonResponse({ ok: true, name: 'hongguo-drama-api', version: '1.73.0' });
     }
-    const headers: Record<string, string> = {};
-    for (const [key, value] of Object.entries((init?.headers ?? {}) as Record<string, string>)) {
-      headers[key.toLowerCase()] = value;
+    const headers = headersOf(init);
+    const call: ApiCall = {
+      url,
+      method: init?.method ?? 'GET',
+      headers,
+      body: typeof init?.body === 'string' ? init.body : undefined
+    };
+    // Endpoint dò token của daemon: không tính vào danh sách lời gọi nghiệp vụ.
+    if (parsed.pathname === '/api/v1/browse-categories') {
+      probeCalls.push(call);
+      if (headers.authorization !== `Bearer ${serving.token}`) return new Response('unauthorized', { status: 401 });
+      return jsonResponse({ categories: [] });
     }
-    apiCalls.push({ url, method: init?.method ?? 'GET', headers, body: typeof init?.body === 'string' ? init.body : undefined });
+    apiCalls.push(call);
+    if (headers.authorization !== `Bearer ${serving.token}`) return new Response('unauthorized', { status: 401 });
     if (apiStatus !== 200) return new Response('upstream boom', { status: apiStatus });
     if (url.includes('/api/v1/browse-list')) {
       return jsonResponse({ success: true, results: [{ series_id: '7686713195246930968', series_title: '总裁' }], total: 1, totalPages: 1 });
@@ -90,6 +118,7 @@ async function createDramaFixture(): Promise<DramaFixture> {
     return new Response('not found', { status: 404 });
   }) as unknown as typeof fetch;
   const spawnCalls: Array<{ exePath: string; env: NodeJS.ProcessEnv }> = [];
+  const exitedPids = new Set<number>();
   const deps: HongguoComponentManagerDeps = {
     fetchImpl,
     extractArchive: async (zipPath, destination) => {
@@ -99,19 +128,33 @@ async function createDramaFixture(): Promise<DramaFixture> {
     },
     spawnProcess: (exePath, env): HongguoSpawnedProcess => {
       spawnCalls.push({ exePath, env });
-      // Giả lập tiến trình component boot xong là API phản hồi.
+      if (options.exitFirstSpawn === true && spawnCalls.length === 1) {
+        // Giả lập tiến trình thoát ngay (một bản Hồng Quả khác đang giữ khoá
+        // single-instance) nên API không bao giờ lắng nghe.
+        exitedPids.add(4241);
+        return {
+          pid: 4241,
+          onExit: handler => { queueMicrotask(() => handler(0)); },
+          onError: () => undefined
+        };
+      }
+      // Giả lập tiến trình component boot xong là API phản hồi ở đúng cổng/token.
       apiUp = true;
+      serving = { port: Number(env.HONGGUO_API_PORT), token: String(env.HONGGUO_API_TOKEN) };
       return { pid: 4242, onExit: () => undefined, onError: () => undefined };
     },
-    isProcessAlive: () => true
+    isProcessAlive: pid => !exitedPids.has(pid)
   };
   const manager = await createHongguoComponentManager({ root }, deps);
   return {
     manager,
     spawnCalls,
     apiCalls,
+    probeCalls,
     setApiUp: value => { apiUp = value; },
-    setApiStatus: value => { apiStatus = value; }
+    setApiStatus: value => { apiStatus = value; },
+    serving: () => serving,
+    setServing: value => { serving = value; }
   };
 }
 
@@ -154,8 +197,40 @@ describe('hongguo drama api (component loopback proxy)', () => {
     expect(state.api?.token).toBe(firstEnv.HONGGUO_API_TOKEN);
   });
 
-  it('rejects with creator_hongguo_unavailable when the component is not installed', async () => {
+  it('adopts the port and token published by a running component when state.json is stale', async () => {
     const fixture = await createDramaFixture();
+    await fixture.manager.update();
+    // Thành phần đang chạy đã ghi descriptor với cổng khác state.json.
+    const descriptor = { port: 49_999, token: 'descriptor-token-123456', pid: 777, version: '1.73.0' };
+    fixture.setServing({ port: descriptor.port, token: descriptor.token });
+    fixture.setApiUp(true);
+    await mkdir(join(root, 'user-data'), { recursive: true });
+    await writeFile(join(root, 'user-data', 'drama-api.json'), JSON.stringify(descriptor), 'utf8');
+
+    const payload = await fixture.manager.apiFetch('/api/v1/media-sources');
+
+    expect(payload).toMatchObject({ success: true });
+    expect(fixture.spawnCalls).toHaveLength(0);
+    const call = fixture.apiCalls[0]!;
+    expect(call.url).toContain(':49999/');
+    expect(call.headers.authorization).toBe(`Bearer ${descriptor.token}`);
+  });
+
+  it('relaunches on a fresh port when the spawned process exits at once (stale single-instance lock)', async () => {
+    const fixture = await createDramaFixture({ exitFirstSpawn: true });
+    await fixture.manager.update();
+
+    const payload = await fixture.manager.apiFetch('/api/v1/media-sources');
+
+    expect(payload).toMatchObject({ success: true });
+    expect(fixture.spawnCalls).toHaveLength(2);
+    const firstPort = fixture.spawnCalls[0]!.env.HONGGUO_API_PORT;
+    const secondPort = fixture.spawnCalls[1]!.env.HONGGUO_API_PORT;
+    expect(secondPort).not.toBe(firstPort);
+    expect(secondPort).toBe(String(fixture.serving().port));
+  });
+
+  it('rejects with creator_hongguo_unavailable when the component is not installed', async () => {    const fixture = await createDramaFixture();
     const error = await fixture.manager.apiFetch('/api/v1/media-sources').catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(HongguoUpdateError);
     expect((error as HongguoUpdateError).code).toBe('creator_hongguo_unavailable');

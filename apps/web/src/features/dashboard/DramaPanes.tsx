@@ -1,4 +1,5 @@
 import type {
+  HongguoDramaBrowseResponse,
   HongguoDramaCategory,
   HongguoDramaEpisode,
   HongguoDramaGenre,
@@ -79,6 +80,73 @@ function messageOf(error: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
+// Tải trước (preload) dữ liệu Hồng Quả
+// ---------------------------------------------------------------------------
+
+/**
+ * Bộ đệm cấp module cho Khám phá phim / Gợi ý hot.
+ *
+ * AppController gọi `prefetchDramaPanes` ngay khi app kết nối Runtime, nên khi
+ * người dùng mở trang tải video thì danh mục cùng hai danh sách mặc định đã nằm
+ * sẵn trong bộ đệm và hiển thị tức thì. Màn hình vẫn tải nền để dữ liệu không cũ.
+ */
+const dramaPreload = {
+  installed: undefined as boolean | undefined,
+  downloadsRoot: undefined as string | undefined,
+  categories: undefined as HongguoDramaCategory[] | undefined,
+  sources: undefined as HongguoDramaSource[] | undefined,
+  browse: new Map<string, HongguoDramaBrowseResponse>(),
+  hot: new Map<string, HongguoDramaBrowseResponse>()
+};
+
+type DramaListQuery = { source: string; category: string; genre?: string; page: number };
+
+/** Khoá bộ đệm cho một truy vấn danh sách (nguồn + danh mục + thể loại + trang). */
+function dramaListKey(query: DramaListQuery): string {
+  return [query.source, query.category, query.genre ?? '', query.page].join('\u0000');
+}
+
+/** Truy vấn mặc định của hai màn hình dữ liệu (khớp với state khởi tạo bên dưới). */
+const DRAMA_BROWSE_DEFAULT: DramaListQuery = { source: 'hongguo', category: 'real-drama', page: 1 };
+const DRAMA_HOT_DEFAULT: DramaListQuery = { source: 'hongguo', category: 'hot-drama', page: 1 };
+
+/**
+ * Tải trước danh mục + hai danh sách mặc định. Gọi nhiều lần cũng an toàn: chỉ
+ * đọc lại bộ đệm phía daemon. Chưa cài thành phần Hồng Quả thì bỏ qua để không
+ * đánh thức tiến trình ngoài ý muốn.
+ */
+export async function prefetchDramaPanes(service: RuntimeDependencyService): Promise<void> {
+  const status = await service.getDramaStatus();
+  dramaPreload.installed = status.hongguo.installed === true;
+  dramaPreload.downloadsRoot = status.hongguo.downloadsRoot;
+  if (status.hongguo.installed !== true) return;
+  const settled = await Promise.allSettled([
+    service.getDramaCategories(),
+    service.getDramaMediaSources()
+  ]);
+  const [categories, sources] = settled;
+  if (categories.status === 'fulfilled') dramaPreload.categories = categories.value.categories ?? [];
+  if (sources.status === 'fulfilled' && sources.value.success) dramaPreload.sources = sources.value.sources ?? [];
+  const browseKey = dramaListKey(DRAMA_BROWSE_DEFAULT);
+  const browse = await service.browseDrama({ ...DRAMA_BROWSE_DEFAULT }).catch(() => undefined);
+  if (browse !== undefined) dramaPreload.browse.set(browseKey, browse);
+  const hotKey = dramaListKey(DRAMA_HOT_DEFAULT);
+  const hot = await service.browseDrama({ ...DRAMA_HOT_DEFAULT, category: DRAMA_HOT_DEFAULT.category }).catch(() => undefined);
+  if (hot !== undefined) dramaPreload.hot.set(hotKey, hot);
+}
+
+/** Lọc danh sách xếp hạng: bỏ mục thiếu mã/tên hợp lệ và mục trùng lặp. */
+function filterHotItems(items: HongguoDramaItem[] | undefined): HongguoDramaItem[] {
+  const seen = new Set<string>();
+  return (items ?? []).filter(item => {
+    const id = String(item.series_id ?? '');
+    if (!/^\d{6,30}$/.test(id) || typeof item.series_title !== 'string' || item.series_title.trim() === '' || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // khung dùng chung
 // ---------------------------------------------------------------------------
 
@@ -114,15 +182,19 @@ function DramaSpinner(props: { label: string }) {
 
 /** Chuẩn bị service + trạng thái cài đặt của thành phần Hồng Quả. */
 function useDramaBackend(deps: DramaPaneProps['runtimeDependencies']) {
-  const [phase, setPhase] = useState<'unknown' | 'ready' | 'not-installed' | 'failed'>('unknown');
+  const [phase, setPhase] = useState<'unknown' | 'ready' | 'not-installed' | 'failed'>(
+    () => dramaPreload.installed === undefined ? 'unknown' : dramaPreload.installed ? 'ready' : 'not-installed'
+  );
   const [failure, setFailure] = useState('');
-  const [downloadsRoot, setDownloadsRoot] = useState<string | undefined>(undefined);
+  const [downloadsRoot, setDownloadsRoot] = useState<string | undefined>(dramaPreload.downloadsRoot);
   const service = deps?.service ?? null;
 
   const probe = useCallback(async () => {
     if (service === null) { setPhase('failed'); return; }
     try {
       const response: HongguoDramaStatusResponse = await service.getDramaStatus();
+      dramaPreload.installed = response.hongguo.installed === true;
+      dramaPreload.downloadsRoot = response.hongguo.downloadsRoot;
       setDownloadsRoot(response.hongguo.downloadsRoot);
       // Sẵn sàng dùng: lời gọi dữ liệu đầu tiên phía daemon tự khởi động
       // tiến trình thành phần (single-flight) nếu chưa chạy.
@@ -449,18 +521,20 @@ function DramaDetailDrawer(props: {
 export function DramaBrowsePane(props: DramaPaneProps) {
   const { t, language } = useAppLanguage();
   const { service, phase, failure, downloadsRoot, probe } = useDramaBackend(props.runtimeDependencies);
-  const [sources, setSources] = useState<HongguoDramaSource[]>([]);
+  const [sources, setSources] = useState<HongguoDramaSource[]>(dramaPreload.sources ?? []);
   const [source, setSource] = useState('hongguo');
-  const [categories, setCategories] = useState<HongguoDramaCategory[]>([]);
+  const [categories, setCategories] = useState<HongguoDramaCategory[]>(dramaPreload.categories ?? []);
   const [category, setCategory] = useState('real-drama');
   const [genre, setGenre] = useState('');
   const [page, setPage] = useState(1);
   const [completion, setCompletion] = useState<'all' | 'completed' | 'ongoing'>('all');
-  const [results, setResults] = useState<HongguoDramaItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [genres, setGenres] = useState<HongguoDramaGenre[]>([]);
-  const [hasMore, setHasMore] = useState(false);
+  // Dữ liệu đã tải trước lúc app khởi động: hiển thị ngay, không quay lại vòng xoay.
+  const preloaded = useRef(dramaPreload.browse.get(dramaListKey(DRAMA_BROWSE_DEFAULT))).current;
+  const [results, setResults] = useState<HongguoDramaItem[]>(preloaded?.results ?? []);
+  const [total, setTotal] = useState(preloaded?.total ?? preloaded?.meta?.total ?? 0);
+  const [totalPages, setTotalPages] = useState(preloaded?.totalPages ?? preloaded?.meta?.totalPages ?? 0);
+  const [genres, setGenres] = useState<HongguoDramaGenre[]>(preloaded?.genres ?? preloaded?.meta?.genres ?? []);
+  const [hasMore, setHasMore] = useState(preloaded?.hasMore === true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [unsupported, setUnsupported] = useState(false);
@@ -479,20 +553,22 @@ export function DramaBrowsePane(props: DramaPaneProps) {
     if (service === null) return;
     void probe();
     void service.getDramaCategories()
-      .then(response => setCategories(response.categories ?? []))
+      .then(response => { dramaPreload.categories = response.categories ?? []; setCategories(dramaPreload.categories); })
       .catch(() => undefined);
     void service.getDramaMediaSources()
-      .then(response => { if (response.success) setSources(response.sources ?? []); })
+      .then(response => { if (response.success) { dramaPreload.sources = response.sources ?? []; setSources(dramaPreload.sources); } })
       .catch(() => undefined);
   }, [probe, service]);
 
   const loadBrowse = useCallback(async (forceRefresh: boolean) => {
     if (service === null) return;
+    const cacheKey = dramaListKey({ source, category, genre, page });
     const request = ++listRequest.current;
     clearTimeout(timeoutTimer.current);
     setError('');
     setUnsupported(false);
-    setLoading(true);
+    // Có dữ liệu tải trước thì làm mới nền, không nháy vòng xoay.
+    setLoading(dramaPreload.browse.get(cacheKey) === undefined);
     timeoutTimer.current = setTimeout(() => {
       if (request !== listRequest.current) return;
       listRequest.current++;
@@ -507,6 +583,7 @@ export function DramaBrowsePane(props: DramaPaneProps) {
         setError(response.error || t('dashboard.drama.loadFailed'));
         return;
       }
+      dramaPreload.browse.set(cacheKey, response);
       const items = response.results ?? [];
       setResults(items);
       setTotal(response.total ?? response.meta?.total ?? 0);
@@ -977,7 +1054,9 @@ export function DramaHotPane(props: DramaPaneProps) {
     HOT_FALLBACK.map(([slug, label]) => ({ slug, label }))
   );
   const [category, setCategory] = useState('hot-drama');
-  const [items, setItems] = useState<HongguoDramaItem[]>([]);
+  // Dữ liệu đã tải trước lúc app khởi động: hiển thị ngay thay vì chờ tải lại.
+  const preloaded = useRef(dramaPreload.hot.get(dramaListKey(DRAMA_HOT_DEFAULT))).current;
+  const [items, setItems] = useState<HongguoDramaItem[]>(filterHotItems(preloaded?.results));
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -997,8 +1076,10 @@ export function DramaHotPane(props: DramaPaneProps) {
 
   const loadList = useCallback(async (forceRefresh: boolean) => {
     if (service === null) return;
+    const cacheKey = dramaListKey({ source: 'hongguo', category, page: 1 });
     const request = ++listRequest.current;
-    setLoading(true);
+    // Có dữ liệu tải trước thì làm mới nền, không nháy vòng xoay.
+    setLoading(dramaPreload.hot.get(cacheKey) === undefined);
     setError('');
     try {
       const response = await service.browseDrama({ source: 'hongguo', category, page: 1, forceRefresh });
@@ -1008,13 +1089,8 @@ export function DramaHotPane(props: DramaPaneProps) {
         setError(response.error || t('dashboard.drama.loadFailed'));
         return;
       }
-      const seen = new Set<string>();
-      setItems((response.results ?? []).filter(item => {
-        const id = String(item.series_id ?? '');
-        if (!/^\d{6,30}$/.test(id) || typeof item.series_title !== 'string' || item.series_title.trim() === '' || seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      }));
+      dramaPreload.hot.set(cacheKey, response);
+      setItems(filterHotItems(response.results));
       setIndex(0);
     } catch (cause) {
       if (request !== listRequest.current) return;

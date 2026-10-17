@@ -194,7 +194,10 @@ export function createRemotionComponentManager(input: {
       } catch { state = 'unsupported'; }
       return {
         id: 'remotion', name: 'Remotion', available: release !== undefined,
-        version: prepared ? release?.remotionVersion ?? null : null,
+        // Báo đúng phiên bản khi thành phần đã cài: `prepared` chỉ được đặt sau khi
+        // xác minh xong, còn `state === 'ready'` cũng là trạng thái đã cài nên
+        // tránh trường hợp thẻ ghi "Đã sẵn sàng" mà phiên bản lại trống.
+        version: prepared || state === 'ready' ? release?.remotionVersion ?? null : null,
         supportedVersion: release?.remotionVersion ?? null, installedAt, path: resolve(input.root),
         source: 'OpenCreator release · SHA-256 verified', models: [], model: null,
         state, item: typeof progress.dependencyItem === 'string' ? progress.dependencyItem : null,
