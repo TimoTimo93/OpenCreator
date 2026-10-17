@@ -1,5 +1,5 @@
-import type { CreatorYtDlpStatus } from '@opencreator/protocol';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { CreatorYtDlpStatus, HongguoComponentStatus } from '@opencreator/protocol';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { RuntimeDependenciesController } from '../../app/use-runtime-dependencies.js';
 import { normalizePageIssue } from '../issues/page-issue-state.js';
@@ -130,6 +130,33 @@ describe('RuntimeComponentsSettingsView', () => {
     expect(screen.getByText('已是最新').closest('.runtime-component-details')).not.toBeNull();
     expect(screen.getByText('已是最新').closest('.runtime-component-title')).toBeNull();
   });
+
+  it('replaces the blocked Hongguo update check with a single clear notice', () => {
+    const checkHongguoUpdate = vi.fn();
+    renderView({ hongguoStatus: hongguo({ channelConfigured: false, installed: true }), checkHongguoUpdate });
+    const card = screen.getByRole('heading', { name: '红果短剧（第三方组件）' }).closest('article')!;
+
+    expect(within(card).getByText('红果短剧当前有错误，无法检查更新。')).toBeVisible();
+    expect(within(card).getByText('无法检查更新')).toHaveAttribute('data-status', 'failed');
+    // Không còn nút bị chặn nào để bấm.
+    expect(within(card).queryByRole('button', { name: '检查更新' })).not.toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: /更新到|安装/ })).not.toBeInTheDocument();
+    expect(checkHongguoUpdate).not.toHaveBeenCalled();
+  });
+
+  it('keeps the Hongguo update check usable once a channel exists', async () => {
+    const checkHongguoUpdate = vi.fn(async () => hongguo({ channelConfigured: true, installed: true }));
+    renderView({
+      hongguoStatus: hongguo({ channelConfigured: true, installed: true }),
+      checkHongguoUpdate
+    });
+    const card = screen.getByRole('heading', { name: '红果短剧（第三方组件）' }).closest('article')!;
+
+    expect(within(card).queryByText('红果短剧当前有错误，无法检查更新。')).not.toBeInTheDocument();
+    expect(within(card).getByText('已就绪')).toBeVisible();
+    fireEvent.click(within(card).getByRole('button', { name: '检查更新' }));
+    await waitFor(() => expect(checkHongguoUpdate).toHaveBeenCalledWith(true));
+  });
 });
 
 function renderView(patch: Partial<RuntimeDependenciesController>) {
@@ -159,6 +186,31 @@ function status(patch: Partial<CreatorYtDlpStatus> = {}): CreatorYtDlpStatus {
     lastCheckedAt: null,
     lastCheckAttemptAt: null,
     installedAt: null,
+    ...patch
+  };
+}
+
+function hongguo(patch: Partial<HongguoComponentStatus> = {}): HongguoComponentStatus {
+  return {
+    installed: false,
+    currentVersion: null,
+    currentViRevision: null,
+    latestVersion: null,
+    latestViRevision: null,
+    updateAvailable: false,
+    checkDue: false,
+    channelConfigured: false,
+    channelUrl: null,
+    phase: 'idle',
+    downloadProgress: null,
+    lastCheckedAt: null,
+    lastCheckAttemptAt: null,
+    installedAt: null,
+    running: false,
+    runningPid: null,
+    dataRoot: '/runtime/hongguo-drama/user-data',
+    downloadsRoot: '/runtime/hongguo-drama/downloads',
+    error: null,
     ...patch
   };
 }

@@ -94,6 +94,40 @@ describe('usePageIssueState', () => {
       .toContain('尚未确认更细的原因');
   });
 
+  it('records the rejected endpoint for a validation failure so the diagnostic names it', () => {
+    const error = new ApiClientError({
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      message: 'projectId must be a non-empty string',
+      issue: normalizePageIssue(
+        'runtime',
+        '/creator/jobs/creator_:id/preflight',
+        Object.assign(new Error('bad input'), { code: 'VALIDATION_FAILED' }),
+        'The input or parameters failed validation. Check them and try again.'
+      )
+    });
+    const issue = normalizePageIssue('creator-session', 'creator-session.list-jobs', error, '无法加载创作任务。');
+    expect(issue.technicalDetail)
+      .toBe('Request /creator/jobs/creator_:id/preflight failed validation (VALIDATION_FAILED).');
+    expect(issueConversationText(issue).message).not.toContain('projectId must be a non-empty string');
+  });
+
+  it('keeps a page-specific fallback message instead of the endpoint note', () => {
+    const error = new ApiClientError({
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      message: 'cwd must exist: path not found',
+      issue: normalizePageIssue(
+        'runtime',
+        '/schedules',
+        new Error('failed'),
+        'The project directory does not exist or cannot be accessed'
+      )
+    });
+    const issue = normalizePageIssue('schedules', 'schedules.save', error, '项目目录不存在或无法访问');
+    expect(issue.technicalDetail).toBeUndefined();
+  });
+
   it('preserves a local coded network failure but rejects a token-like code', () => {
     const network = normalizePageIssue('projects', 'projects.load',
       Object.assign(new Error('private host'), { code: 'ENOTFOUND' }), '无法连接服务。');

@@ -3525,5 +3525,20 @@
   "Choose the most recently downloaded video": "Chọn video mới tải gần nhất",
   "Recently downloaded videos": "Video tải gần đây",
   "No downloaded videos yet — paste a link to download a new one.": "Chưa có video nào đã tải; hãy dán liên kết để tải video mới.",
-  "Configure API": "Cấu hình API"
+  "Configure API": "Cấu hình API",
+  "The request timed out. Check the connection and try again.": "Yêu cầu quá thời gian chờ. Vui lòng kiểm tra kết nối rồi thử lại.",
+  "Could not connect to the local Runtime. Check its status and try again.": "Không kết nối được với Runtime cục bộ. Vui lòng kiểm tra trạng thái rồi thử lại.",
+  "The local Runtime returned an unreadable response. Try again.": "Runtime cục bộ trả về phản hồi không đọc được. Vui lòng thử lại.",
+  "Required configuration is missing or unreadable. Check the service settings.": "Thiếu cấu hình bắt buộc hoặc không đọc được. Vui lòng kiểm tra cài đặt dịch vụ.",
+  "The input or parameters failed validation. Check them and try again.": "Dữ liệu hoặc tham số không hợp lệ. Vui lòng kiểm tra rồi thử lại.",
+  "The requested resource is missing or was removed.": "Tài nguyên được yêu cầu không tồn tại hoặc đã bị xoá.",
+  "The requested content is missing or was removed.": "Nội dung được yêu cầu không tồn tại hoặc đã bị xoá.",
+  "The current state conflicts with this operation. Refresh and try again.": "Trạng thái hiện tại xung đột với thao tác này. Vui lòng làm mới rồi thử lại.",
+  "The current state has changed. Refresh and try again.": "Trạng thái hiện tại đã thay đổi. Vui lòng làm mới rồi thử lại.",
+  "This environment or service does not support the operation.": "Môi trường hoặc dịch vụ này không hỗ trợ thao tác này.",
+  "Could not write the local file or result. Check storage status.": "Không ghi được tệp hoặc kết quả cục bộ. Vui lòng kiểm tra trạng thái lưu trữ.",
+  "This operation requires permission. Check sign-in or authorization settings.": "Thao tác này cần quyền. Vui lòng kiểm tra đăng nhập hoặc cài đặt uỷ quyền.",
+  "The operation did not complete. Try again later.": "Thao tác chưa hoàn tất. Vui lòng thử lại sau.",
+  "Add your service keys in Configure API to continue creating.": "Hãy nhập khoá dịch vụ trong mục “Cấu hình API” để tiếp tục sáng tạo.",
+  "Request {{0}} failed validation ({{1}}).": "Yêu cầu {{0}} không hợp lệ (mã {{1}})."
 }

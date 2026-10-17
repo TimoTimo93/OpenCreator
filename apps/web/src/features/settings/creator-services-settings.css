@@ -97,6 +97,22 @@
   margin-top: 16px;
 }
 
+/* Nhấp nháy khối cấu hình sau khi bấm "Cấu hình API" để thấy rõ đã điều hướng tới đâu. */
+.creator-services-form[data-highlight='true'] {
+  animation: creator-services-highlight 1.8s ease-out;
+}
+
+@keyframes creator-services-highlight {
+  0%,
+  40% {
+    box-shadow: 0 0 0 2px var(--accent, #c2582a);
+  }
+
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+
 .creator-services-fieldset {
   min-width: 0;
   margin: 0;

@@ -22,6 +22,7 @@ describe('creator web service', () => {
     await service.listPresets('en-US');
     await service.listJobs('project 1');
     await service.listJobs();
+    await service.listJobs('');
     await service.createJob({
       projectId: 'project 1',
       templateId: 'video-translation',
@@ -88,6 +89,7 @@ describe('creator web service', () => {
     expect(client.get).toHaveBeenCalledWith('/creator/presets?locale=en-US');
     expect(client.get).toHaveBeenCalledWith('/creator/jobs?projectId=project%201');
     expect(client.get).toHaveBeenCalledWith('/creator/jobs');
+    expect(client.get).not.toHaveBeenCalledWith('/creator/jobs?projectId=');
     expect(client.post).toHaveBeenNthCalledWith(1, '/creator/jobs', {
       projectId: 'project 1',
       templateId: 'video-translation',

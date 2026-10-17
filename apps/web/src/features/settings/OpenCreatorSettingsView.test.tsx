@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ConfirmDialogProvider } from '../../components/dialogs/ConfirmDialogProvider.js';
@@ -55,8 +55,7 @@ describe('OpenCreatorSettingsView', () => {
     const expired = { ...state, authState: 'expired' as const, activationState };
     const client = { get: vi.fn(), post: vi.fn(), patch: vi.fn() };
     const service = createGatewayAccountService(client);
-    const onOpenPersonalCenter = vi.fn();
-    const props = { runtimeStatus, gatewayAccountService: service, initialTab: 'ai-services' as const, onOpenPersonalCenter, onBack: vi.fn() };
+    const props = { runtimeStatus, gatewayAccountService: service, initialTab: 'ai-services' as const, onBack: vi.fn() };
     const view = render(<OpenCreatorSettingsView {...props} gatewayAccountState={state}/>);
     const user = userEvent.setup();
     await user.click(screen.getByRole('combobox', { name: '文本模型' }));
@@ -68,8 +67,9 @@ describe('OpenCreatorSettingsView', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
     for (const model of screen.getAllByRole('combobox')) expect(model).toBeDisabled();
     expect(screen.getByRole('combobox', { name: '文本模型' })).toHaveValue('second');
-    await user.click(screen.getByRole('button', { name: '重新登录' }));
-    expect(onOpenPersonalCenter).toHaveBeenCalledOnce();
+    // Trang tài khoản đã bị bỏ: chỉ còn trạng thái phiên, không còn nút đăng nhập lại.
+    expect(screen.queryByRole('button', { name: '重新登录' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '账户' })).not.toBeInTheDocument();
     expect(client.patch).not.toHaveBeenCalled();
     view.rerender(<OpenCreatorSettingsView {...props} gatewayAccountState={state}/>);
     expect(await screen.findByText('已连接')).toBeInTheDocument();
@@ -97,7 +97,7 @@ describe('OpenCreatorSettingsView', () => {
     const gateway: GatewayAccountState = { source: 'manual', authState: 'signed_out', activationState: 'inactive', account: null, bindingVersion: null, models: [], activationError: null };
     const service: GatewayAccountSettingsService = { getState: vi.fn(async () => gateway), setSource: vi.fn(), selectModel: vi.fn(), start: vi.fn(), cancel: vi.fn(), logout: vi.fn(), activate: vi.fn(), getBalance: vi.fn(), getSummary: vi.fn(), getPlans: vi.fn(), getOrders: vi.fn(), getOrder: vi.fn(), getCreditGrants: vi.fn(), checkout: vi.fn(), portal: vi.fn() };
     const onOpenPersonalCenter = vi.fn();
-    render(<OpenCreatorSettingsView runtimeStatus={runtimeStatus} gatewayAccountService={service} gatewayAccountState={gateway} initialTab="ai-services" onOpenPersonalCenter={onOpenPersonalCenter} onBack={vi.fn()}/>);
+    render(<OpenCreatorSettingsView runtimeStatus={runtimeStatus} gatewayAccountService={service} gatewayAccountState={gateway} initialTab="ai-services" onBack={vi.fn()}/>);
     expect(await screen.findByText('自定义配置')).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: '配置 API' }));
     expect(onOpenPersonalCenter).not.toHaveBeenCalled();
@@ -117,6 +117,19 @@ describe('OpenCreatorSettingsView', () => {
     expect(service.setSource).not.toHaveBeenCalled();
     view.rerender(<OpenCreatorSettingsView runtimeStatus={runtimeStatus} gatewayAccountService={service} gatewayAccountState={local} initialTab="ai-services" onBack={vi.fn()}/>);
     expect(await screen.findByRole('tab', { name: '模型服务' })).toBeInTheDocument();
+  });
+  it('jumps to the API key section when the sidebar requests API configuration', async () => {
+    const gateway: GatewayAccountState = { source: 'manual', authState: 'signed_out', activationState: 'inactive', account: null, bindingVersion: null, models: [], activationError: null };
+    const service: GatewayAccountSettingsService = { getState: vi.fn(async () => gateway), setSource: vi.fn(), selectModel: vi.fn(), start: vi.fn(), cancel: vi.fn(), logout: vi.fn(), activate: vi.fn(), getBalance: vi.fn(), getSummary: vi.fn(), getPlans: vi.fn(), getOrders: vi.fn(), getOrder: vi.fn(), getCreditGrants: vi.fn(), checkout: vi.fn(), portal: vi.fn() };
+    render(<OpenCreatorSettingsView runtimeStatus={runtimeStatus} gatewayAccountService={service} gatewayAccountState={gateway} initialTab="general" onBack={vi.fn()}/>);
+    expect(screen.getByRole('button', { name: /AI 服务/ })).not.toHaveAttribute('aria-current', 'page');
+
+    // Nút "Cấu hình API" ở thanh bên phát sự kiện này khi trang cài đặt đã mở sẵn:
+    // tab phải chuyển sang AI 服务 để người dùng thấy phản hồi.
+    await act(async () => {
+      window.dispatchEvent(new Event('opencreator:open-api-configuration'));
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: /AI 服务/ })).toHaveAttribute('aria-current', 'page'));
   });
   it('keeps account and subscription management out of settings', () => {
     render(<OpenCreatorSettingsView runtimeStatus={{ connected: false }} onBack={vi.fn()}/>);

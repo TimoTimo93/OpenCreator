@@ -91,9 +91,11 @@ export function createCreatorService(client: ClientLike) {
       return client.post('/creator/jobs', request) as Promise<{ job: CreatorJob }>;
     },
     listJobs(projectId?: string): Promise<CreatorJobListResponse> {
-      return client.get(projectId === undefined
+      // Daemon từ chối `?projectId=` rỗng (400 VALIDATION_FAILED) nên bỏ hẳn tham số.
+      const scoped = projectId === undefined || projectId === '' ? undefined : projectId;
+      return client.get(scoped === undefined
         ? '/creator/jobs'
-        : `/creator/jobs?projectId=${encodeURIComponent(projectId)}`) as Promise<CreatorJobListResponse>;
+        : `/creator/jobs?projectId=${encodeURIComponent(scoped)}`) as Promise<CreatorJobListResponse>;
     },
     getJob(jobId: string, options?: { signal?: AbortSignal }): Promise<{ job: CreatorJob }> {
       return client.get(`/creator/jobs/${encodeURIComponent(jobId)}`, options) as Promise<{ job: CreatorJob }>;

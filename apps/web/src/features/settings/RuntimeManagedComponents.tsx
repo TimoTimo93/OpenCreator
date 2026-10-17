@@ -71,7 +71,17 @@ export function RuntimeManagedComponents({ controller, componentId, onReturn }: 
       const canDownload = component.available && downloadComponents !== undefined;
       const updateAvailable = component.version !== null && component.supportedVersion !== null && component.version !== component.supportedVersion;
       const current = component.state === 'ready' && !updateAvailable;
-      const statusKind = component.state === 'failed' ? 'failed' : busy ? 'checking' : updateAvailable ? 'update' : current ? 'current' : 'checking';
+      // `state` (nguồn sự thật) phải khớp với huy hiệu trạng thái: chưa cài đặt mà
+      // có bản tải được thì là "cần tải" (icon tải về) chứ không phải "đang kiểm tra",
+      // còn nền tảng không hỗ trợ thì báo lỗi rõ ràng.
+      const statusKind = component.state === 'failed' ? 'failed'
+        : component.state === 'unsupported' ? 'failed'
+        : busy ? 'checking'
+        : updateAvailable ? 'update'
+        : component.state === 'ready' ? 'current'
+        : component.state === 'partial' ? 'update'
+        : component.available ? 'update'
+        : 'failed';
       const updateLabel = localize(`更新到 ${component.supportedVersion}`, `Update to ${component.supportedVersion}`, `Uppdatera till ${component.supportedVersion}`);
       const requiredResources = [
         component.version === null || updateAvailable ? rendering ? localize('渲染引擎、浏览器和模板资源', 'rendering engine, browser, and template resources', 'renderingsmotor, webbläsare och mallresurser') : localize('转录引擎', 'transcription engine') : undefined,
@@ -90,7 +100,7 @@ export function RuntimeManagedComponents({ controller, componentId, onReturn }: 
               <h2 className="runtime-component-name"><img className="runtime-component-logo" src={componentLogos[component.id]} width="26" height="26" alt="" />{component.name}</h2>
               <span role="status" data-status={statusKind}>
                 {statusKind === 'failed' ? <AlertCircle size={13} aria-hidden="true" /> : statusKind === 'current' ? <CheckCircle2 size={13} aria-hidden="true" /> : statusKind === 'update' ? <Download size={13} aria-hidden="true" /> : busy ? <LoaderCircle className="settings-spin" size={13} aria-hidden="true" /> : null}
-                {statusKind === 'update' ? localize('有可用更新', 'Update available', 'Uppdatering tillgänglig') : labels[component.state]}</span>
+                {statusKind === 'update' && component.state === 'ready' ? localize('有可用更新', 'Update available', 'Uppdatering tillgänglig') : labels[component.state]}</span>
               {selected ? <span>{localize('当前使用', 'Selected')}</span> : null}
             </div>
             <p>{rendering ? localize('用于火柴人动画本地渲染。', 'Local rendering for stickman animations.', 'Lokal rendering av streckgubbsanimationer.') : localize('用于本地语音转录，仅在实际需要转录时使用。', 'Used for local speech transcription only when transcription is needed.')}</p>

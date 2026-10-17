@@ -4,7 +4,6 @@ import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../../i18n/LanguageProvider.js';
 import type { AppLanguage } from '../../i18n/language.js';
-import { createLocalizedCopy } from '../../i18n/localized-copy.js';
 import { LanguageSwitchControls } from '../../test/LanguageSwitchControls.js';
 import { OpenCreatorSidebar } from './OpenCreatorSidebar.js';
 
@@ -69,59 +68,36 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof OpenCreatorSideb
 
 describe('OpenCreatorSidebar', () => {
   it.each([
-    ['zh-CN', '个人中心', '未登录'], ['en-US', 'Account', 'Signed out'],
-    ['sv-SE', 'Konto', 'Utloggad'], ['ja-JP', 'アカウント', '未ログイン'],
-    ['ko-KR', '계정', '로그인되지 않음'], ['es-ES', 'Cuenta', 'Sin iniciar sesión'],
-    ['fr-FR', 'Compte', 'Non connecté'], ['de-DE', 'Konto', 'Abgemeldet'],
-    ['pt-BR', 'Conta', 'Não conectado']
-  ] as const)('localizes the footer, expired state and collapsed tooltip in %s', (language, account, signedOut) => {
+    ['zh-CN', '配置 API'], ['en-US', 'Configure API'], ['vi-VN', 'Cấu hình API'], ['ja-JP', 'Configure API']
+  ] as const)('localizes the API configuration footer action in %s', (language, label) => {
     const view = renderSidebar({}, language);
-    const button = screen.getByRole('button', { name: account });
-    expect(button).toHaveAttribute('title', account);
-    expect(within(button).getByText(signedOut)).toBeVisible();
+    const button = screen.getByRole('button', { name: label });
+    expect(button).toHaveAttribute('title', label);
+    expect(button.parentElement).toHaveClass('sidebar-bottom');
     view.unmount();
-    const expired = renderSidebar({ gatewayAccountState: { source: 'gateway', authState: 'expired', activationState: 'inactive', account: null, bindingVersion: 'guest:0', models: [], activationError: null } }, language);
-    expect(screen.getByText(createLocalizedCopy(language)('登录已过期', 'Session expired'))).toBeVisible();
-    expired.unmount();
     renderSidebar({ collapsed: true }, language);
-    expect(screen.getByRole('button', { name: account })).toHaveAttribute('title', account);
+    expect(screen.getByRole('button', { name: label })).toHaveAttribute('title', label);
   });
 
-  it('updates footer and project actions without changing account or user content', () => {
-    renderSidebar({ onArchiveProject: vi.fn(), gatewayAccountState: { source: 'gateway', authState: 'signed_in', activationState: 'ready', account: { id: 'a', email: 'a@example.test', verified: true }, bindingVersion: 'a:1', models: [], activationError: null } });
+  it('opens the API configuration page from the footer and keeps project actions intact', () => {
+    const onOpenApiSettings = vi.fn();
+    renderSidebar({ onArchiveProject: vi.fn(), onOpenApiSettings });
     for (const language of ['sv-SE', 'ja-JP', 'fr-FR'] as const) {
       fireEvent.click(screen.getByRole('button', { name: language }));
-      expect(screen.getByRole('button', { name: createLocalizedCopy(language)('个人中心', 'Account') })).toBeVisible();
-      expect(screen.getByText('a@example.test')).toBeVisible();
+      const button = screen.getByRole('button', { name: 'Configure API' });
+      expect(button).toBeVisible();
+      fireEvent.click(button);
+      expect(onOpenApiSettings).toHaveBeenCalled();
       expect(screen.getByRole('button', { name: 'content-design' })).toBeVisible();
-      expect(screen.getAllByTitle(createLocalizedCopy(language)('项目操作', 'Project operations'))[0]).toBeInTheDocument();
       expect(screen.getByRole('button', { name: '整理本周项目进展 4天' })).toBeInTheDocument();
     }
   });
 
-  it.each([
-    { collapsed: false, activeView: 'account' as const },
-    { collapsed: true, activeView: 'account' as const },
-    { collapsed: false, activeView: 'subscription' as const },
-    { collapsed: true, activeView: 'subscription' as const }
-  ])('opens the personal center from the footer when collapsed=$collapsed and activeView=$activeView', ({ collapsed, activeView }) => {
-    const onOpenView = vi.fn();
-    renderSidebar({ collapsed, activeView, onOpenView });
-    const button = screen.getByRole('button', { name: '个人中心' });
-    expect(button.parentElement).toHaveClass('sidebar-bottom');
-    expect(button).toHaveAttribute('aria-current', 'page');
-    expect(button).toHaveAttribute('title', '个人中心');
-    fireEvent.click(button);
-    expect(onOpenView).toHaveBeenCalledWith('account');
-  });
-  it('updates the footer identity when the user signs out', () => {
-    const props = { source: 'gateway' as const, authState: 'signed_in' as const, activationState: 'ready' as const, account: { id: 'a', email: 'a@example.test', verified: true }, bindingVersion: 'a:1', models: [], activationError: null };
-    const view = renderSidebar({ gatewayAccountState: props });
-    expect(screen.getByText('a@example.test')).toBeInTheDocument();
-    view.unmount();
-    renderSidebar({ gatewayAccountState: { ...props, authState: 'signed_out', account: null } });
-    expect(screen.queryByText('a@example.test')).not.toBeInTheDocument();
-    expect(screen.getByText('未登录')).toBeInTheDocument();
+  it('renders no account entry point in the footer', () => {
+    renderSidebar({ activeView: 'settings' });
+    expect(screen.queryByRole('button', { name: '个人中心' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '账户' })).not.toBeInTheDocument();
+    expect(screen.queryByText('未登录')).not.toBeInTheDocument();
   });
   it('renders global actions, projects with nested conversations, and the settings footer action', () => {
     renderSidebar();

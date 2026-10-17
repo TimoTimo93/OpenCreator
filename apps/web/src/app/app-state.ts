@@ -10,8 +10,6 @@ export type ActiveView =
   | 'dashboard'
   | 'plugins'
   | 'settings'
-  | 'account'
-  | 'subscription'
   | 'files';
 
 export type AppState = {

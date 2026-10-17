@@ -13,6 +13,7 @@ import {
   FolderOpen,
   LayoutTemplate,
   LoaderCircle,
+  KeyRound,
   MoreHorizontal,
   Pencil,
   PanelLeftClose,
@@ -30,8 +31,6 @@ import {
   type LucideIcon
 } from 'lucide-react';
 import type { ActiveView } from '../../app/app-state.js';
-import type { GatewayAccountState } from '@opencreator/protocol';
-import { AccountAvatar } from '../account/AccountAvatar.js';
 import { useLocalizedCopy } from '../../i18n/useLocalizedCopy.js';
 import OpenCreatorMark from '../../components/brand/OpenCreatorMark.js';
 import { ConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
@@ -52,7 +51,6 @@ const SIDEBAR_ACTION_MENU_VIEWPORT_MARGIN = 8;
 const SIDEBAR_ACTION_MENU_GAP = 4;
 
 export function OpenCreatorSidebar(props: {
-  loadAccountAvatar?(accountId: string, revision: string): Promise<Blob>;
   projects: OpenCreatorProject[];
   conversations: OpenCreatorConversation[];
   tasks: SidebarTaskSummary[];
@@ -60,7 +58,6 @@ export function OpenCreatorSidebar(props: {
   currentProjectId?: string;
   selectedConversationId?: string;
   activeView: ActiveView;
-  gatewayAccountState?: GatewayAccountState;
   homeActive?: boolean;
   projectNavigationMode?: 'library' | 'tree';
   collapsed?: boolean;
@@ -70,9 +67,10 @@ export function OpenCreatorSidebar(props: {
   onOpenHome(): void;
   onSelectProject(projectId: string): void;
   onSelectConversation(conversationId: string): void;
-  onSelectTask(threadId: string): void;
-  onOpenView(view: ActiveView): void;
+  onSelectTask(threadId: string): void;  onOpenView(view: ActiveView): void;
   onOpenSettings(): void;
+  /** Mở thẳng trang cài đặt API (Agnes AI, ElevenLabs, VieNeu-TTS); mặc định dùng onOpenSettings. */
+  onOpenApiSettings?(): void;
   onToggleCollapsed(): void;
   onAddProject?(): void;
   onManageProjects?(): void;
@@ -90,7 +88,6 @@ export function OpenCreatorSidebar(props: {
 }) {
   const { t } = useAppLanguage();
   const l = useLocalizedCopy();
-  const accountEmail = props.gatewayAccountState?.authState === 'signed_in' ? props.gatewayAccountState.account?.email : undefined;
   const [expandedProjectId, setExpandedProjectId] = useState<string | undefined>(props.currentProjectId);
   const [projectMenuId, setProjectMenuId] = useState<string>();
   const [archivingConversationId, setArchivingConversationId] = useState<string>();
@@ -814,9 +811,20 @@ export function OpenCreatorSidebar(props: {
       )}
 
       <div className="sidebar-bottom">
-        <button type="button" className="sidebar-account" aria-label={l('个人中心', 'Account')} title={l('个人中心', 'Account')} aria-current={props.activeView === 'account' || props.activeView === 'subscription' ? 'page' : undefined} onClick={() => props.onOpenView('account')}>
-          <AccountAvatar email={accountEmail} accountId={props.gatewayAccountState?.account?.id} avatarUrl={props.gatewayAccountState?.account?.avatarUrl} loadAvatar={props.loadAccountAvatar}/>
-          {!collapsed ? <span className="sidebar-account__copy"><strong>{l('个人中心', 'Account')}</strong><small>{accountEmail ?? (props.gatewayAccountState?.authState === 'expired' ? l('登录已过期', 'Session expired') : l('未登录', 'Signed out'))}</small></span> : null}
+        <button
+          type="button"
+          className="sidebar-account"
+          aria-label={t('nav.configureApi')}
+          title={t('nav.configureApi')}
+          onClick={() => (props.onOpenApiSettings ?? props.onOpenSettings)?.()}
+        >
+          <KeyRound size={18} strokeWidth={1.8} aria-hidden="true" />
+          {!collapsed ? (
+            <span className="sidebar-account__copy">
+              <strong>{t('nav.configureApi')}</strong>
+              <small>Agnes AI · ElevenLabs · VieNeu</small>
+            </span>
+          ) : null}
         </button>
       </div>
 

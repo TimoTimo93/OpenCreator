@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Check, CircleCheck, CircleAlert, FolderOpen, KeyRound, LogIn, Moon, Save, Sun, UserRound } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Check, CircleCheck, CircleAlert, FolderOpen, KeyRound, Moon, Save, Sun } from 'lucide-react';
 import type {
   CodexProfileListResponse,
   CodexStatusResponse,
@@ -84,7 +84,6 @@ export type OpenCreatorSettingsViewProps = {
   gatewayAccountService?: GatewayAccountSettingsService | null;
   gatewayAccountState?: GatewayAccountState;
   onGatewayStateChange?(state: GatewayAccountState): void;
-  onOpenPersonalCenter?(): void;
   openExternal?(url: string): Promise<void> | void;
   codexRuntimeService?: CodexRuntimeSettingsService | null;
   agentSetupNeeded?: boolean;
@@ -159,11 +158,45 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
     return () => { canceled = true; };
   }, [props.gatewayAccountService, props.gatewayAccountState]);
 
+  /**
+   * "Cấu hình API" (thay lối đăng nhập OpenCreator cũ): mở tab AI Services và
+   * nhảy thẳng tới mục khoá API. Trang có thể đang ở sẵn tab đó nên phải có phản
+   * hồi thấy được — cuộn tới khối cấu hình rồi nhấp nháy viền.
+   */
+  const revealApiSection = useCallback(() => {
+    const reveal = (attempt = 0) => {
+      const panel = document.getElementById('creator-services-panel-text');
+      if (panel === null) {
+        if (attempt < 8) window.setTimeout(() => reveal(attempt + 1), 60);
+        return;
+      }
+      panel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      panel.dataset.highlight = 'true';
+      window.setTimeout(() => { delete panel.dataset.highlight; }, 1800);
+    };
+    window.setTimeout(() => reveal(), 60);
+  }, []);
+
+  const openApiConfiguration = useCallback(() => {
+    setActiveTab('ai-services');
+    setApiSection('text');
+    revealApiSection();
+  }, [revealApiSection]);
+
+  // Nút "Cấu hình API" ở thanh bên có thể bấm khi trang cài đặt đã mở sẵn ở đúng
+  // mục: lúc đó route không đổi nên React không render lại, phải tự cuộn/nhấp nháy
+  // để người dùng thấy phản hồi.
+  useEffect(() => {
+    const onRequest = () => openApiConfiguration();
+    window.addEventListener('opencreator:open-api-configuration', onRequest);
+    return () => window.removeEventListener('opencreator:open-api-configuration', onRequest);
+  }, [openApiConfiguration]);
+
   const modeControls = props.gatewayAccountService && gatewayState ? (
     <div className={`gateway-account ai-services-mode${officialMode ? ' ai-services-mode--official' : ''}`}>
       <span className="ai-services-mode__label">{l('使用模式', 'Usage mode')}</span>
       <strong>{officialMode ? l('官方服务', 'Official service') : l('自定义配置', 'Custom configuration')}</strong>
-      {!officialMode ? <button type="button" onClick={() => { setActiveTab('ai-services'); setApiSection('text'); }}><KeyRound size={15} aria-hidden="true"/>{l('配置 API', 'Configure API')}</button> : null}
+      {!officialMode ? <button type="button" onClick={openApiConfiguration}><KeyRound size={15} aria-hidden="true"/>{l('配置 API', 'Configure API')}</button> : null}
     </div>
   ) : null;
 
@@ -231,9 +264,6 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
                     {officialStatus}
                   </p>
                 </div>
-                {props.onOpenPersonalCenter ? <button type="button" onClick={props.onOpenPersonalCenter}>
-                  {gatewayState.authState === 'expired' ? <><LogIn size={15} aria-hidden="true"/>{l('重新登录', 'Sign in again')}</> : <><UserRound size={15} aria-hidden="true"/>{l('账户', 'Account')}</>}
-                </button> : null}
               </header>
               {modeControls}
               {props.gatewayAccountService ? <OfficialServicesSettingsView state={gatewayState} service={props.gatewayAccountService} onChange={next => { setGatewayState(next); props.onGatewayStateChange?.(next); }} /> : null}

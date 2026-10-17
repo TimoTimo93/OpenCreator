@@ -241,7 +241,29 @@ export function issueDiagnosticText(issue: OpenCreatorIssue, language: AppLangua
   return safeFallback(safePublicErrorMessage(issue.technicalDetail) ?? issue.fallbackMessage, language);
 }
 
+/**
+ * Câu dự phòng do tầng runtime sinh ra (chung chung, không có thông tin riêng của
+ * trang). Chỉ với những issue này mới nên thay nội dung chẩn đoán bằng endpoint bị
+ * từ chối; câu do trang tự đặt (ví dụ “项目目录不存在或无法访问”) phải được giữ lại.
+ */
+export function isGenericRuntimeFallback(message: string): boolean {
+  const trimmed = message.trim();
+  return runtimeFallbackCopy[trimmed] !== undefined
+    || /^Request .{1,160} failed validation \([A-Z0-9_]{1,64}\)\.$/.test(trimmed);
+}
+
 function safeFallback(value: string, language: AppLanguage): string {
+  const known = runtimeFallbackCopy[value.trim()];
+  if (known !== undefined) return createLocalizedCopy(language)(known.zh, known.en);
+  // Câu chẩn đoán gắn thêm endpoint bị Runtime từ chối (xem `validationTraceDetail`
+  // trong page-issue-state.ts): giữ lại đường dẫn đã lược id để còn truy vết.
+  const rejected = /^Request (.{1,160}) failed validation \(([A-Z0-9_]{1,64})\)\.$/.exec(value.trim());
+  if (rejected !== null) {
+    return createLocalizedCopy(language)(
+      `请求 ${rejected[1]} 校验失败（${rejected[2]}）。`,
+      `Request ${rejected[1]} failed validation (${rejected[2]}).`
+    );
+  }
   const normalized = value
     .replace(/authorization\s*[:=]\s*(?:Bearer|Basic)\s+\S+/gi, '[redacted]')
     .replace(/(?:authorization|api[-_ ]?key|token|secret)\s*[:=]\s*\S+/gi, '[redacted]')
@@ -253,3 +275,68 @@ function safeFallback(value: string, language: AppLanguage): string {
   if (normalized.length > 0) return normalized;
   return createLocalizedCopy(language)('操作未完成，请重试。', 'The operation did not complete.', 'Åtgärden slutfördes inte. Försök igen.');
 }
+
+/**
+ * Câu dự phòng do tầng runtime sinh ra (xem `apps/web/src/runtime/client.ts`) và
+ * bản dịch tương ứng. Chúng được lưu nguyên văn vào `fallbackMessage` của issue
+ * rồi hiển thị trong phần “thông tin chẩn đoán gốc”; nếu không dịch ở đây thì
+ * giao diện tiếng Việt sẽ lọt nguyên câu tiếng Anh.
+ */
+const runtimeFallbackCopy: Record<string, { zh: string; en: string }> = {
+  'The request timed out. Check the connection and try again.': {
+    zh: '请求超时，请检查网络连接后重试。',
+    en: 'The request timed out. Check the connection and try again.'
+  },
+  'Could not connect to the local Runtime. Check its status and try again.': {
+    zh: '无法连接本地 Runtime，请检查其状态后重试。',
+    en: 'Could not connect to the local Runtime. Check its status and try again.'
+  },
+  'The local Runtime returned an unreadable response. Try again.': {
+    zh: '本地 Runtime 返回了无法读取的响应，请重试。',
+    en: 'The local Runtime returned an unreadable response. Try again.'
+  },
+  'Required configuration is missing or unreadable. Check the service settings.': {
+    zh: '缺少或无法读取必需配置，请检查服务设置。',
+    en: 'Required configuration is missing or unreadable. Check the service settings.'
+  },
+  'The input or parameters failed validation. Check them and try again.': {
+    zh: '输入或参数未通过校验，请检查后重试。',
+    en: 'The input or parameters failed validation. Check them and try again.'
+  },
+  'The requested resource is missing or was removed.': {
+    zh: '请求的资源不存在或已被移除。',
+    en: 'The requested resource is missing or was removed.'
+  },
+  'The requested content is missing or was removed.': {
+    zh: '请求的内容不存在或已被移除。',
+    en: 'The requested content is missing or was removed.'
+  },
+  'The current state conflicts with this operation. Refresh and try again.': {
+    zh: '当前状态与该操作冲突，请刷新后重试。',
+    en: 'The current state conflicts with this operation. Refresh and try again.'
+  },
+  'The current state has changed. Refresh and try again.': {
+    zh: '当前状态已发生变化，请刷新后重试。',
+    en: 'The current state has changed. Refresh and try again.'
+  },
+  'This environment or service does not support the operation.': {
+    zh: '当前环境或服务不支持此操作。',
+    en: 'This environment or service does not support the operation.'
+  },
+  'Could not write the local file or result. Check storage status.': {
+    zh: '无法写入本地文件或结果，请检查存储状态。',
+    en: 'Could not write the local file or result. Check storage status.'
+  },
+  'This operation requires permission. Check sign-in or authorization settings.': {
+    zh: '此操作需要权限，请检查登录或授权设置。',
+    en: 'This operation requires permission. Check sign-in or authorization settings.'
+  },
+  'The operation did not complete. Try again later.': {
+    zh: '操作未完成，请稍后重试。',
+    en: 'The operation did not complete. Try again later.'
+  },
+  'The operation did not complete.': {
+    zh: '操作未完成，请重试。',
+    en: 'The operation did not complete.'
+  }
+};

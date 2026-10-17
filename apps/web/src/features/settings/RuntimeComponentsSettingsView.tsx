@@ -245,9 +245,13 @@ function HongguoComponentCard(props: { controller: RuntimeDependenciesController
   if (status === undefined) return null;
 
   const progressPercent = status.downloadProgress?.percent ?? null;
+  // Chưa cấu hình kênh phát hành thì không thể kiểm tra bản cập nhật. Trước đây
+  // nút “Kiểm tra cập nhật” vẫn hiện nhưng bị chặn (disabled) nên trông như lỗi;
+  // giờ chỉ hiển thị đúng một thông báo và bỏ hẳn nút bị chặn đó.
+  const cannotCheck = !status.channelConfigured;
   const statusKind = busy
     ? 'checking'
-    : status.error !== null
+    : status.error !== null || cannotCheck
       ? 'failed'
       : status.updateAvailable || !status.installed
         ? 'update'
@@ -258,17 +262,17 @@ function HongguoComponentCard(props: { controller: RuntimeDependenciesController
       : phase === 'launching'
         ? t('settings.runtimeComponents.hongguoOpening')
         : t('settings.runtimeComponents.checking')
-    : status.error !== null
-      ? t('settings.runtimeComponents.hongguoFailed')
-      : status.updateAvailable
-        ? t('settings.runtimeComponents.updateAvailable')
-        : !status.installed
-          ? status.channelConfigured
+    : cannotCheck
+      ? t('settings.runtimeComponents.hongguoCannotCheckStatus')
+      : status.error !== null
+        ? t('settings.runtimeComponents.hongguoFailed')
+        : status.updateAvailable
+          ? t('settings.runtimeComponents.updateAvailable')
+          : !status.installed
             ? t('settings.runtimeComponents.hongguoNotInstalled')
-            : t('settings.runtimeComponents.hongguoNotConfigured')
-          : status.running
-            ? t('settings.runtimeComponents.hongguoRunning')
-            : t('settings.runtimeComponents.hongguoReady');
+            : status.running
+              ? t('settings.runtimeComponents.hongguoRunning')
+              : t('settings.runtimeComponents.hongguoReady');
   const latestLabel = status.latestVersion === null
     ? t('settings.runtimeComponents.notChecked')
     : `v${status.latestVersion} · vi.${status.latestViRevision ?? 0}`;
@@ -332,18 +336,18 @@ function HongguoComponentCard(props: { controller: RuntimeDependenciesController
 
       <footer className="runtime-component-footer">
         <div className="runtime-component-actions">
-          <button
+          {cannotCheck ? null : <button
             className="settings-secondary-button"
             type="button"
-            disabled={busy || !status.channelConfigured}
+            disabled={busy}
             onClick={runCheck}
           >
             {phase === 'checking'
               ? <LoaderCircle className="settings-spin" size={15} aria-hidden="true" />
               : <RefreshCw size={15} aria-hidden="true" />}
             {t('settings.runtimeComponents.check')}
-          </button>
-          {status.channelConfigured && status.latestVersion !== null && (status.updateAvailable || !status.installed) ? (
+          </button>}
+          {!cannotCheck && status.latestVersion !== null && (status.updateAvailable || !status.installed) ? (
             <button
               className="settings-primary-button"
               data-status="update"
@@ -382,8 +386,8 @@ function HongguoComponentCard(props: { controller: RuntimeDependenciesController
         </dl>
       </details>
 
-      {!status.channelConfigured && !status.installed ? (
-        <p className="settings-notice" role="status">{t('settings.runtimeComponents.hongguoChannelMissing')}</p>
+      {cannotCheck ? (
+        <p className="settings-notice" role="status">{t('settings.runtimeComponents.hongguoCannotCheck')}</p>
       ) : null}
       {status.error !== null && !busy ? (
         <p className="settings-notice" role="status">{status.error}</p>

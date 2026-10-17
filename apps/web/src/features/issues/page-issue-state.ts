@@ -7,6 +7,7 @@ import {
   publishPageIssue,
   resolvePageIssue
 } from './page-issue-hub.js';
+import { isGenericRuntimeFallback } from './issue-catalog.js';
 
 export type PageIssueState = {
   issues: OpenCreatorIssue[];
@@ -102,10 +103,16 @@ export function normalizePageIssue(
         fingerprint
       };
     }
+    const validationTrace = issue.technicalDetail !== undefined && issue.technicalDetail.trim() !== ''
+      ? undefined
+      : isGenericRuntimeFallback(issue.fallbackMessage)
+        ? validationTraceDetail(issue.code, issue.publicFacts?.kind, issue.operation || operationId)
+        : undefined;
     return {
       ...issue,
       scope: { kind: 'page', surface },
       operation: operationId,
+      ...(validationTrace === undefined ? {} : { technicalDetail: validationTrace }),
       fallbackMessage: ['操作未完成，请稍后重试。', 'The operation did not complete. Try again later.'].includes(issue.fallbackMessage)
         ? fallbackMessage
         : issue.fallbackMessage || fallbackMessage
@@ -148,6 +155,19 @@ export function normalizePageIssue(
     occurredAt: now,
     lastOccurredAt: now
   };
+}
+
+/**
+ * Runtime 400 "tham số sai" chỉ trả về câu chung chung, không nói lời gọi nào bị
+ * từ chối. Ghi lại endpoint (đã lược id) vào phần chẩn đoán để lần sau còn biết
+ * chính xác chỗ hỏng; câu chữ được Việt hóa lúc hiển thị.
+ */
+function validationTraceDetail(code: string, kind: string | undefined, operationId: string): string | undefined {
+  const validation = kind === 'validation' || /VALIDATION_FAILED$/.test(code);
+  if (!validation) return undefined;
+  const operation = operationId.trim().slice(0, 160);
+  if (operation === '') return undefined;
+  return `Request ${operation} failed validation (${code}).`;
 }
 
 function mergeOccurrence(previous: OpenCreatorIssue | undefined, next: OpenCreatorIssue): OpenCreatorIssue {

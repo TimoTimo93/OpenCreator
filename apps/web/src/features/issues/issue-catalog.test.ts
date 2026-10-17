@@ -184,4 +184,33 @@ describe('localized issue copy', () => {
     expect(prompt).toContain('Min fråga: Varför misslyckades nedladdningen?');
     expect(issueDiagnosticText({ ...issue, fallbackMessage: '' }, 'sv-SE')).toBe('Åtgärden slutfördes inte. Försök igen.');
   });
+
+  it('localizes the runtime validation fallback instead of leaking English', () => {
+    const validation = {
+      ...issue,
+      code: 'VALIDATION_FAILED',
+      fallbackMessage: 'The input or parameters failed validation. Check them and try again.'
+    };
+    expect(issueDiagnosticText(validation, 'vi-VN')).toBe('Dữ liệu hoặc tham số không hợp lệ. Vui lòng kiểm tra rồi thử lại.');
+    expect(issueDiagnosticText(validation, 'zh-CN')).toBe('输入或参数未通过校验，请检查后重试。');
+    expect(issueDiagnosticText(validation, 'en-US')).toBe('The input or parameters failed validation. Check them and try again.');
+    // Câu không nằm trong danh sách vẫn giữ nguyên để không mất thông tin chẩn đoán.
+    expect(issueDiagnosticText({ ...validation, fallbackMessage: 'remotion_component_wrong_platform' }, 'vi-VN'))
+      .toBe('remotion_component_wrong_platform');
+  });
+
+  it('localizes the rejected endpoint note added for validation failures', () => {
+    const traced = {
+      ...issue,
+      code: 'VALIDATION_FAILED',
+      operation: '/creator/jobs/:id/preflight',
+      technicalDetail: 'Request /creator/jobs/:id/preflight failed validation (VALIDATION_FAILED).'
+    };
+    expect(issueDiagnosticText(traced, 'vi-VN'))
+      .toBe('Yêu cầu /creator/jobs/:id/preflight không hợp lệ (mã VALIDATION_FAILED).');
+    expect(issueDiagnosticText(traced, 'zh-CN'))
+      .toBe('请求 /creator/jobs/:id/preflight 校验失败（VALIDATION_FAILED）。');
+    expect(issueDiagnosticText(traced, 'en-US'))
+      .toBe('Request /creator/jobs/:id/preflight failed validation (VALIDATION_FAILED).');
+  });
 });
