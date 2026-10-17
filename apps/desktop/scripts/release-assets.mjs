@@ -153,7 +153,7 @@ export function renderReleaseNotes({ version, repository, highlights = '' }) {
     '',
     '## Optional Rendering Components',
     '',
-    'Remotion rendering components are downloaded on demand by OpenCreator. They are not included in the Desktop installer.',
+    'Desktop builds bundle the Remotion rendering component for their own platform, so OpenCreator installs it offline without downloading. Platforms without a bundled archive fall back to downloading the matching release asset on demand.',
     '',
     `[SHA-256 Checksums](${downloadRoot}/SHA256SUMS.txt)`,
     '',
