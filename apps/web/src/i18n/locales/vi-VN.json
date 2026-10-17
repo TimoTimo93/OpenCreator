@@ -3521,5 +3521,9 @@
   "Local center": "Trung tâm Cục bộ",
   "AI system status": "Trạng thái Hệ thống AI",
   "Unlimited (local access)": "Không giới hạn hạn mức (Unlimited Local Access)",
-  "All creation, translation, video dubbing, speech recognition, and editing tasks run directly through local AI services (9router, Agnes AI, ElevenLabs, VieNeu-TTS). No top-ups or cloud account required.": "Toàn bộ các tác vụ sáng tạo, dịch thuật, lồng tiếng video, nhận dạng giọng nói và chỉnh sửa được thực thi trực tiếp qua các dịch vụ AI nội bộ (9router, Agnes AI, ElevenLabs, VieNeu-TTS). Không cần nạp thẻ hay duy trì tài khoản đám mây."
+  "All creation, translation, video dubbing, speech recognition, and editing tasks run directly through local AI services (9router, Agnes AI, ElevenLabs, VieNeu-TTS). No top-ups or cloud account required.": "Toàn bộ các tác vụ sáng tạo, dịch thuật, lồng tiếng video, nhận dạng giọng nói và chỉnh sửa được thực thi trực tiếp qua các dịch vụ AI nội bộ (9router, Agnes AI, ElevenLabs, VieNeu-TTS). Không cần nạp thẻ hay duy trì tài khoản đám mây.",
+  "Choose the most recently downloaded video": "Chọn video mới tải gần nhất",
+  "Recently downloaded videos": "Video tải gần đây",
+  "No downloaded videos yet — paste a link to download a new one.": "Chưa có video nào đã tải; hãy dán liên kết để tải video mới.",
+  "Configure API": "Cấu hình API"
 }

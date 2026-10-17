@@ -1,5 +1,5 @@
 import { useRef, useState, type DragEvent } from 'react';
-import { Link2, UploadCloud } from 'lucide-react';
+import { Film, Link2, UploadCloud } from 'lucide-react';
 import { useLocalizedCopy } from '../../i18n/useLocalizedCopy.js';
 import type { VideoMetadataResponse } from '@opencreator/protocol';
 import type { VideoMetadataService } from '../../services/video-metadata-service.js';
@@ -7,6 +7,13 @@ import VideoSourcePreview, { type SourcePlaybackPreview } from './VideoSourcePre
 import SupportedVideoSources from './SupportedVideoSources.js';
 
 type SourceMode = 'url' | 'file';
+
+/** Video đã tải về máy (hàng đợi Hồng Quả) để chọn lại nhanh. */
+export type RecentDownloadedVideo = {
+  path: string;
+  title: string;
+  cover?: string;
+};
 
 export default function VideoSourceInput(props: {
   file: File | null;
@@ -22,6 +29,9 @@ export default function VideoSourceInput(props: {
    * the Translate & Dub page so the other workspaces keep the combined input.
    */
   showSourceMode?: boolean;
+  /** Video vừa tải xong trong hàng đợi tải; hiển thị để chọn nhanh. */
+  recentVideos?: RecentDownloadedVideo[];
+  recentLoading?: boolean;
   metadataService?: VideoMetadataService;
   metadata?: VideoMetadataResponse;
   previewEnabled?: boolean;
@@ -29,6 +39,7 @@ export default function VideoSourceInput(props: {
   onFileChange(file: File | null): void;
   onUrlChange(url: string): void;
   onClear(): void;
+  onSelectRecent?(video: RecentDownloadedVideo): void;
   onDimensions?(width: number, height: number): void;
   onMetadata?(url: string, metadata: VideoMetadataResponse): void;
 }) {
@@ -73,7 +84,7 @@ export default function VideoSourceInput(props: {
             onClick={() => setMode('url')}
           >
             <Link2 size={16} strokeWidth={1.7} aria-hidden="true" />
-            {l('下载新视频', 'Download a new video')}
+            {l('选择最近下载的视频', 'Choose the most recently downloaded video')}
           </button>
           <button
             type="button"
@@ -138,6 +149,36 @@ export default function VideoSourceInput(props: {
 
       {showUrlField ? (
         <>
+          {props.showSourceMode === true && mode === 'url' ? (
+            <div className="video-translation-recent" aria-label={l('最近下载的视频', 'Recently downloaded videos')}>
+              <p className="video-translation-recent-title">
+                {l('最近下载的视频', 'Recently downloaded videos')}
+              </p>
+              {(props.recentVideos ?? []).length === 0 ? (
+                <p className="video-translation-recent-empty">
+                  {props.recentLoading === true
+                    ? l('正在读取...', 'Loading...')
+                    : l('还没有已下载的视频，可粘贴链接下载新视频。', 'No downloaded videos yet — paste a link to download a new one.')}
+                </p>
+              ) : (
+                <ul className="video-translation-recent-list">
+                  {(props.recentVideos ?? []).map(item => (
+                    <li key={item.path}>
+                      <button type="button" onClick={() => props.onSelectRecent?.(item)}>
+                        {item.cover !== undefined && item.cover !== ''
+                          ? <img src={item.cover} alt="" loading="lazy" />
+                          : <span className="video-translation-recent-ph" aria-hidden="true"><Film size={14} /></span>}
+                        <span>
+                          <strong>{item.title}</strong>
+                          <small title={item.path}>{item.path}</small>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
           <label className="video-translation-field video-translation-url-field">
             <span>{l('视频链接', 'Video link')}</span>
             <div>

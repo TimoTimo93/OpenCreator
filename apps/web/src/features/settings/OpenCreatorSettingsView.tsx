@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Check, CircleCheck, CircleAlert, FolderOpen, LogIn, Moon, Save, Sun, UserRound } from 'lucide-react';
+import { Check, CircleCheck, CircleAlert, FolderOpen, KeyRound, LogIn, Moon, Save, Sun, UserRound } from 'lucide-react';
 import type {
   CodexProfileListResponse,
   CodexStatusResponse,
@@ -118,6 +118,9 @@ type SettingsTab =
 export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => props.initialTab ?? 'general');
   const [gatewayState, setGatewayState] = useState<GatewayAccountState>();
+  // Ghi đè mục đang mở của trang cài đặt dịch vụ AI khi người dùng bấm nút
+  // "Cấu hình API" (thay cho lối đăng nhập OpenCreator cũ).
+  const [apiSection, setApiSection] = useState<CreatorServicesSection | undefined>(props.initialSection);
   const { t } = useAppLanguage();
   const l = useLocalizedCopy();
   const officialMode = gatewayState !== undefined && (gatewayState.source === 'gateway' || gatewayState.authState !== 'signed_out');
@@ -146,6 +149,10 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
   }, [props.initialTab]);
 
   useEffect(() => {
+    if (props.initialSection !== undefined) setApiSection(props.initialSection);
+  }, [props.initialSection]);
+
+  useEffect(() => {
     if (props.gatewayAccountState) { setGatewayState(props.gatewayAccountState); return; }
     let canceled = false;
     void props.gatewayAccountService?.getState().then(next => { if (!canceled) setGatewayState(next); }).catch(() => undefined);
@@ -156,7 +163,7 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
     <div className={`gateway-account ai-services-mode${officialMode ? ' ai-services-mode--official' : ''}`}>
       <span className="ai-services-mode__label">{l('使用模式', 'Usage mode')}</span>
       <strong>{officialMode ? l('官方服务', 'Official service') : l('自定义配置', 'Custom configuration')}</strong>
-      {!officialMode && props.onOpenPersonalCenter ? <button type="button" onClick={props.onOpenPersonalCenter}><UserRound size={15} aria-hidden="true"/>{l('登录 OpenCreator', 'Sign in to OpenCreator')}</button> : null}
+      {!officialMode ? <button type="button" onClick={() => { setActiveTab('ai-services'); setApiSection('text'); }}><KeyRound size={15} aria-hidden="true"/>{l('配置 API', 'Configure API')}</button> : null}
     </div>
   ) : null;
 
@@ -238,7 +245,7 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
                 connected={props.runtimeStatus.connected}
                 service={props.creatorServicesService ?? null}
                 modelService={props.codexRuntimeService ?? null}
-                initialSection={props.initialSection}
+                initialSection={apiSection}
                 modeControls={<>
                   {modeControls}
                   {props.agentSetupNeeded && props.onOpenAgentSetup !== undefined ? (

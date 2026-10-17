@@ -11,7 +11,8 @@ import { useOptionalCreatorSession } from './creator-session-store.js';
 export default function CreatorToolShell(props: {
   title: string;
   titleIcon?: ReactNode;
-  subtitle: string;
+  /** Dòng mô tả dưới tiêu đề; bỏ trống thì chỉ hiển thị tiêu đề. */
+  subtitle?: string;
   context: string;
   taskSummary?: ReactNode;
   headerActions?: ReactNode;
@@ -54,7 +55,7 @@ export default function CreatorToolShell(props: {
             )}
             <div>
               <h1>{props.title}</h1>
-              <p>{props.subtitle}</p>
+              {props.subtitle === undefined || props.subtitle === '' ? null : <p>{props.subtitle}</p>}
             </div>
             {props.headerActions === undefined ? null : <div className="creator-workspace-header-actions">{props.headerActions}</div>}
           </header>

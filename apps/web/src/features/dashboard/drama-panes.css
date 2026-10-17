@@ -11,13 +11,21 @@
   align-self: flex-start;
 }
 
-/* Gộp tab nguồn và nút Formats/Works về cùng một hàng */
-.video-download-tab-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+/* Gộp tab nguồn và nút Formats/Works về cùng hàng với tiêu đề trang. */
+.video-download-workspace-page .creator-workspace-header.has-actions {
+  grid-template-columns: 34px auto minmax(0, 1fr);
+}
+
+.video-download-workspace-page .creator-workspace-header-actions {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
   flex-wrap: wrap;
+  gap: 12px;
+}
+
+.video-download-workspace-page .creator-workspace-header-actions .video-source-tabs {
+  align-self: center;
 }
 
 .video-source-tabs button {

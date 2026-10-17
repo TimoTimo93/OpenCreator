@@ -11,7 +11,8 @@ import type {
   HongguoDramaMediaSourcesResponse,
   HongguoDramaSearchResponse,
   HongguoDramaSeriesResponse,
-  HongguoDramaStatusResponse
+  HongguoDramaStatusResponse,
+  HongguoDramaTitleTranslationResponse
 } from '@opencreator/protocol';
 
 type ClientLike = {
@@ -97,6 +98,13 @@ export function createRuntimeDependencyService(client: ClientLike) {
     },
     getDramaDownloadTasks(): Promise<HongguoDramaDownloadTasksResponse> {
       return client.get('/creator/drama/download-tasks') as Promise<HongguoDramaDownloadTasksResponse>;
+    },
+    /** Dịch tên phim tiếng Trung sang ngôn ngữ giao diện (daemon gọi mô hình). */
+    translateDramaTitles(titles: readonly string[], language?: string): Promise<HongguoDramaTitleTranslationResponse> {
+      return client.post('/creator/drama/translate-titles', {
+        titles: [...titles],
+        language
+      }) as Promise<HongguoDramaTitleTranslationResponse>;
     }
   };
 }

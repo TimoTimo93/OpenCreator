@@ -34,7 +34,7 @@ import type { VideoMetadataService } from '../../services/video-metadata-service
 import VideoTranslationAgentPanel from './VideoTranslationAgentPanel.js';
 import CreatorResizableLayout from './CreatorResizableLayout.js';
 import CreatorTaskSummary from './CreatorTaskSummary.js';
-import VideoSourceInput from './VideoSourceInput.js';
+import VideoSourceInput, { type RecentDownloadedVideo } from './VideoSourceInput.js';
 import { BilibiliPartSelector } from './BilibiliPartSelector.js';
 import { parseVideoSource } from './VideoSourcePreview.js';
 import { VideoTranslationSubtitleImport } from './VideoTranslationSubtitleImport.js';
@@ -1694,6 +1694,10 @@ export default function VideoTranslationWorkspace(props: {
   const [agentFocus, setAgentFocus] = useState<AgentFocus>();
   const cancelConfirmRef = useRef<HTMLButtonElement>(null);
   const localSourceRef = useRef<{ path: string; status: 'loading' | 'loaded' | 'failed' }>();
+  // Video đã tải xong trong hàng đợi Hồng Quả, dùng cho lựa chọn "video mới tải
+  // gần nhất" ở bước chọn nguồn.
+  const [recentDownloads, setRecentDownloads] = useState<RecentDownloadedVideo[]>([]);
+  const [recentDownloadsLoading, setRecentDownloadsLoading] = useState(false);
   const parsedVideoSource = useMemo(() => parseVideoSource(videoUrl), [videoUrl]);
   const currentUrlMetadata = sourceType === 'url' && urlMetadata?.url === videoUrl ? urlMetadata.value : undefined;
   const sourceSelectionReady = sourceType !== 'url' || (parsedVideoSource.kind !== 'invalid'
@@ -1877,6 +1881,32 @@ export default function VideoTranslationWorkspace(props: {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Video vừa tải xong trong hàng đợi Hồng Quả: cho phép chọn lại ở bước 1
+  // ("chọn video mới tải gần nhất") mà không cần mở thư mục.
+  useEffect(() => {
+    const service = props.runtimeDependencies?.service;
+    if (service === undefined) return;
+    let active = true;
+    setRecentDownloadsLoading(true);
+    void service.getDramaDownloadTasks()
+      .then(response => {
+        if (!active) return;
+        setRecentDownloads((response.tasks ?? [])
+          .filter(task => task.status === 'completed' && typeof task.savePath === 'string' && task.savePath !== '')
+          .map(task => {
+            const path = task.savePath as string;
+            const title = task.title ?? task.videoInfo?.title ?? task.filename
+              ?? path.split(/[\\/]/).pop() ?? path;
+            const cover = task.videoInfo?.cover;
+            return { path, title, ...(cover === undefined || cover === '' ? {} : { cover }) };
+          })
+          .slice(0, 8));
+      })
+      .catch(() => { if (active) setRecentDownloads([]); })
+      .finally(() => { if (active) setRecentDownloadsLoading(false); });
+    return () => { active = false; };
+  }, [props.runtimeDependencies?.service]);
 
   useEffect(() => {
     if (!composeVideo) return;
@@ -2773,6 +2803,27 @@ export default function VideoTranslationWorkspace(props: {
     setAttemptedContinue(false);
   }
 
+  function chooseRecentDownload(video: RecentDownloadedVideo) {
+    if (localSourceRef.current?.status === 'loading') return;
+    localSourceRef.current = { path: video.path, status: 'loading' };
+    void (async () => {
+      try {
+        const file = await fileFromLocalPath(video.path);
+        localSourceRef.current = { path: video.path, status: 'loaded' };
+        chooseVideo(file);
+        setCurrentStep(0);
+        setWorkspacePhase('configure');
+        setResultNotice('');
+      } catch {
+        localSourceRef.current = { path: video.path, status: 'failed' };
+        setResultNotice(l(
+          '无法读取已下载的视频，请手动选择文件。',
+          'Could not read the downloaded video from disk. Choose the file manually.'
+        ));
+      }
+    })();
+  }
+
   function selectBilibiliPart(index: number) {
     const source = parseBilibiliVideoSource(videoUrl);
     const part = currentUrlMetadata?.parts?.find(candidate => candidate.index === index);
@@ -3361,6 +3412,8 @@ export default function VideoTranslationWorkspace(props: {
             <VideoSourceInput
               showSupportedPlatforms
               showSourceMode
+              recentVideos={recentDownloads}
+              recentLoading={recentDownloadsLoading}
               file={videoFile}
               registeredFile={registeredSourceFile}
               sourceType={sourceType}
@@ -3378,6 +3431,7 @@ export default function VideoTranslationWorkspace(props: {
                 onPrepare: creatorSession !== null && currentSourceIdentity !== null ? () => void prepareDraftSourcePreview() : undefined
               } : undefined}
               onFileChange={chooseVideo}
+              onSelectRecent={chooseRecentDownload}
               onUrlChange={url => {
                 setVideoUrl(normalizeVideoSourceUrl(url));
                 setSourceType('url');

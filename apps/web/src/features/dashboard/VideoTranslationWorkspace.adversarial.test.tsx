@@ -47,7 +47,7 @@ describe('VideoTranslationWorkspace Adversarial & Empirical Stress Suite (Milest
     );
 
     // Initial step is Step 0: two explicit source choices, link input shown first
-    expect(screen.getByRole('tab', { name: '下载新视频' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: '选择最近下载的视频' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByLabelText('视频链接')).toBeInTheDocument();
 
     // Input URL to advance through wizard

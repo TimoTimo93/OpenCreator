@@ -93,16 +93,17 @@ describe('OpenCreatorSettingsView', () => {
     expect(client.get).toHaveBeenCalledWith('/gateway/account');
     expect(screen.getByRole('combobox', { name: '文本模型' })).toBeDisabled();
   });
-  it('shows custom settings for guests and directs sign-in to the personal center', async () => {
+  it('shows custom settings for guests and opens API key settings instead of a sign-in flow', async () => {
     const gateway: GatewayAccountState = { source: 'manual', authState: 'signed_out', activationState: 'inactive', account: null, bindingVersion: null, models: [], activationError: null };
     const service: GatewayAccountSettingsService = { getState: vi.fn(async () => gateway), setSource: vi.fn(), selectModel: vi.fn(), start: vi.fn(), cancel: vi.fn(), logout: vi.fn(), activate: vi.fn(), getBalance: vi.fn(), getSummary: vi.fn(), getPlans: vi.fn(), getOrders: vi.fn(), getOrder: vi.fn(), getCreditGrants: vi.fn(), checkout: vi.fn(), portal: vi.fn() };
     const onOpenPersonalCenter = vi.fn();
     render(<OpenCreatorSettingsView runtimeStatus={runtimeStatus} gatewayAccountService={service} gatewayAccountState={gateway} initialTab="ai-services" onOpenPersonalCenter={onOpenPersonalCenter} onBack={vi.fn()}/>);
     expect(await screen.findByText('自定义配置')).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('button', { name: '登录 OpenCreator' }));
-    expect(onOpenPersonalCenter).toHaveBeenCalledOnce();
+    await userEvent.setup().click(screen.getByRole('button', { name: '配置 API' }));
+    expect(onOpenPersonalCenter).not.toHaveBeenCalled();
     expect(service.setSource).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '官方服务' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '配置 API' })).toBeInTheDocument();
   });
   it('keeps signed-in accounts in official settings and restores custom settings after sign-out', async () => {
     const gateway: GatewayAccountState = { source: 'gateway', authState: 'signed_in', activationState: 'ready', account: { id: 'a', email: 'a@example.test', verified: true }, bindingVersion: null, models: [], activationError: null };

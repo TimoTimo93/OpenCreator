@@ -820,7 +820,7 @@ describe('DashboardPage', () => {
 
     openBlankWorkspace('Video Translation', 'Blank Video Translation');
     expect(screen.getByRole('heading', { name: 'Translate & Dub Video' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Download a new video' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Choose the most recently downloaded video' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Open an existing video file' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Video link' })).toHaveAttribute(
       'placeholder',
@@ -995,7 +995,7 @@ describe('DashboardPage', () => {
 
     expect(screen.getByRole('heading', { name: '视频翻译配音' })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'OpenCreator' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '下载新视频' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: '选择最近下载的视频' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('list', { name: '支持的平台' }).querySelectorAll('li')).toHaveLength(10);
     fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
       target: { value: 'https://www.youtube.com/watch?v=test' }
@@ -1740,7 +1740,7 @@ describe('DashboardPage', () => {
     expect(screen.queryByRole('textbox', { name: '视频链接' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '清除当前视频来源' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '清除当前视频来源' }));
-    fireEvent.click(screen.getByRole('tab', { name: '下载新视频' }));
+    fireEvent.click(screen.getByRole('tab', { name: '选择最近下载的视频' }));
     expect(screen.getByRole('textbox', { name: '视频链接' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '打开本地已有视频' }));
     fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [video] } });
@@ -1799,7 +1799,7 @@ describe('DashboardPage', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('请先添加需要翻译的视频');
     expect(screen.getByRole('alert').parentElement).toHaveClass('video-translation-action-group');
-    expect(screen.getByRole('tab', { name: '下载新视频' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: '选择最近下载的视频' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('delegates translation changes to the Creator Agent without local command parsing', async () => {

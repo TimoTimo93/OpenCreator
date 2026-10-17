@@ -669,11 +669,46 @@ export default function VideoDownloadWorkspace(props: {
     <CreatorToolShell
       title={l('视频下载', 'Video Downloader')}
       pageClassName="video-download-workspace-page"
-      subtitle={l(
-        '解析公开链接并把视频或音频保存到项目',
-        'Analyze a public link and save video or audio to the project'
-      )}
       context={context}
+      headerActions={<>
+        {props.batch !== undefined || currentStep === 0 ? (
+          <nav className="video-source-tabs" role="tablist" aria-label={t('dashboard.drama.tabs')}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sourceTab === 'link'}
+              onClick={() => setSourceTab('link')}
+            >
+              {t('dashboard.drama.tabLink')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sourceTab === 'browse'}
+              onClick={() => setSourceTab('browse')}
+            >
+              {t('dashboard.drama.title')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sourceTab === 'hot'}
+              onClick={() => setSourceTab('hot')}
+            >
+              {t('dashboard.drama.hotTitle')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sourceTab === 'queue'}
+              onClick={() => setSourceTab('queue')}
+            >
+              {t('dashboard.drama.tabQueue')}
+            </button>
+          </nav>
+        ) : null}
+        {props.batch === undefined || sourceTab !== 'link' ? null : resultToolbar}
+      </>}
       taskSummary={probe === undefined ? undefined : <CreatorTaskSummary
         sourceIcon={Link2}
         sourceLabel={l('视频链接', 'Video link')}
@@ -723,45 +758,6 @@ export default function VideoDownloadWorkspace(props: {
       onBack={props.onBack}
     >
       <div className="creator-tool-stack">
-        {props.batch !== undefined || currentStep === 0 ? (
-          <div className="video-download-tab-row">
-            <nav className="video-source-tabs" role="tablist" aria-label={t('dashboard.drama.tabs')}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sourceTab === 'link'}
-                onClick={() => setSourceTab('link')}
-              >
-                {t('dashboard.drama.tabLink')}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sourceTab === 'browse'}
-                onClick={() => setSourceTab('browse')}
-              >
-                {t('dashboard.drama.title')}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sourceTab === 'hot'}
-                onClick={() => setSourceTab('hot')}
-              >
-                {t('dashboard.drama.hotTitle')}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sourceTab === 'queue'}
-                onClick={() => setSourceTab('queue')}
-              >
-                {t('dashboard.drama.tabQueue')}
-              </button>
-            </nav>
-            {props.batch === undefined || sourceTab !== 'link' ? null : resultToolbar}
-          </div>
-        ) : null}
         {props.batch === undefined || sourceTab !== 'link' ? null : props.batch.editor}
         {props.batch !== undefined && sourceTab === 'link' && resultTab === 'formats' && probe === undefined ? props.batch.sourceList : null}
         {props.batch === undefined ? <nav

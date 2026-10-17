@@ -19,7 +19,8 @@ function dramaMocks() {
     getDramaSeries: vi.fn(async () => ({ success: true })),
     getDramaSeriesEpisodes: vi.fn(async () => ({ success: true })),
     downloadDramaBatch: vi.fn(async () => ({ success: true })),
-    getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] }))
+    getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
+    translateDramaTitles: vi.fn(async () => ({ translations: {} }))
   };
 }
 

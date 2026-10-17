@@ -23,6 +23,8 @@ import { useAppLanguage } from '../../i18n/LanguageProvider.js';
 import type { RuntimeDependenciesController } from '../../app/use-runtime-dependencies.js';
 import type { RuntimeDependencyService } from '../../services/runtime-dependency-service.js';
 import { setPendingTranslationSource } from './pending-translation-source.js';
+import { localizeDramaLabel, localizeDramaTags } from './drama-labels.js';
+import { useDramaTitleTranslations } from './drama-title-translations.js';
 import './drama-panes.css';
 
 /**
@@ -188,6 +190,10 @@ function DramaDetailDrawer(props: {
   const [notice, setNotice] = useState('');
   const requestRef = useRef(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+  const translateTitle = useDramaTitleTranslations(
+    props.service ?? null,
+    useMemo(() => (detail === undefined ? [] : [detail.series_title]), [detail])
+  );
 
   const showToast = useCallback((text: string) => {
     setNotice(text);
@@ -316,7 +322,7 @@ function DramaDetailDrawer(props: {
         <div className="drama-drawer-head">
           <div className="drama-drawer-title">
             <Film size={16} aria-hidden="true" />
-            <span>{detail === undefined ? t('dashboard.drama.drawerLoading') : `《${detail.series_title}》`}</span>
+            <span>{detail === undefined ? t('dashboard.drama.drawerLoading') : `《${translateTitle(detail.series_title)}》`}</span>
           </div>
           <button type="button" className="drama-icon-btn" onClick={props.onClose} aria-label={t('dashboard.drama.close')} title={t('dashboard.drama.close')}>
             <X size={16} aria-hidden="true" />
@@ -441,7 +447,7 @@ function DramaDetailDrawer(props: {
 // ---------------------------------------------------------------------------
 
 export function DramaBrowsePane(props: DramaPaneProps) {
-  const { t } = useAppLanguage();
+  const { t, language } = useAppLanguage();
   const { service, phase, failure, downloadsRoot, probe } = useDramaBackend(props.runtimeDependencies);
   const [sources, setSources] = useState<HongguoDramaSource[]>([]);
   const [source, setSource] = useState('hongguo');
@@ -464,6 +470,10 @@ export function DramaBrowsePane(props: DramaPaneProps) {
   const [detailId, setDetailId] = useState<string | null>(null);
   const listRequest = useRef(0);
   const timeoutTimer = useRef<ReturnType<typeof setTimeout>>();
+  const translateTitle = useDramaTitleTranslations(
+    service,
+    useMemo(() => results.map(item => item.series_title), [results])
+  );
 
   useEffect(() => {
     if (service === null) return;
@@ -623,7 +633,7 @@ export function DramaBrowsePane(props: DramaPaneProps) {
                   aria-pressed={category === item.slug}
                   onClick={() => { setCategory(item.slug); setGenre(''); setPage(1); }}
                 >
-                  {item.label}
+                  {localizeDramaLabel(item.label, language)}
                 </button>
               ))}
             </div>
@@ -639,7 +649,7 @@ export function DramaBrowsePane(props: DramaPaneProps) {
                     className={`drama-chip ${genre === item.slug ? 'drama-chip-active' : ''}`}
                     onClick={() => { setGenre(item.slug); setPage(1); }}
                   >
-                    {item.label}
+                    {localizeDramaLabel(item.label, language)}
                   </button>
                 ))}
               </div>
@@ -682,7 +692,7 @@ export function DramaBrowsePane(props: DramaPaneProps) {
               key={item.series_id}
               type="button"
               className="drama-card"
-              title={item.series_title}
+              title={translateTitle(item.series_title)}
               onClick={() => setDetailId(String(item.series_id))}
             >
               <div className="drama-cover">
@@ -696,13 +706,13 @@ export function DramaBrowsePane(props: DramaPaneProps) {
                     ? <span className="drama-ep-badge">{t('dashboard.drama.episodes', { count: item.episode_count })}</span>
                     : null}
               </div>
-              <div className="drama-card-title">{item.series_title}</div>
+              <div className="drama-card-title">{translateTitle(item.series_title)}</div>
               {item.completion_status === 'completed' ? <div className="drama-card-flag">{t('dashboard.drama.completionCompleted')}</div> : null}
               {item.completion_status === 'ongoing' ? <div className="drama-card-flag">{t('dashboard.drama.completionOngoing')}</div> : null}
               {item.heat !== undefined ? <div className="drama-card-heat">{item.heat}</div> : null}
               {(item.tags ?? []).length > 0 ? (
                 <div className="drama-card-tags">
-                  {(item.tags ?? []).slice(0, 2).map(tag => <span key={tag} className="drama-tag">{tag}</span>)}
+                  {(item.tags ?? []).slice(0, 2).map(tag => <span key={tag} className="drama-tag">{localizeDramaLabel(tag, language)}</span>)}
                 </div>
               ) : null}
             </button>
@@ -769,6 +779,13 @@ export function DramaQueuePane(props: DramaPaneProps) {
   const [tasks, setTasks] = useState<HongguoDramaTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const translateTitle = useDramaTitleTranslations(
+    service,
+    useMemo(
+      () => tasks.map(task => task.title ?? task.videoInfo?.title ?? task.filename),
+      [tasks]
+    )
+  );
 
   const load = useCallback(async (showSpinner: boolean): Promise<void> => {
     if (service === null) return;
@@ -877,7 +894,10 @@ export function DramaQueuePane(props: DramaPaneProps) {
               const key = queueStatusKey(task.status);
               const percent = Math.max(0, Math.min(100, Math.round(Number(task.progress) || 0)));
               const cover = task.videoInfo?.cover ?? '';
-              const title = task.title ?? task.videoInfo?.title ?? task.filename ?? t('dashboard.drama.queueUntitled');
+              const rawTitle = task.title ?? task.videoInfo?.title ?? task.filename;
+              const title = rawTitle === undefined || rawTitle === ''
+                ? t('dashboard.drama.queueUntitled')
+                : translateTitle(rawTitle);
               const size = task.receivedBytes !== undefined && task.totalBytes !== undefined && task.totalBytes > 0
                 ? `${formatBytes(task.receivedBytes)} / ${formatBytes(task.totalBytes)}`
                 : '';
@@ -951,7 +971,7 @@ const HOT_FALLBACK = [
 ] as const;
 
 export function DramaHotPane(props: DramaPaneProps) {
-  const { t } = useAppLanguage();
+  const { t, language } = useAppLanguage();
   const { service, phase, failure, downloadsRoot, probe } = useDramaBackend(props.runtimeDependencies);
   const [tabs, setTabs] = useState<Array<{ slug: string; label: string }>>(
     HOT_FALLBACK.map(([slug, label]) => ({ slug, label }))
@@ -1011,6 +1031,10 @@ export function DramaHotPane(props: DramaPaneProps) {
   const selected = items[index];
   const upcoming = items.slice(index + 1, index + 5);
   const introduction = selected?.intro ?? selected?.series_intro;
+  const translateTitle = useDramaTitleTranslations(
+    service,
+    useMemo(() => items.map(item => item.series_title), [items])
+  );
 
   return (
     <BackendGate phase={phase} failure={failure} onRetry={() => void probe()} {...(props.onOpenRuntimeComponents === undefined ? {} : { onOpenRuntimeComponents: props.onOpenRuntimeComponents })}>
@@ -1037,7 +1061,7 @@ export function DramaHotPane(props: DramaPaneProps) {
               aria-pressed={category === tab.slug}
               onClick={() => setCategory(tab.slug)}
             >
-              {tab.label}
+              {localizeDramaLabel(tab.label, language)}
             </button>
           ))}
         </div>
@@ -1066,13 +1090,13 @@ export function DramaHotPane(props: DramaPaneProps) {
                     : `#${index + 1}`}
                   {selected.heat !== undefined && selected.heat !== '' ? ` · ${selected.heat}` : ''}
                 </p>
-                <h3>{selected.series_title}</h3>
+                <h3>{translateTitle(selected.series_title)}</h3>
                 <p className="drama-feature-tags">
                   {[
                     typeof selected.episode_count === 'number' && selected.episode_count > 0
                       ? t('dashboard.drama.episodes', { count: selected.episode_count })
                       : undefined,
-                    ...(selected.tags ?? [])
+                    ...localizeDramaTags(selected.tags, language)
                   ].filter(Boolean).join(' · ')}
                 </p>
                 {typeof introduction === 'string' && introduction.trim() !== ''
@@ -1105,7 +1129,7 @@ export function DramaHotPane(props: DramaPaneProps) {
                   >
                     {item.cover ? <img src={item.cover} alt="" loading="lazy" /> : <div className="drama-cover-ph"><Film size={15} aria-hidden="true" /></div>}
                     <span>
-                      <strong>{item.series_title}</strong>
+                      <strong>{translateTitle(item.series_title)}</strong>
                       <small>{typeof item.rank === 'number' && item.rank > 0 ? t('dashboard.drama.rank', { rank: item.rank }) : `#${index + offset + 2}`}</small>
                     </span>
                   </button>

@@ -684,6 +684,27 @@ export function AppController(props: AppControllerProps) {
     connected: connectionState.status === 'connected',
     service: runtimeDependencyService
   });
+  // Tải trước dữ liệu Hồng Quả (Khám phá phim / Gợi ý hot) ngay khi app khởi
+  // động: lời gọi đầu tiên đánh thức thành phần, các trang sau đó mở ra là có
+  // sẵn danh sách thay vì phải chờ khởi động lại từ đầu.
+  useEffect(() => {
+    if (connectionState.status !== 'connected' || runtimeDependencyService === null) return;
+    let canceled = false;
+    void (async () => {
+      try {
+        const status = await runtimeDependencyService.getDramaStatus();
+        if (canceled || status.hongguo?.installed !== true) return;
+        await Promise.allSettled([
+          runtimeDependencyService.getDramaCategories(),
+          runtimeDependencyService.getDramaMediaSources(),
+          runtimeDependencyService.browseDrama({ source: 'hongguo', category: 'real-drama', page: 1 })
+        ]);
+      } catch {
+        // Chưa cài thành phần hoặc mạng lỗi: trang tải video sẽ tự thử lại.
+      }
+    })();
+    return () => { canceled = true; };
+  }, [connectionState.status, runtimeDependencyService]);
   const memoryService = useMemo(
     () => runtimeClient === null ? null : createMemoryService(runtimeClient),
     [runtimeClient]

@@ -1520,7 +1520,7 @@ describe('VideoTranslationWorkspace task controls', () => {
     );
 
     // Initial step is Step 0: two explicit source choices, link input shown first
-    expect(screen.getByRole('tab', { name: '下载新视频' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: '选择最近下载的视频' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: '打开本地已有视频' })).toHaveAttribute('aria-selected', 'false');
     expect(screen.getByLabelText('视频链接')).toBeInTheDocument();
 
