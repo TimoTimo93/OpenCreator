@@ -1172,7 +1172,7 @@ test('Dashboard 握手超时后显示本地错误页并可无 Probe 重载', asy
   const fixture = await launchPackagedDesktop('workspace-failure');
   try {
     await expect(fixture.page.locator('#status-title')).toHaveText(
-      'Dashboard failed to load',
+      'Không thể tải Bảng điều khiển',
       { timeout: 30_000 }
     );
     await expect(fixture.page.locator('#reload-workspace')).toBeVisible();

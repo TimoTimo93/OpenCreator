@@ -4,6 +4,37 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpenCreator</title>
+    <!-- Nền tối ngay từ khung hình đầu: tránh nháy trắng trước khi app.css tải xong. -->
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        min-height: 100%;
+        background: #0a0a0a;
+        color: #e5e5e5;
+      }
+
+      #root:empty::after {
+        content: "";
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        width: 26px;
+        height: 26px;
+        margin: -13px 0 0 -13px;
+        border: 2.5px solid rgba(255, 255, 255, 0.14);
+        border-top-color: #e08b5f;
+        border-radius: 50%;
+        animation: opencreator-boot-spin 800ms linear infinite;
+      }
+
+      @keyframes opencreator-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

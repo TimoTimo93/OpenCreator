@@ -57,6 +57,9 @@ const title = element('status-title');
 const detail = element('status-detail');
 const elapsed = element('elapsed');
 const statusMark = element('status-mark');
+const progress = element('progress');
+const progressFill = element('progress-fill');
+const bootSteps = element('boot-steps');
 const actions = element('failure-actions');
 const workspaceActions = element('workspace-actions');
 const technicalDetails = element('technical-details');
@@ -76,6 +79,30 @@ const labels: Record<BootstrapState['phase'], [string, string]> = {
   ready: ['Đang mở OpenCreator', 'Runtime cục bộ đã sẵn sàng'],
   workspace_failed: ['Không thể tải Bảng điều khiển', 'Runtime cục bộ vẫn đang chạy. Hãy tải lại Bảng điều khiển hoặc khởi động lại Runtime.'],
   failed: ['Codex CLI không khả dụng', 'OpenCreator không nhận được phản hồi hợp lệ. Vui lòng kiểm tra chẩn đoán và thử lại.']
+};
+
+/** Phản hồi thị giác cho thanh tiến trình (giá trị ước lượng theo pha). */
+const PHASE_PERCENT: Record<BootstrapState['phase'], number> = {
+  idle: 6,
+  resolving_codex: 20,
+  starting_daemon: 45,
+  probing_codex: 68,
+  starting_runtime: 88,
+  ready: 100,
+  workspace_failed: 100,
+  failed: 100
+};
+
+/** Bước đang chạy trong dải 3 bước (0..2). */
+const PHASE_STEP: Record<BootstrapState['phase'], number> = {
+  idle: 0,
+  resolving_codex: 0,
+  starting_daemon: 1,
+  probing_codex: 1,
+  starting_runtime: 2,
+  ready: 2,
+  workspace_failed: 2,
+  failed: 0
 };
 
 api.subscribeBootstrapState(render);
@@ -116,6 +143,17 @@ function render(state: BootstrapState): void {
   const failed = state.phase === 'failed';
   const workspaceFailed = state.phase === 'workspace_failed';
   statusMark.dataset.failed = failed || workspaceFailed ? 'true' : 'false';
+  const percent = PHASE_PERCENT[state.phase];
+  progress.hidden = failed || workspaceFailed;
+  progressFill.style.width = `${percent}%`;
+  progress.setAttribute('aria-valuenow', String(percent));
+  const activeStep = PHASE_STEP[state.phase];
+  for (const [index, step] of Array.from(bootSteps.children).entries()) {
+    step.setAttribute(
+      'data-state',
+      failed ? 'failed' : index < activeStep ? 'done' : index === activeStep ? 'active' : 'pending'
+    );
+  }
   actions.hidden = !failed;
   selectCodex.hidden = state.error?.code === 'RUNTIME_DATA_IN_USE';
   workspaceActions.hidden = !workspaceFailed;
