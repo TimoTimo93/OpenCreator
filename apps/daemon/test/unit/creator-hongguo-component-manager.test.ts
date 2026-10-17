@@ -30,6 +30,7 @@ type Fixture = {
   manager: HongguoComponentManager;
   manifestFetches: () => number;
   spawnCalls: Array<{ exePath: string; env: NodeJS.ProcessEnv }>;
+  killedPids: number[];
   setAlive: (value: boolean) => void;
   manifest: Record<string, unknown>;
 };
@@ -61,9 +62,17 @@ async function createFixture(options: { configureChannel?: boolean; sha?: string
     if (url === ARTIFACT_URL) {
       return new Response(ARTIFACT_BYTES, { status: 200 });
     }
+    // Cổng loopback: thành phần Hồng Quả đang chạy (nếu có) trả lời như thật.
+    if (url.startsWith('http://127.0.0.1:')) {
+      return new Response(JSON.stringify({ ok: true, name: 'hongguo-drama-api' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
     return new Response('not found', { status: 404 });
   }) as unknown as typeof fetch;
   const spawnCalls: Array<{ exePath: string; env: NodeJS.ProcessEnv }> = [];
+  const killedPids: number[] = [];
   let alive = true;
   const deps: HongguoComponentManagerDeps = {
     fetchImpl,
@@ -80,13 +89,15 @@ async function createFixture(options: { configureChannel?: boolean; sha?: string
         onError: () => undefined
       };
     },
-    isProcessAlive: () => alive
+    isProcessAlive: () => alive,
+    killProcessTree: pid => { killedPids.push(pid); }
   };
   const manager = await createHongguoComponentManager({ root }, deps);
   return {
     manager,
     manifestFetches: () => manifestFetches,
     spawnCalls,
+    killedPids,
     setAlive: value => { alive = value; },
     manifest
   };
@@ -173,6 +184,35 @@ describe('hongguo component manager', () => {
 
     fixture.setAlive(false);
     expect(fixture.manager.status().running).toBe(false);
+  });
+
+  it('adopts the component left by a previous run and stops its tree on close', async () => {
+    const fixture = await createFixture();
+    await fixture.manager.update();
+    await mkdir(join(root, 'user-data'), { recursive: true });
+    await writeFile(
+      join(root, 'user-data', 'drama-api.json'),
+      JSON.stringify({ port: 61234, token: 'adopted-token-1234', pid: 9090, version: '1.74.0' })
+    );
+
+    const payload = await fixture.manager.apiFetch('/api/v1/browse-categories');
+    expect(payload).toMatchObject({ ok: true });
+    // Đã dùng lại tiến trình cũ: không spawn thêm bản Hồng Quả thứ hai.
+    expect(fixture.spawnCalls).toHaveLength(0);
+
+    fixture.manager.close();
+    expect(fixture.killedPids).toEqual([9090]);
+    await vi.waitFor(async () => {
+      await expect(readFile(join(root, 'user-data', 'drama-api.json'), 'utf8')).rejects.toThrow();
+    });
+  });
+
+  it('stops the launched component tree when the host closes', async () => {
+    const fixture = await createFixture();
+    await fixture.manager.update();
+    await fixture.manager.launch();
+    fixture.manager.close();
+    expect(fixture.killedPids).toEqual([4242]);
   });
 
   it('keeps the previous version when a newer vi revision arrives', async () => {

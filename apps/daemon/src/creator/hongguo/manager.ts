@@ -115,6 +115,8 @@ export type HongguoComponentManagerDeps = {
   /** Overridable GUI launcher (default: detached spawn). */
   spawnProcess?: (exePath: string, env: NodeJS.ProcessEnv) => HongguoSpawnedProcess;
   isProcessAlive?: (pid: number) => boolean;
+  /** Overridable component shutdown (default: kill the whole process tree). */
+  killProcessTree?: (pid: number) => void;
 };
 
 export type HongguoComponentManager = {
@@ -152,6 +154,7 @@ export async function createHongguoComponentManager(
   const isProcessAlive = deps.isProcessAlive ?? defaultIsProcessAlive;
   const extractArchive = deps.extractArchive ?? defaultExtractArchive;
   const spawnProcess = deps.spawnProcess ?? defaultSpawnProcess;
+  const killProcessTree = deps.killProcessTree ?? defaultKillProcessTree;
 
   await mkdir(versionsDir, { recursive: true });
   await mkdir(stagingDir, { recursive: true });
@@ -161,6 +164,8 @@ export async function createHongguoComponentManager(
   let phase: HongguoComponentStatus['phase'] = 'idle';
   let downloadProgress: HongguoComponentDownloadProgressState = null;
   let runningPid: number | null = null;
+  /** Pid của tiến trình Hồng Quả đang chạy do lần khởi động trước để lại. */
+  let adoptedPid: number | null = null;
   let abortController: AbortController | null = null;
   let fatalError: string | null = null;
   let apiReady = false;
@@ -513,6 +518,7 @@ export async function createHongguoComponentManager(
         fatalError = messageOf(error);
       });
       runningPid = proc.pid ?? null;
+      adoptedPid = null;
       fatalError = null;
       return status();
     } catch (error) {
@@ -524,10 +530,17 @@ export async function createHongguoComponentManager(
   };
 
   const close = () => {
-    // Abort in-flight downloads. The launched GUI is deliberately left running:
-    // it is a user-facing application, not a daemon-owned background task.
+    // Abort in-flight downloads.
     abortController?.abort();
     abortController = null;
+    // Thành phần chạy ẩn dưới sự quản lý của host: khi host thoát phải tắt luôn
+    // tiến trình Hồng Quả. Bản portable sinh thêm tiến trình con (Electron) nên
+    // phải tắt cả cây, nếu không chúng sẽ nằm lại trong Task Manager.
+    const pid = runningPid ?? adoptedPid;
+    runningPid = null;
+    adoptedPid = null;
+    if (pid !== null) killProcessTree(pid);
+    void rm(apiDescriptorPath, { force: true }).catch(() => undefined);
   };
 
   /**
@@ -553,9 +566,10 @@ export async function createHongguoComponentManager(
     if (options.force !== true) {
       const discovered = await readApiDescriptor();
       if (discovered !== null) {
-        state.api = discovered;
+        state.api = { port: discovered.port, token: discovered.token };
+        adoptedPid = discovered.pid;
         await persist().catch(() => undefined);
-        return discovered;
+        return state.api;
       }
     }
     const api = { port: await findFreePort(), token: randomUUID() };
@@ -568,7 +582,7 @@ export async function createHongguoComponentManager(
    * Đọc descriptor của thành phần; chỉ nhận khi cổng đó thật sự phục vụ API
    * loopback với đúng token (tiến trình cũ còn sót lại sẽ bị bỏ qua).
    */
-  const readApiDescriptor = async (): Promise<{ port: number; token: string } | null> => {
+  const readApiDescriptor = async (): Promise<{ port: number; token: string; pid: number | null } | null> => {
     let payload: unknown;
     try {
       payload = await readPrivateJsonFile(apiDescriptorPath);
@@ -576,10 +590,13 @@ export async function createHongguoComponentManager(
       return null;
     }
     if (typeof payload !== 'object' || payload === null) return null;
-    const descriptor = payload as { port?: unknown; token?: unknown };
+    const descriptor = payload as { port?: unknown; token?: unknown; pid?: unknown };
+    const pid = typeof descriptor.pid === 'number' && Number.isInteger(descriptor.pid) && descriptor.pid > 0
+      ? descriptor.pid
+      : null;
     if (!isApiCredential(descriptor)) return null;
-    const candidate = { port: descriptor.port as number, token: descriptor.token as string };
-    return (await probeApi(candidate.port, candidate.token, 800)) ? candidate : null;
+    const candidate = { port: descriptor.port, token: descriptor.token };
+    return (await probeApi(candidate.port, candidate.token, 800)) ? { ...candidate, pid } : null;
   };
 
   /** Dò cổng API không cần token (healthcheck công khai của thành phần). */
@@ -904,6 +921,28 @@ function defaultIsProcessAlive(pid: number): boolean {
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Tắt tiến trình Hồng Quả cùng toàn bộ tiến trình con. Bản portable tách tiến
+ * trình Electron chính khỏi tiến trình bọc ngoài, nên `kill(pid)` thường chỉ
+ * đóng lớp bọc và để lại các tiến trình con chạy mãi.
+ */
+function defaultKillProcessTree(pid: number): void {
+  try {
+    if (process.platform === 'win32') {
+      const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+        detached: true
+      });
+      killer.unref();
+      return;
+    }
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // Tiến trình đã thoát trước khi kịp tắt.
   }
 }
 
