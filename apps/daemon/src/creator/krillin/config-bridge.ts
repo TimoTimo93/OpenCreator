@@ -66,6 +66,13 @@ export function createKrillinConfigToml(
     image: {
       provider: config.image.provider,
       openai: openAi(config.image.openai)
+    },
+    // Tắt bước "viết lại câu" bằng LLM bên trong CLI: bước này nhắc mô hình bằng
+    // tiếng Trung và không nêu rõ ngôn ngữ đích, nên hay trả về nguyên văn tiếng
+    // Trung — lồng tiếng bị lẫn tiếng Trung. Tắt đi thì CLI đọc đúng bản dịch
+    // tiếng Việt do OpenCreator tạo ra (chỉ còn co giãn tốc độ đọc cho vừa thời gian).
+    dubbing: {
+      enable_text_rewrite: false
     }
   });
   return stringify(document as never);

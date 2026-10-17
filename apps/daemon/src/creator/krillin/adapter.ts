@@ -33,6 +33,7 @@ import {
   resolveDubbingTtsDecision,
   type DubbingTtsProbe
 } from './tts-dubbing-provider.js';
+import type { KrillinTtsGatewayConfig } from './tts-gateway.js';
 
 export function createKrillinExecutor(input: {
   resourceRoot: string;
@@ -43,6 +44,10 @@ export function createKrillinExecutor(input: {
   verificationCachePath?: string;
   ensureRuntimeReady?(): Promise<void>;
   getCodexLlmConfig?(): { baseUrl: string; apiKey: string; model: string } | undefined;
+  /** Cấu hình cổng TTS cục bộ cho một giọng đọc cụ thể (VieNeu ưu tiên, Edge TTS dự phòng). */
+  getLocalTtsConfig?(voice: string): KrillinTtsGatewayConfig | undefined;
+  /** Xác minh cổng TTS cục bộ có tổng hợp được hay không. */
+  probeLocalTts?(): Promise<boolean>;
   /** Xác minh provider TTS của giai đoạn lồng tiếng trước khi chạy CLI. */
   ttsProbe?: DubbingTtsProbe;
 }): CreatorExecutor {
@@ -58,8 +63,16 @@ export function createKrillinExecutor(input: {
       const ffprobe = executablePath(input.resourceRoot, /(?:^|\/)ffprobe(?:\.exe)?$/i);
       const materializedArtifacts = await writeArtifactIndex(input.jobsRoot, stage);
       const options = buildKrillinStageOptions(stage);
+      let ttsOverride: KrillinTtsGatewayConfig | undefined;
       if (stage.stageRun.stageId === 'tts' && stage.job.templateId === 'video-translation') {
-        await applyDubbingTtsProvider(options, configured, stage, input.ttsProbe);
+        ttsOverride = await applyDubbingTtsProvider(
+          options,
+          configured,
+          stage,
+          input.ttsProbe,
+          input.getLocalTtsConfig,
+          input.probeLocalTts
+        );
       }
       let artifacts: KrillinResultArtifact[];
       let captionFallbackProgress: Record<string, CreatorJson> = {};
@@ -106,7 +119,8 @@ export function createKrillinExecutor(input: {
               ytDlpRuntime: input.getYtDlpRuntime?.(stringValue(attempt.options.sourceUrl)),
               llmOverride: preflight.config.llm.source === 'codex'
                 ? input.getCodexLlmConfig?.()
-                : undefined
+                : undefined,
+              ttsOverride
             });
             break;
           } catch (error) {
@@ -677,21 +691,28 @@ function finiteNumber(value: CreatorJson | undefined): number | undefined {
  * Giai đoạn lồng tiếng (TTS) của Dịch video: chọn provider thực sự chạy được.
  * Provider đang cấu hình được xác minh bằng một lần tổng hợp thử; nếu thất bại
  * (hoặc thiếu khóa API), tự chuyển sang tuyến Edge TTS miễn phí của gateway cục
- * bộ rồi tới Edge TTS tích hợp — video vẫn có giọng đọc thay vì thất bại.
+ * bộ, rồi tới cổng Edge TTS cục bộ của daemon — video vẫn có giọng đọc thay vì
+ * thất bại. Trả về phần ghi đè cấu hình TTS khi phải dùng cổng cục bộ.
  */
 async function applyDubbingTtsProvider(
   options: Record<string, unknown>,
   config: CreatorServicesConfig,
   stage: CreatorExecutorInput,
-  probe: DubbingTtsProbe | undefined
-): Promise<void> {
+  probe: DubbingTtsProbe | undefined,
+  getLocalTtsConfig: ((voice: string) => KrillinTtsGatewayConfig | undefined) | undefined,
+  probeLocalTts: (() => Promise<boolean>) | undefined
+): Promise<KrillinTtsGatewayConfig | undefined> {
+  const requestedVoice = stringValue(options.voiceCode);
   const decision = await resolveDubbingTtsDecision({
     config,
     requestedProvider: stringValue(options.ttsProvider),
     requestedModel: stringValue(options.ttsModel),
-    requestedVoice: stringValue(options.voiceCode),
+    requestedVoice,
     targetLanguage: stringValue(options.targetLanguage),
-    ...(probe === undefined ? {} : { probe })
+    ...(probe === undefined ? {} : { probe }),
+    ...(getLocalTtsConfig === undefined
+      ? {}
+      : { localTts: probeLocalTts === undefined ? {} : { probe: probeLocalTts } })
   });
   options.ttsProvider = decision.ttsProvider;
   if (decision.ttsModel !== undefined) options.ttsModel = decision.ttsModel;
@@ -699,4 +720,13 @@ async function applyDubbingTtsProvider(
   if (decision.notice !== undefined) {
     stage.reportProgress({ providerStatus: 'running', message: decision.notice });
   }
+  if (decision.localTts !== true || getLocalTtsConfig === undefined) return undefined;
+  // VieNeu: giữ giọng người dùng đã chọn; Edge: dùng giọng mà quyết định đã ánh xạ.
+  const voice = decision.voiceCode ?? requestedVoice ?? '';
+  const local = getLocalTtsConfig(voice);
+  if (local === undefined) return undefined;
+  options.ttsProvider = 'openai';
+  options.ttsModel = local.model;
+  options.voiceCode = local.defaultVoiceId;
+  return local;
 }

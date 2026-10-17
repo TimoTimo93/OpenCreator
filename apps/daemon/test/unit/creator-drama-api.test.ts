@@ -13,6 +13,7 @@ import {
   type HongguoSpawnedProcess
 } from '../../src/creator/hongguo/manager.js';
 import { registerCreatorDramaRoutes } from '../../src/api/routes.creator-drama.js';
+import type { DramaTitleTranslator } from '../../src/creator/drama/title-translator.js';
 
 const CHANNEL_URL = 'https://channel.test/releases/manifest.json';
 const ARTIFACT_URL = 'https://channel.test/releases/HongguoDrama-1.74.0-vi.1-win-x64.zip';
@@ -224,9 +225,9 @@ function fakeManager(overrides: Partial<HongguoComponentManager> = {}): HongguoC
   } as HongguoComponentManager;
 }
 
-async function buildApp(manager?: HongguoComponentManager) {
+async function buildApp(manager?: HongguoComponentManager, translator?: DramaTitleTranslator) {
   const app = Fastify();
-  await registerCreatorDramaRoutes(app, manager);
+  await registerCreatorDramaRoutes(app, manager, translator);
   await app.ready();
   return app;
 }
@@ -250,13 +251,15 @@ describe('creator drama routes', () => {
     const browse = await app.inject({ method: 'GET', url: '/creator/drama/browse?source=hongguo&category=hot-drama&page=3&forceRefresh=true' });
     expect(browse.statusCode).toBe(200);
     expect(manager.apiFetch).toHaveBeenLastCalledWith('/api/v1/browse-list', {
-      query: { source: 'hongguo', category: 'hot-drama', page: '3', forceRefresh: 'true' }
+      query: { source: 'hongguo', category: 'hot-drama', page: '3', forceRefresh: 'true' },
+      timeoutMs: 150_000
     });
 
     const search = await app.inject({ method: 'GET', url: `/creator/drama/search?keyword=${encodeURIComponent('总裁')}` });
     expect(search.statusCode).toBe(200);
     expect(manager.apiFetch).toHaveBeenLastCalledWith('/api/v1/search-series', {
-      query: { keyword: '总裁' }
+      query: { keyword: '总裁' },
+      timeoutMs: 150_000
     });
     await app.close();
   });
@@ -293,5 +296,35 @@ describe('creator drama routes', () => {
     expect(response.statusCode).toBe(503);
     expect(response.json()).toMatchObject({ error: { code: 'creator_hongguo_unavailable' } });
     await absent.close();
+  });
+
+  it('translates drama titles through the injected translator', async () => {
+    const translate = vi.fn(async (titles: readonly string[]) => Object.fromEntries(titles.map(title => [title, `vi:${title}`])));
+    const app = await buildApp(undefined, { translate } as DramaTitleTranslator);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/creator/drama/translate-titles',
+      payload: { titles: ['惊悚', '志怪', 7, null], language: 'vi-VN' }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ translations: { 惊悚: 'vi:惊悚', 志怪: 'vi:志怪' } });
+    expect(translate).toHaveBeenCalledWith(['惊悚', '志怪'], 'vi');
+    await app.close();
+  });
+
+  it('rejects malformed title translation bodies', async () => {
+    const app = await buildApp(undefined, { translate: vi.fn(async () => ({})) } as DramaTitleTranslator);
+    const notAnObject = await app.inject({ method: 'POST', url: '/creator/drama/translate-titles', payload: [1, 2] });
+    expect(notAnObject.statusCode).toBe(400);
+    const missingTitles = await app.inject({ method: 'POST', url: '/creator/drama/translate-titles', payload: { language: 'vi' } });
+    expect(missingTitles.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('does not register the translation route without a translator', async () => {
+    const app = await buildApp(undefined);
+    const response = await app.inject({ method: 'POST', url: '/creator/drama/translate-titles', payload: { titles: ['惊悚'] } });
+    expect(response.statusCode).toBe(404);
+    await app.close();
   });
 });

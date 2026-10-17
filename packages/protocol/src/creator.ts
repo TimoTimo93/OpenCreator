@@ -609,6 +609,11 @@ export type HongguoDramaDownloadTasksResponse = {
   tasks: HongguoDramaTask[];
 };
 
+/** Tên phim tiếng Trung đã được mô hình ngôn ngữ dịch sang ngôn ngữ giao diện. */
+export type HongguoDramaTitleTranslationResponse = {
+  translations: Record<string, string>;
+};
+
 export type HongguoDramaApiStatus = {
   /** The loopback API of the component process answered a health check. */
   ready: boolean;

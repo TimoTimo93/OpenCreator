@@ -161,6 +161,79 @@ describe('resolveDubbingTtsDecision', () => {
     });
     expect(decision).toEqual({ ttsProvider: 'openai' });
   });
+
+  it('prefers the local VieNeu gateway for Vietnamese when the configured provider fails', async () => {
+    const probe = vi.fn(async () => false);
+    const localProbe = vi.fn(async () => true);
+    const decision = await resolveDubbingTtsDecision({
+      config: gatewayConfig(),
+      requestedProvider: 'openai',
+      requestedVoice: 'marin',
+      targetLanguage: 'vi',
+      probe,
+      localTts: { probe: localProbe }
+    });
+    expect(decision).toMatchObject({ ttsProvider: 'openai', localTts: true });
+    expect(decision.ttsModel).toBeUndefined();
+    expect(decision.voiceCode).toBeUndefined();
+    expect(decision.notice).toBeTruthy();
+    expect(localProbe).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the Edge gateway route for non-Vietnamese targets even when the local gateway exists', async () => {
+    const probe = vi.fn(async (candidate: DubbingTtsCandidate) => candidate.model?.startsWith('edge-tts/') === true);
+    const localProbe = vi.fn(async () => true);
+    const decision = await resolveDubbingTtsDecision({
+      config: gatewayConfig(),
+      requestedProvider: 'openai',
+      requestedVoice: 'marin',
+      targetLanguage: 'en',
+      probe,
+      localTts: { probe: localProbe }
+    });
+    expect(decision).toMatchObject({ ttsProvider: 'openai', ttsModel: 'edge-tts/en-US-AriaNeural' });
+    expect(decision.localTts).toBeUndefined();
+    expect(localProbe).not.toHaveBeenCalled();
+  });
+
+  it('keeps the bundled provider when the local Edge TTS gateway is unreachable', async () => {
+    const decision = await resolveDubbingTtsDecision({
+      config: gatewayConfig(),
+      requestedProvider: 'openai',
+      requestedVoice: 'marin',
+      targetLanguage: 'vi',
+      probe: vi.fn(async () => false),
+      localTts: { probe: vi.fn(async () => false) }
+    });
+    expect(decision.ttsProvider).toBe('edge-tts');
+    expect(decision.localTts).toBeUndefined();
+  });
+
+  it('uses the local Edge TTS gateway without a probe and maps the target language', async () => {
+    const config = gatewayConfig();
+    config.tts.openai.baseUrl = 'https://api.openai.com/v1';
+    const decision = await resolveDubbingTtsDecision({
+      config,
+      requestedProvider: 'openai',
+      requestedVoice: 'marin',
+      targetLanguage: 'en',
+      probe: vi.fn(async () => false),
+      localTts: {}
+    });
+    expect(decision).toMatchObject({ localTts: true, voiceCode: 'en-US-AriaNeural' });
+  });
+
+  it('ignores the local Edge TTS gateway for an unknown target language', async () => {
+    const decision = await resolveDubbingTtsDecision({
+      config: gatewayConfig(),
+      requestedProvider: 'openai',
+      requestedVoice: 'marin',
+      targetLanguage: 'auto',
+      probe: vi.fn(async () => false),
+      localTts: {}
+    });
+    expect(decision.localTts).toBeUndefined();
+  });
 });
 
 describe('isLoopbackBaseUrl', () => {

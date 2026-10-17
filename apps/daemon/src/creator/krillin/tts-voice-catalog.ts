@@ -3,6 +3,7 @@ import type {
   CreatorTtsVoice
 } from '@opencreator/protocol';
 import { listVolcengineTtsVoices } from './volcengine-tts-catalog.js';
+import { VIENEU_VOICES } from '../tts/vieneu.js';
 
 const QWEN3_TTS_FLASH = 'qwen3-tts-flash';
 const QWEN3_TTS_FLASH_2025_11_27 = 'qwen3-tts-flash-2025-11-27';
@@ -102,15 +103,16 @@ export function listBundledTtsVoices(
     ];
   }
   if (provider === 'vieneu') {
-    return [
-      { id: 'Mai Anh', name: 'Mai Anh (Nữ trẻ - v3 Turbo)', language: 'vi-VN', gender: 'female', provider: 'vieneu', scenario: 'v3 Turbo 48kHz', kind: 'builtin', recommended: true },
-      { id: 'Kim Thanh', name: 'Kim Thanh (Nữ ấm áp - v3 Turbo)', language: 'vi-VN', gender: 'female', provider: 'vieneu', scenario: 'v3 Turbo 48kHz', kind: 'builtin' },
-      { id: 'Adam', name: 'Adam (Nam trầm - v3 Turbo)', language: 'vi-VN', gender: 'male', provider: 'vieneu', scenario: 'v3 Turbo 48kHz', kind: 'builtin' },
-      { id: 'Minh Triết', name: 'Minh Triết (Nam dõng dạc - v3 Turbo)', language: 'vi-VN', gender: 'male', provider: 'vieneu', scenario: 'v3 Turbo 48kHz', kind: 'builtin' },
-      { id: 'Mỹ Duyên', name: 'Mỹ Duyên (Nữ truyền cảm - v3 Turbo)', language: 'vi-VN', gender: 'female', provider: 'vieneu', scenario: 'v3 Turbo 48kHz', kind: 'builtin' },
-      { id: 'default_female', name: 'Nữ trẻ chuẩn (v2)', language: 'vi-VN', gender: 'female', provider: 'vieneu', scenario: 'v2 24kHz', kind: 'builtin' },
-      { id: 'default_male', name: 'Nam trung niên (v2)', language: 'vi-VN', gender: 'male', provider: 'vieneu', scenario: 'v2 24kHz', kind: 'builtin' }
-    ];
+    return VIENEU_VOICES.map(voice => ({
+      id: voice.id,
+      name: voice.label,
+      language: 'vi-VN',
+      gender: voice.gender,
+      provider: 'vieneu' as const,
+      scenario: voice.model === 'v3turbo' ? 'v3 Turbo 48kHz' : 'v2 24kHz',
+      kind: 'builtin' as const,
+      ...(voice.recommended === true ? { recommended: true } : {})
+    }));
   }
   if (provider === 'volcengine') {
     return listVolcengineTtsVoices(model);

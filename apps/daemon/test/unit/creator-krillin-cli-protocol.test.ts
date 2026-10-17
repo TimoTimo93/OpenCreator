@@ -201,6 +201,15 @@ describe('KrillinAI CLI protocol', () => {
     expect(createKrillinConfigToml(config)).toContain('model = "large-v3-turbo"');
   });
 
+  it('disables the CLI text rewrite so dubbing keeps the OpenCreator translation', () => {
+    const config = createDefaultCreatorServicesConfig();
+
+    const document = parse(createKrillinConfigToml(config)) as {
+      dubbing: { enable_text_rewrite: boolean };
+    };
+    expect(document.dubbing.enable_text_rewrite).toBe(false);
+  });
+
   it('passes the configured FunASR endpoint, model and timeout to KrillinAI', () => {
     const config = createDefaultCreatorServicesConfig();
     config.transcription.provider = 'funasr';

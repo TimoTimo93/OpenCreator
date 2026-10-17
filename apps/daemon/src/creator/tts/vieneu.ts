@@ -8,13 +8,31 @@ export type VieNeuVoice = {
 };
 
 export const VIENEU_VOICES: VieNeuVoice[] = [
-  { id: 'Mai Anh', name: 'Mai Anh', label: 'Mai Anh (Nữ trẻ - v3 Turbo)', gender: 'female', model: 'v3turbo', recommended: true },
-  { id: 'Kim Thanh', name: 'Kim Thanh', label: 'Kim Thanh (Nữ ấm áp - v3 Turbo)', gender: 'female', model: 'v3turbo' },
-  { id: 'Adam', name: 'Adam', label: 'Adam (Nam trầm - v3 Turbo)', gender: 'male', model: 'v3turbo' },
-  { id: 'Minh Triết', name: 'Minh Triết', label: 'Minh Triết (Nam dõng dạc - v3 Turbo)', gender: 'male', model: 'v3turbo' },
-  { id: 'Mỹ Duyên', name: 'Mỹ Duyên', label: 'Mỹ Duyên (Nữ truyền cảm - v3 Turbo)', gender: 'female', model: 'v3turbo' },
-  { id: 'default_female', name: 'Nữ trẻ chuẩn', label: 'Nữ trẻ chuẩn (v2)', gender: 'female', model: 'v2' },
-  { id: 'default_male', name: 'Nam trung niên chuẩn', label: 'Nam trung niên chuẩn (v2)', gender: 'male', model: 'v2' }
+  { id: 'Hải Đăng', name: 'Hải Đăng', label: 'Hải Đăng (Nam · Bắc · Tự nhiên)', gender: 'male', model: 'v3turbo', recommended: true },
+  { id: 'Adam bựa', name: 'Adam bựa', label: 'Adam bựa (Nam · Bắc · Tự nhiên)', gender: 'male', model: 'v3turbo' },
+  { id: 'Trúc Ly', name: 'Trúc Ly', label: 'Trúc Ly (Nữ · Bắc · Tự nhiên)', gender: 'female', model: 'v3turbo' },
+  { id: 'Thiện Minh', name: 'Thiện Minh', label: 'Thiện Minh (Nam · Bắc · Kể chuyện)', gender: 'male', model: 'v3turbo' },
+  { id: 'Mai Anh', name: 'Mai Anh', label: 'Mai Anh (Nữ · Bắc · Tin tức)', gender: 'female', model: 'v3turbo' },
+  { id: 'Thùy Dung', name: 'Thùy Dung', label: 'Thùy Dung (Nữ · Nam · Tin tức)', gender: 'female', model: 'v3turbo' },
+  { id: 'Thiền Tâm Đức', name: 'Thiền Tâm Đức', label: 'Thiền Tâm Đức (Nam · Bắc · Kể chuyện)', gender: 'male', model: 'v3turbo' },
+  { id: 'Ngọc Huyền', name: 'Ngọc Huyền', label: 'Ngọc Huyền (Nữ · Bắc · Tự nhiên)', gender: 'female', model: 'v3turbo' },
+  { id: 'Quang Sơn', name: 'Quang Sơn', label: 'Quang Sơn (Nam · Trung · Tự nhiên)', gender: 'male', model: 'v3turbo' },
+  { id: 'Ngọc Trân', name: 'Ngọc Trân', label: 'Ngọc Trân (Nữ · Trung · Tự nhiên)', gender: 'female', model: 'v3turbo' },
+  { id: 'Adam', name: 'Adam', label: 'Adam (Nam · Nam · Tự nhiên)', gender: 'male', model: 'v3turbo' },
+  { id: 'Kim Thanh', name: 'Kim Thanh', label: 'Kim Thanh (Nữ · Nam · Kể chuyện)', gender: 'female', model: 'v3turbo' },
+  { id: 'Minh Triết', name: 'Minh Triết', label: 'Minh Triết (Nam · Nam · Tin tức)', gender: 'male', model: 'v3turbo' },
+  { id: 'Minh Đức', name: 'Minh Đức', label: 'Minh Đức (Nam · Bắc · Tin tức)', gender: 'male', model: 'v3turbo' },
+  { id: 'Mỹ Duyên', name: 'Mỹ Duyên', label: 'Mỹ Duyên (Nữ · Nam · Kể chuyện)', gender: 'female', model: 'v3turbo' },
+  { id: 'Ngọc Linh', name: 'Ngọc Linh', label: 'Ngọc Linh (Nữ · Bắc · Kể chuyện)', gender: 'female', model: 'v3turbo' },
+  { id: 'Phạm Tuyên', name: 'Phạm Tuyên', label: 'Phạm Tuyên (Nam · Bắc · Tự nhiên)', gender: 'male', model: 'v3turbo' },
+  { id: 'Quốc Tuấn', name: 'Quốc Tuấn', label: 'Quốc Tuấn (Nam · Bắc · Tự nhiên)', gender: 'male', model: 'v3turbo' },
+  { id: 'Quỳnh Anh', name: 'Quỳnh Anh', label: 'Quỳnh Anh (Nữ · Bắc · Kể chuyện)', gender: 'female', model: 'v3turbo' },
+  { id: 'Thanh Bình', name: 'Thanh Bình', label: 'Thanh Bình (Nam · Bắc · Kể chuyện)', gender: 'male', model: 'v3turbo' },
+  { id: 'Thái Sơn', name: 'Thái Sơn', label: 'Thái Sơn (Nam · Nam · Kể chuyện)', gender: 'male', model: 'v3turbo' },
+  { id: 'Thục Đoan', name: 'Thục Đoan', label: 'Thục Đoan (Nữ · Nam · Kể chuyện)', gender: 'female', model: 'v3turbo' },
+  { id: 'Xuân Vĩnh', name: 'Xuân Vĩnh', label: 'Xuân Vĩnh (Nam · Bắc · Tự nhiên)', gender: 'male', model: 'v3turbo' },
+  { id: 'Đoan Trang', name: 'Đoan Trang', label: 'Đoan Trang (Nữ · Bắc · Tự nhiên)', gender: 'female', model: 'v3turbo' },
+  { id: 'Đức Trí', name: 'Đức Trí', label: 'Đức Trí (Nam · Nam · Kể chuyện)', gender: 'male', model: 'v3turbo' }
 ];
 
 export const DEFAULT_VIENEU_BASE_URL = 'http://127.0.0.1:7860';

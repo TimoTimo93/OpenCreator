@@ -42,6 +42,10 @@ import { createCreatorStageScheduler } from '../creator/stage-scheduler.js';
 import { createCreatorCommandDispatcher } from '../creator/command-dispatcher.js';
 import type { CreatorExecutor } from '../creator/executor.js';
 import { createKrillinExecutor } from '../creator/krillin/adapter.js';
+import { createEdgeTtsEngine, createEdgeTtsProbe } from '../creator/krillin/edge-tts-engine.js';
+import { createVieNeuEngine } from '../creator/krillin/vieneu-engine.js';
+import { createKrillinTtsGateway } from '../creator/krillin/tts-gateway.js';
+import { createLocalTtsSynthesizer } from '../creator/krillin/local-tts.js';
 import { probeDubbingTtsProvider } from '../creator/krillin/tts-probe.js';
 import { createKrillinDependencyLoader } from '../creator/krillin/dependency-loader.js';
 import { readKrillinRuntimeManifest, resolveInside } from '../creator/krillin/manifest.js';
@@ -254,6 +258,8 @@ import { createCodexAppServerHost } from '../codex/app-server-host-2026-07-28.js
 import { registerCreatorRoutes } from './routes.creator.js';
 import { registerCreatorRuntimeRoutes } from './routes.creator-runtime.js';
 import { registerCreatorDramaRoutes } from './routes.creator-drama.js';
+import { createDramaTitleTranslator } from '../creator/drama/title-translator.js';
+import { KRILLIN_TTS_ROUTE_PREFIX } from '../creator/krillin/tts-gateway.js';
 import { registerDiagnosticsRoutes } from './routes.diagnostics.js';
 import { registerImageGenerationRoutes } from './routes.image-generation.js';
 import { registerMcpRoutes } from './routes.mcp.js';
@@ -622,6 +628,27 @@ export async function buildServer(input: BuildServerInput) {
     readConfiguration: createFollowingLocalCodexHome(localCodexHome,
       join(runtimeDir, 'creator-text-codex'))
   });
+  // Cổng TTS cục bộ: cho giai đoạn lồng tiếng của Dịch video một endpoint kiểu
+  // OpenAI luôn chạy được. Ưu tiên VieNeu-TTS v3 Turbo (giọng Việt chất lượng cao,
+  // chạy CPU cục bộ); chỉ rơi về Edge TTS (miễn phí) khi VieNeu không dùng được.
+  const krillinEdgeTtsEngine = createEdgeTtsEngine();
+  const krillinVieNeuEngine = createVieNeuEngine({
+    runtimeDir,
+    readConfig: async () => {
+      const configured = await creatorServicesConfigStore.read();
+      return {
+        ...(configured.tts.vieneu?.baseUrl === undefined ? {} : { baseUrl: configured.tts.vieneu.baseUrl }),
+        ...(configured.tts.vieneu?.defaultVoiceId === undefined
+          ? {}
+          : { defaultVoiceId: configured.tts.vieneu.defaultVoiceId })
+      };
+    }
+  });
+  const synthesizeLocalSpeech = createLocalTtsSynthesizer({
+    vieNeu: krillinVieNeuEngine,
+    edge: krillinEdgeTtsEngine
+  }).synthesize;
+  const krillinTtsGateway = createKrillinTtsGateway({ synthesize: synthesizeLocalSpeech });
   const creatorAgentBootstrapInput = {
     sourceCodexHome: localCodexHome,
     runtimeRoot: runtimeDir,
@@ -923,7 +950,15 @@ export async function buildServer(input: BuildServerInput) {
         getYtDlpRuntime,
         verificationCachePath: krillinVerificationCachePath,
         ensureRuntimeReady: () => ensureKrillinRuntimeReady(),
-        ttsProbe: candidate => probeDubbingTtsProvider(krillinTtsService, candidate)
+        ttsProbe: candidate => probeDubbingTtsProvider(krillinTtsService, candidate),
+        getLocalTtsConfig: voice => {
+          const origin = resolveListeningOrigin(server.server.address());
+          if (origin === undefined) return undefined;
+          const requested = voice.trim();
+          return krillinTtsGateway.config(origin, requested === '' ? 'Hải Đăng' : requested);
+        },
+        probeLocalTts: async () =>
+          (await krillinVieNeuEngine.isAvailable()) || createEdgeTtsProbe(krillinEdgeTtsEngine)()
       }));
     }
     if (
@@ -1481,6 +1516,8 @@ export async function buildServer(input: BuildServerInput) {
     await capture(() => creatorAppServerRuntimeManager?.close());
     await capture(() => stickmanContentRuntimeManager?.close());
     await capture(() => krillinCodexLlmGateway.close());
+    await capture(() => krillinEdgeTtsEngine.close());
+    await capture(() => krillinVieNeuEngine.close());
     await capture(() => codexSessionProvider.close());
     await capture(() => codexModelCatalog.close());
     await capture(() => codexControlClient.close());
@@ -1501,6 +1538,7 @@ export async function buildServer(input: BuildServerInput) {
     if (request.url === '/healthz') return;
     if (isAgentToolInternalRequest(request.url)) return;
     if (request.url.startsWith(`${KRILLIN_LLM_ROUTE_PREFIX}/`)) return;
+    if (request.url.startsWith(`${KRILLIN_TTS_ROUTE_PREFIX}/`)) return;
     await auth(request, reply);
   });
 
@@ -1565,6 +1603,7 @@ export async function buildServer(input: BuildServerInput) {
     })
   });
   await krillinCodexLlmGateway.register(server);
+  await krillinTtsGateway.register(server);
   if (input.agentToolsEnabled === true) {
     await registerAgentScheduleMcpRoute(server, {
       capabilities: agentCapabilityTokens,
@@ -1610,7 +1649,21 @@ export async function buildServer(input: BuildServerInput) {
     remotion: remotionComponent,
     readConfig: () => creatorServicesConfigStore.read()
   }, creatorHongguoComponentManager);
-  await registerCreatorDramaRoutes(server, creatorHongguoComponentManager);
+  const dramaTitleTranslator = createDramaTitleTranslator({
+    cachePath: join(dataDir, 'drama-title-cache.json'),
+    readLlmConfig: async () => {
+      const services = await creatorServicesConfigStore.read();
+      return {
+        baseUrl: services.llm.baseUrl,
+        apiKey: services.llm.apiKey,
+        model: services.llm.model,
+        agnesAi: services.llm.agnesAi,
+        failoverToAgnes: services.llm.failoverToAgnes
+      };
+    },
+    log: message => console.warn(`[drama-title] ${message}`)
+  });
+  await registerCreatorDramaRoutes(server, creatorHongguoComponentManager, dramaTitleTranslator);
   await registerImageGenerationRoutes(server, imageGenerationService);
   await registerCreatorRoutes(server, creatorService, creatorEvents, {
     sseHeartbeatMs: input.sseHeartbeatMs,

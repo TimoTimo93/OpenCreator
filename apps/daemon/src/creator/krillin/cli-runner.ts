@@ -15,6 +15,7 @@ import { spawnCreatorProcess } from '../process-tree.js';
 import { createKrillinConfigToml } from './config-bridge.js';
 import { gatewayCreatorBinding } from '../../gateway/creator-service-source.js';
 import { isYouTubeSource } from './execution-plan.js';
+import type { KrillinTtsGatewayConfig } from './tts-gateway.js';
 import {
   resolveInside,
   type KrillinRuntimeManifest
@@ -101,6 +102,8 @@ type RunKrillinCliInput = {
   options: Record<string, unknown>;
   ytDlpRuntime?: YtDlpRuntime;
   llmOverride?: { baseUrl: string; apiKey: string; model: string };
+  /** Ghi đè endpoint TTS (cổng Edge TTS cục bộ) cho giai đoạn lồng tiếng. */
+  ttsOverride?: KrillinTtsGatewayConfig;
 };
 
 export async function runKrillinCli(input: RunKrillinCliInput): Promise<KrillinResultArtifact[]> {
@@ -133,7 +136,12 @@ export async function runKrillinCli(input: RunKrillinCliInput): Promise<KrillinR
       : undefined,
     ytDlpRuntime: input.ytDlpRuntime
   });
-  const cliConfig = stageConfig(input.config, krillinCliStageId(input.stage.stageRun.stageId), input.options);
+  const cliConfig = stageConfig(
+    input.config,
+    krillinCliStageId(input.stage.stageRun.stageId),
+    input.options,
+    input.ttsOverride
+  );
   await writeFile(
     join(configDir, 'config.toml'),
     createKrillinConfigToml(cliConfig, input.llmOverride, gatewayCreatorBinding(input.config)?.models.transcription),
@@ -219,11 +227,27 @@ export async function runKrillinCli(input: RunKrillinCliInput): Promise<KrillinR
   }
 }
 
-function stageConfig(
+export function stageConfig(
   source: CreatorServicesConfig,
   stageId: string,
-  options: Record<string, unknown>
+  options: Record<string, unknown>,
+  ttsOverride?: KrillinTtsGatewayConfig
 ): CreatorServicesConfig {
+  // `render-horizontal`/`render-vertical` cũng tự sinh giọng khi lồng tiếng, nên phải
+  // nhận cùng cổng TTS cục bộ; nếu không chúng sẽ gọi thẳng nhà cung cấp ngoài.
+  const speechCapable = stageId === 'tts'
+    || stageId === 'render-horizontal'
+    || stageId === 'render-vertical';
+  if (!speechCapable) return source;
+  const config = structuredClone(source);
+  if (ttsOverride !== undefined) {
+    config.tts.provider = 'openai';
+    config.tts.openai.baseUrl = ttsOverride.baseUrl;
+    config.tts.openai.apiKey = ttsOverride.apiKey;
+    config.tts.openai.model = ttsOverride.model;
+    config.tts.openai.defaultVoiceId = ttsOverride.defaultVoiceId;
+    return config;
+  }
   if (stageId !== 'tts') return source;
   const provider = stringOption(options, 'ttsProvider');
   if (
@@ -233,7 +257,6 @@ function stageConfig(
     && provider !== 'edge-tts'
     && provider !== 'volcengine'
   ) return source;
-  const config = structuredClone(source);
   config.tts.provider = provider;
   if (provider !== 'edge-tts') {
     const model = stringOption(options, 'ttsModel');
