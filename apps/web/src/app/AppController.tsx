@@ -622,7 +622,10 @@ export function AppController(props: AppControllerProps) {
   );
   const gatewayAccountService = useMemo(() => runtimeClient === null ? null : createGatewayAccountService(runtimeClient, { authorizationReturnUrl: hostBridge.authorizationReturnUrl, billingReturnUrl: hostBridge.billingReturnUrl }), [runtimeClient, hostBridge]);
   useEffect(() => hostBridge.subscribeBillingReturn?.(billingOrderId => {
-    props.onNavigate({ view: 'account', ...(billingOrderId ? { billingOrderId } : {}) });
+    // Trang tài khoản đã bị bỏ khỏi giao diện, nên kết quả thanh toán quay về
+    // mục “Cấu hình API” trong Cài đặt (nơi quản lý khoá dịch vụ).
+    void billingOrderId;
+    props.onNavigate({ view: 'settings', tab: 'ai-services', section: 'text' });
   }), [hostBridge, props.onNavigate]);
   const platformConnectionsService = useMemo(() => runtimeClient === null ? null : createPlatformConnectionsService(runtimeClient), [runtimeClient]);
   const [gatewayAccountState, setGatewayAccountState] = useState<GatewayAccountState>();
