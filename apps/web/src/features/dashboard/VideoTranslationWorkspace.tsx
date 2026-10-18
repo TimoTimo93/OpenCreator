@@ -101,6 +101,8 @@ type TranslationSettingsSnapshot = {
   subtitleShadowOffsetY: number;
   subtitleShadowBlur: number;
   dubbing: boolean;
+  keepBackgroundAudio: boolean;
+  bgmRetention: number;
   ttsProvider: CreatorTtsProvider;
   ttsModel: string;
   voiceCode: string;
@@ -374,6 +376,8 @@ function sameSettings(left: TranslationSettingsSnapshot, right: TranslationSetti
     && left.preferPlatformCaptions === right.preferPlatformCaptions
     && sameSubtitleStyle(left, right)
     && left.dubbing === right.dubbing
+    && left.keepBackgroundAudio === right.keepBackgroundAudio
+    && left.bgmRetention === right.bgmRetention
     && left.ttsProvider === right.ttsProvider
     && left.ttsModel === right.ttsModel
     && left.voiceCode === right.voiceCode
@@ -428,7 +432,9 @@ function translationChanges(
     || version.settings.ttsProvider !== settings.ttsProvider
     || version.settings.ttsModel !== settings.ttsModel
     || version.settings.voiceCode !== settings.voiceCode
-    || version.settings.voiceName !== settings.voiceName;
+    || version.settings.voiceName !== settings.voiceName
+    || version.settings.keepBackgroundAudio !== settings.keepBackgroundAudio
+    || version.settings.bgmRetention !== settings.bgmRetention;
   const outputChanged = version.settings.composeVideo !== settings.composeVideo
     || version.settings.videoFormat !== settings.videoFormat
     || version.settings.verticalTitle !== settings.verticalTitle
@@ -576,6 +582,12 @@ function deserializeResultVersions(value: CreatorJson | undefined): TranslationR
         preferPlatformCaptions: settingsRecord.preferPlatformCaptions,
         ...readSubtitleStyleSettings(settingsRecord, {}, undefined),
         dubbing: settingsRecord.dubbing,
+        keepBackgroundAudio: typeof settingsRecord.keepBackgroundAudio === 'boolean'
+          ? settingsRecord.keepBackgroundAudio
+          : true,
+        bgmRetention: typeof settingsRecord.bgmRetention === 'number' && Number.isFinite(settingsRecord.bgmRetention)
+          ? Math.min(1, Math.max(0, settingsRecord.bgmRetention))
+          : 0.8,
         ttsProvider: isTtsProvider(settingsRecord.ttsProvider)
           ? settingsRecord.ttsProvider
           : 'openai',
@@ -976,6 +988,16 @@ function resultVersionFromSnapshot(
       ),
       ...readSubtitleStyleSettings(sourceState, fallbackState, persisted),
       dubbing: readBooleanSetting(sourceState, fallbackState, persisted, 'dubbing', true),
+      keepBackgroundAudio: readBooleanSetting(
+        sourceState,
+        fallbackState,
+        persisted,
+        'keepBackgroundAudio',
+        true
+      ),
+      bgmRetention: typeof (sourceState.bgmRetention ?? fallbackState.bgmRetention) === 'number'
+        ? Math.min(1, Math.max(0, Number(sourceState.bgmRetention ?? fallbackState.bgmRetention)))
+        : persisted?.settings.bgmRetention ?? 0.8,
       ttsProvider: readTtsProviderSetting(sourceState, fallbackState, persisted),
       ttsModel: readStringSetting(sourceState, fallbackState, persisted, 'ttsModel', ''),
       voiceCode: readStringSetting(sourceState, fallbackState, persisted, 'voiceCode', ''),
@@ -1175,7 +1197,7 @@ function readBooleanSetting(
   state: Record<string, CreatorJson>,
   fallback: Record<string, CreatorJson>,
   persisted: TranslationResultVersion | undefined,
-  key: 'bilingual' | 'preferPlatformCaptions' | 'dubbing' | 'composeVideo',
+  key: 'bilingual' | 'preferPlatformCaptions' | 'dubbing' | 'composeVideo' | 'keepBackgroundAudio',
   defaultValue: boolean
 ): boolean {
   const value = state[key] ?? fallback[key];
@@ -1664,6 +1686,8 @@ export default function VideoTranslationWorkspace(props: {
   const [subtitleShadowOffsetY, setSubtitleShadowOffsetY] = useState(defaultSubtitleStyle.subtitleShadowOffsetY);
   const [subtitleShadowBlur, setSubtitleShadowBlur] = useState(defaultSubtitleStyle.subtitleShadowBlur);
   const [dubbingRequested, setDubbing] = useState(true);
+  const [keepBackgroundAudio, setKeepBackgroundAudio] = useState(true);
+  const [bgmRetention, setBgmRetention] = useState(0.8);
   const [ttsProvider, setTtsProvider] = useState<CreatorTtsProvider>('openai');
   const [ttsModel, setTtsModel] = useState('gpt-4o-mini-tts');
   const [voiceCode, setVoiceCode] = useState('');
@@ -1775,6 +1799,10 @@ export default function VideoTranslationWorkspace(props: {
     setSubtitleShadowOffsetY(persistedSubtitleStyle.subtitleShadowOffsetY);
     setSubtitleShadowBlur(persistedSubtitleStyle.subtitleShadowBlur);
     if (typeof persisted.dubbing === 'boolean') setDubbing(persisted.dubbing);
+  if (typeof persisted.keepBackgroundAudio === 'boolean') setKeepBackgroundAudio(persisted.keepBackgroundAudio);
+  if (typeof persisted.bgmRetention === 'number' && Number.isFinite(persisted.bgmRetention)) {
+    setBgmRetention(Math.min(1, Math.max(0, persisted.bgmRetention)));
+  }
     if (isTtsProvider(persisted.ttsProvider)) setTtsProvider(persisted.ttsProvider);
     if (typeof persisted.ttsModel === 'string') setTtsModel(persisted.ttsModel);
     if (typeof persisted.voiceCode === 'string') setVoiceCode(persisted.voiceCode);
@@ -2010,6 +2038,8 @@ export default function VideoTranslationWorkspace(props: {
       preferPlatformCaptions,
       subtitleStyle,
       dubbing,
+      keepBackgroundAudio,
+      bgmRetention,
       ttsProvider,
       ttsModel,
       voiceCode,
@@ -2044,6 +2074,8 @@ export default function VideoTranslationWorkspace(props: {
     creatorSession,
     currentStep,
     dubbing,
+    keepBackgroundAudio,
+    bgmRetention,
     furthestStep,
     preferPlatformCaptions,
     resultTab,
@@ -2655,6 +2687,8 @@ export default function VideoTranslationWorkspace(props: {
       subtitleShadowOffsetY,
       subtitleShadowBlur,
       dubbing,
+      keepBackgroundAudio,
+      bgmRetention,
       ttsProvider,
       ttsModel,
       voiceCode,
@@ -2697,6 +2731,8 @@ export default function VideoTranslationWorkspace(props: {
     setSubtitleShadowOffsetY(settings.subtitleShadowOffsetY);
     setSubtitleShadowBlur(settings.subtitleShadowBlur);
     setDubbing(settings.dubbing);
+    setKeepBackgroundAudio(settings.keepBackgroundAudio);
+    setBgmRetention(settings.bgmRetention);
     setTtsProvider(settings.ttsProvider);
     setTtsModel(settings.ttsModel);
     setVoiceCode(settings.voiceCode);
@@ -3852,6 +3888,31 @@ export default function VideoTranslationWorkspace(props: {
                             }}
                             onVoiceResolved={voice => setVoiceName(voice.name)}
                           />
+                          <Switch
+                            checked={keepBackgroundAudio}
+                            label={l('保留背景音乐与音效', 'Keep background music & effects')}
+                            description={l(
+                              '用 AI 把原片人声从音乐中分离出来，只去掉旧配音的原始人声，背景音乐保留到所选音量',
+                              'AI-separates the original voice track from music so the old dub voice is removed while music and effects are kept at the chosen level'
+                            )}
+                            onChange={value => setKeepBackgroundAudio(value)}
+                          />
+                          {keepBackgroundAudio ? (
+                            <div className="video-translation-style-fields">
+                              <label className="video-translation-field video-translation-bgm-retention">
+                                <span>{l('背景音乐音量', 'Background music level')}</span>
+                                <input
+                                  type="range"
+                                  min="0.3"
+                                  max="1"
+                                  step="0.05"
+                                  value={bgmRetention}
+                                  onChange={event => setBgmRetention(Number(event.target.value))}
+                                />
+                                <em>{Math.round(bgmRetention * 100)}%</em>
+                              </label>
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>

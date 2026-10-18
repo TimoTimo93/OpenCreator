@@ -51,6 +51,8 @@ const videoTranslationDefaultsSchema = z.object({
   subtitleStyle: creatorSubtitleStyleSchema,
   // Mặc định lồng tiếng: video dịch xuất ra phải có giọng đọc tiếng Việt.
   dubbing: z.boolean().default(true),
+  keepBackgroundAudio: z.boolean().default(true),
+  bgmRetention: z.number().min(0).max(1).default(0.8),
   voiceCode: shortTextSchema.default(''),
   voiceName: shortTextSchema.default(''),
   composeVideo: z.boolean().default(true),

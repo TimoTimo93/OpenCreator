@@ -12,6 +12,16 @@ import { CreatorExecutorError } from '../executor.js';
 import { sha256CreatorFile } from '../file-hash.js';
 import { publicErrorKindForCode, sanitizePublicErrorFacts, type PublicErrorFacts } from '@opencreator/protocol';
 import { spawnCreatorProcess } from '../process-tree.js';
+import {
+  BGM_SEPARATION_MODEL,
+  ensureSeparationRuntime,
+  extractSourceAudio,
+  mixDubVoiceWithBackground,
+  replaceDubbedVideoAudio,
+  resolveBackgroundMusicSettings,
+  resolveSeparationRuntimeRoot,
+  separateBackgroundStem
+} from '../audio/bgm-separation.js';
 import { createKrillinConfigToml } from './config-bridge.js';
 import { gatewayCreatorBinding } from '../../gateway/creator-service-source.js';
 import { isYouTubeSource } from './execution-plan.js';
@@ -203,13 +213,14 @@ export async function runKrillinCli(input: RunKrillinCliInput): Promise<KrillinR
       response = recovered;
     }
     const artifacts = await collectArtifacts(input, response);
+    const restored = await restoreBackgroundMusicForDubbedStage(input, artifacts);
     input.stage.reportProgress({
       krillinMode: 'cli',
       providerStatus: 'succeeded',
       percent: 100,
-      completedOutputKinds: artifacts.map(artifact => artifact.kind)
+      completedOutputKinds: restored.map(artifact => artifact.kind)
     });
-    return artifacts;
+    return restored;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'KrillinAI CLI failed';
     input.stage.reportProgress({
@@ -540,8 +551,7 @@ async function collectArtifacts(
   return result;
 }
 
-export function outputMappings(stageId: string): Array<[string, string]> {
-  if (stageId === 'source-transcript') return [['origin_srt', 'source_subtitle']];
+export function outputMappings(stageId: string): Array<[string, string]> {  if (stageId === 'source-transcript') return [['origin_srt', 'source_subtitle']];
   if (stageId === 'narration') return [['tts_audio', 'narration_audio']];
   if (stageId === 'subtitles') return [['bilingual_srt', 'bilingual_subtitle']];
   if (stageId === 'bilingual-render') return [['horizontal_video', 'bilingual_video']];
@@ -560,8 +570,125 @@ export function outputMappings(stageId: string): Array<[string, string]> {
   return [];
 }
 
-function krillinCliStageId(stageId: string): string {
-  if (stageId === 'source-transcript' || stageId === 'subtitles') return 'subtitle';
+/**
+ * Khôi phục nhạc nền sau giai đoạn lồng tiếng (tts): tách giọng/video gốc bằng
+ * model MDX-Net, ghép stem nhạc nền (âm lượng theo cấu hình `bgmRetention`,
+ * mặc định 80%) với audio lồng tiếng, rồi ghi đè lại artifact dubbed_video /
+ * dubbed_audio. Pipeline không bao giờ bị chặn nếu phần tách giọng lỗi.
+ */
+async function restoreBackgroundMusicForDubbedStage(
+  input: RunKrillinCliInput,
+  artifacts: KrillinResultArtifact[]
+): Promise<KrillinResultArtifact[]> {
+  if (input.stage.stageRun.stageId !== 'tts') return artifacts;
+  const settings = resolveBackgroundMusicSettings(input.options);
+  if (!settings.enabled) return artifacts;
+  const dubbedAudio = artifacts.find(entry => entry.kind === 'dubbed_audio');
+  const dubbedVideo = artifacts.find(entry => entry.kind === 'dubbed_video');
+  if (dubbedAudio === undefined) return artifacts;
+  const sourceVideoPath = input.artifacts.find(entry => entry.kind === 'source_video')?.path
+    ?? (dubbedVideo === undefined ? undefined : resolve(input.jobsRoot, dubbedVideo.relativePath));
+  if (sourceVideoPath === undefined) return artifacts;
+  const ffmpeg = input.manifest.resources.find(resource => (
+    resource.kind === 'executable'
+    && /(?:^|\/)ffmpeg(?:\.exe)?$/i.test(resource.path)
+  ));
+  if (ffmpeg === undefined) return artifacts;
+  const ffmpegPath = resolveInside(input.resourceRoot, ffmpeg.path);
+
+  const reportLocal = (progress: Record<string, unknown>) => input.stage.reportProgress({
+    krillinMode: 'local-audio',
+    providerStatus: 'running',
+    ...progress
+  });
+  reportLocal({
+    phase: 'bgm_restore',
+    percent: 8,
+    message: 'Đang khôi phục nhạc nền (tách giọng bằng model MDX-Net)'
+  });
+
+  const tmpDir = join(input.stage.workdir, `.bgm-${Date.now()}`);
+  await mkdir(tmpDir, { recursive: true });
+  try {
+    await ensureSeparationRuntime({
+      root: resolveSeparationRuntimeRoot(),
+      reportProgress: reportLocal,
+      signal: input.stage.signal
+    });
+    const separationLayout = {
+      separatorExe: join(resolveSeparationRuntimeRoot(), 'python', 'Scripts', 'audio-separator.exe'),
+      modelsDir: join(resolveSeparationRuntimeRoot(), 'models')
+    };
+    const audioPath = await extractSourceAudio({
+      ffmpegPath,
+      videoPath: sourceVideoPath,
+      outputPath: join(tmpDir, 'source-audio.wav'),
+      signal: input.stage.signal
+    });
+    const stems = await separateBackgroundStem({
+      separatorExe: separationLayout.separatorExe,
+      modelsDir: separationLayout.modelsDir,
+      audioPath,
+      outputDir: join(tmpDir, 'stems'),
+      reportProgress: reportLocal,
+      signal: input.stage.signal
+    });
+    const mixedPath = join(tmpDir, 'dubbed-with-bgm.wav');
+    const dubAudioPath = resolve(input.jobsRoot, dubbedAudio.relativePath);
+    await mixDubVoiceWithBackground({
+      ffmpegPath,
+      backgroundPath: stems.instrumentalPath,
+      dubAudioPath,
+      outputPath: mixedPath,
+      retention: settings.retention,
+      signal: input.stage.signal
+    });
+    const updated = [...artifacts];
+    if (dubbedVideo !== undefined) {
+      const dubbedVideoPath = resolve(input.jobsRoot, dubbedVideo.relativePath);
+      await replaceDubbedVideoAudio({
+        ffmpegPath,
+        dubbedVideoPath,
+        mixedAudioPath: mixedPath,
+        reportProgress: reportLocal,
+        signal: input.stage.signal
+      });
+      const videoIndex = updated.findIndex(entry => entry.kind === 'dubbed_video');
+      const videoArtifact = updated[videoIndex];
+      if (videoArtifact !== undefined) {
+        const info = await stat(dubbedVideoPath);
+        updated[videoIndex] = {
+          ...videoArtifact,
+          size: info.size,
+          sha256: await sha256CreatorFile(dubbedVideoPath, input.stage.signal)
+        };
+      }
+    }
+    await copyFile(mixedPath, dubAudioPath);
+    const audioIndex = updated.findIndex(entry => entry.kind === 'dubbed_audio');
+    const audioArtifact = updated[audioIndex];
+    if (audioArtifact !== undefined) {
+      const info = await stat(dubAudioPath);
+      updated[audioIndex] = {
+        ...audioArtifact,
+        size: info.size,
+        sha256: await sha256CreatorFile(dubAudioPath, input.stage.signal)
+      };
+    }
+    return updated;
+  } catch (error) {
+    reportLocal({
+      phase: 'bgm_restore_skipped',
+      percent: 100,
+      bgmRestoreWarning: error instanceof Error ? error.message : String(error)
+    });
+    return artifacts;
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+function krillinCliStageId(stageId: string): string {  if (stageId === 'source-transcript' || stageId === 'subtitles') return 'subtitle';
   if (stageId === 'narration') return 'tts';
   if (stageId === 'bilingual-render') return 'render-horizontal';
   return stageId;

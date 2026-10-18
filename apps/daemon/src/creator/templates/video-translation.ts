@@ -38,6 +38,10 @@ function createVideoTranslationTemplateDefinition(version: 1 | 2): CreatorTempla
       ttsModel: z.string().optional(),
       voiceCode: z.string().optional(),
       voiceName: z.string().optional(),
+      // Giữ lại nhạc nền/hiệu ứng âm thanh của video gốc sau khi thay giọng:
+      // tách stems bằng model UVR MDX-Net rồi trộn lại với giọng lồng mới.
+      keepBackgroundAudio: z.boolean().default(true),
+      bgmRetention: z.number().min(0).max(1).default(0.8),
       composeVideo: z.boolean().default(true),
       videoFormat: z.enum(['horizontal', 'vertical', 'all']).default('horizontal'),
       verticalTitle: z.string().max(80).default(''),

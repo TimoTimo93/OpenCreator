@@ -595,6 +595,8 @@ function fallbackState() {
     subtitlePosition: 'top',
     preferPlatformCaptions: true,
     dubbing: false,
+    keepBackgroundAudio: true,
+    bgmRetention: 0.8,
     voiceCode: '',
     composeVideo: true,
     videoFormat: 'horizontal',
@@ -614,6 +616,8 @@ function resultVersion(input: {
     composeVideo: boolean;
     videoFormat: 'horizontal' | 'vertical' | 'all';
     dubbing: boolean;
+    keepBackgroundAudio: boolean;
+    bgmRetention: number;
     voiceCode: string;
     verticalTitle: string;
     verticalSubtitle: string;
@@ -667,6 +671,8 @@ function resultVersion(input: {
       subtitleShadowOffsetY: settings.subtitleShadowOffsetY ?? 2,
       subtitleShadowBlur: settings.subtitleShadowBlur ?? 1,
       dubbing: settings.dubbing,
+      keepBackgroundAudio: settings.keepBackgroundAudio,
+      bgmRetention: settings.bgmRetention,
       ttsProvider: settings.ttsProvider ?? 'openai',
       ttsModel: settings.ttsModel ?? 'gpt-4o-mini-tts',
       voiceCode: settings.voiceCode,
