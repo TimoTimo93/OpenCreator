@@ -56,6 +56,7 @@ import {
 import { fileFromLocalPath } from './local-media-file.js';
 import { takePendingTranslationSource } from './pending-translation-source.js';
 import {
+  isCreatorTtsProvider,
   readCreatorResultSnapshots,
   parseBilibiliVideoSource,
   normalizeVideoSourceUrl,
@@ -307,6 +308,8 @@ function ttsProviderLabel(provider: CreatorTtsProvider, l: LocalizeCopy): string
   if (provider === 'minimax') return 'MiniMax';
   if (provider === 'volcengine') return l('火山引擎', 'Volcengine');
   if (provider === 'edge-tts') return 'Edge TTS';
+  if (provider === 'elevenlabs') return 'ElevenLabs TTS';
+  if (provider === 'vieneu') return l('VieNeu-TTS (cục bộ)', 'VieNeu-TTS (local)');
   return 'OpenAI TTS';
 }
 
@@ -1036,11 +1039,7 @@ function readTtsProviderSetting(
 }
 
 function isTtsProvider(value: unknown): value is CreatorTtsProvider {
-  return value === 'openai'
-    || value === 'aliyun'
-    || value === 'minimax'
-    || value === 'edge-tts'
-    || value === 'volcengine';
+  return isCreatorTtsProvider(value);
 }
 
 function readSubtitleStyleSettings(

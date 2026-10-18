@@ -15,6 +15,20 @@ import {
 } from '../../src/creator/templates/registry.js';
 
 describe('creator template registry', () => {
+  it('accepts every TTS provider the AI services settings can configure', () => {
+    const providers = ['openai', 'aliyun', 'edge-tts', 'minimax', 'volcengine', 'elevenlabs', 'vieneu'];
+    for (const ttsProvider of providers) {
+      expect(createVideoTranslationTemplate().inputSchema.parse({ ttsProvider }))
+        .toMatchObject({ ttsProvider });
+      expect(createSmartDubbingTemplate().inputSchema.parse({ ttsProvider }))
+        .toMatchObject({ ttsProvider });
+      expect(createStickmanVideoTemplate().inputSchema.parse({ ttsProvider }))
+        .toMatchObject({ ttsProvider });
+    }
+    expect(() => createVideoTranslationTemplate().inputSchema.parse({ ttsProvider: 'unsupported' }))
+      .toThrow();
+  });
+
   it('defaults video clips to three source-format outputs', () => {
     const template = createAutoClipTemplate();
 

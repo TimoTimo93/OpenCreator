@@ -1,4 +1,5 @@
 import {
+  isCreatorTtsProvider,
   smartDubbingStyles,
   type CreatorJson,
   type CreatorTtsProvider,
@@ -15,10 +16,20 @@ import {
 import { smartDubbingInstructions } from '../../smart-dubbing/styles.js';
 import type { CreatorExecutor } from '../executor.js';
 import { CreatorExecutorError } from '../executor.js';
+import { edgeFallbackVoice } from '../krillin/tts-dubbing-provider.js';
 
 export function createSmartDubbingExecutor(input: {
   ttsService: Pick<KrillinTtsService, 'synthesize'>;
   isOfficial?(): boolean;
+  /**
+   * Tổng hợp giọng cục bộ (VieNeu-TTS ưu tiên, rơi về Edge TTS). KrillinAI speech
+   * utility không hỗ trợ edge-tts nên đường Edge phải đi qua bộ tổng hợp cục bộ.
+   */
+  synthesizeLocal?: (request: {
+    text: string;
+    voice: string;
+    speed?: number;
+  }) => Promise<{ audio: Buffer; format: 'mp3' | 'wav' }>;
 }): CreatorExecutor {
   return {
     id: 'smart-dubbing',
@@ -32,17 +43,30 @@ export function createSmartDubbingExecutor(input: {
       }
       stage.reportProgress({ phase: 'generating_voice', percent: 20 });
       try {
-        const synthesis = await input.ttsService.synthesize({
-          logicalId:stage.stageRun.id,
-          text: request.text,
-          ...(request.provider === undefined ? {} : { provider: request.provider }),
-          ...(request.model === undefined ? {} : { model: request.model }),
-          ...(request.voiceCode === undefined ? {} : { voiceId: request.voiceCode }),
-          format: request.format,
-          speed: request.speed,
-          instructions: official ? undefined : smartDubbingInstructions(request.style),
-          signal: stage.signal
-        });
+        let synthesis: {
+          content: Buffer;
+          mime: 'audio/mpeg' | 'audio/wav';
+          provider: string;
+          model: string;
+          voiceId: string;
+          format: 'mp3' | 'wav';
+        };
+        if (request.provider === 'edge-tts' && !official) {
+          synthesis = await synthesizeLocalSpeech(input, request);
+        } else {
+          const provider = request.provider === 'edge-tts' ? undefined : request.provider;
+          synthesis = await input.ttsService.synthesize({
+            logicalId:stage.stageRun.id,
+            text: request.text,
+            ...(provider === undefined ? {} : { provider }),
+            ...(request.model === undefined ? {} : { model: request.model }),
+            ...(request.voiceCode === undefined ? {} : { voiceId: request.voiceCode }),
+            format: request.format,
+            speed: request.speed,
+            instructions: official ? undefined : smartDubbingInstructions(request.style),
+            signal: stage.signal
+          });
+        }
         if (stage.signal.aborted) {
           throw new CreatorExecutorError('creator_stage_canceled', 'Creator stage was canceled');
         }
@@ -102,7 +126,7 @@ export function createSmartDubbingExecutor(input: {
 
 function readRequest(state: Record<string, CreatorJson>): {
   text: string;
-  provider?: Exclude<CreatorTtsProvider, 'edge-tts'>;
+  provider?: CreatorTtsProvider;
   model?: string;
   voiceCode?: string;
   voiceName?: string;
@@ -118,10 +142,10 @@ function readRequest(state: Record<string, CreatorJson>): {
     );
   }
   const provider = readString(state.ttsProvider);
-  if (provider !== undefined && !['openai', 'aliyun', 'minimax'].includes(provider)) {
+  if (provider !== undefined && !isCreatorTtsProvider(provider)) {
     throw new CreatorExecutorError(
-      'unsupported_capability',
-      'The selected TTS provider does not support smart dubbing'
+      'creator_stage_input_missing',
+      'The selected TTS provider is invalid'
     );
   }
   const style = readString(state.style) ?? 'natural';
@@ -137,13 +161,52 @@ function readRequest(state: Record<string, CreatorJson>): {
     text,
     ...(provider === undefined
       ? {}
-      : { provider: provider as Exclude<CreatorTtsProvider, 'edge-tts'> }),
+      : { provider: provider as CreatorTtsProvider }),
     ...(readString(state.ttsModel) === undefined ? {} : { model: readString(state.ttsModel) }),
     ...(readString(state.voiceCode) === undefined ? {} : { voiceCode: readString(state.voiceCode) }),
     ...(readString(state.voiceName) === undefined ? {} : { voiceName: readString(state.voiceName) }),
     style: style as SmartDubbingStyle,
     speed,
     format
+  };
+}
+
+async function synthesizeLocalSpeech(
+  input: {
+    synthesizeLocal?: (request: {
+      text: string;
+      voice: string;
+      speed?: number;
+    }) => Promise<{ audio: Buffer; format: 'mp3' | 'wav' }>;
+  },
+  request: { text: string; voiceCode?: string; speed: number }
+): Promise<{
+  content: Buffer;
+  mime: 'audio/mpeg' | 'audio/wav';
+  provider: string;
+  model: string;
+  voiceId: string;
+  format: 'mp3' | 'wav';
+}> {
+  if (input.synthesizeLocal === undefined) {
+    throw new CreatorExecutorError(
+      'creator_tts_config_missing',
+      'Local Edge TTS synthesis is unavailable on this Runtime'
+    );
+  }
+  const voice = edgeFallbackVoice(request.text, request.voiceCode ?? '');
+  const result = await input.synthesizeLocal({
+    text: request.text,
+    voice,
+    speed: request.speed
+  });
+  return {
+    content: result.audio,
+    mime: result.format === 'mp3' ? 'audio/mpeg' : 'audio/wav',
+    provider: 'edge-tts',
+    model: '',
+    voiceId: voice,
+    format: result.format
   };
 }
 

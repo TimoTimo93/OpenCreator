@@ -4,6 +4,7 @@ import type {
   CreatorProviderRequest,
   CreatorStageRun
 } from '@opencreator/protocol';
+import { isCreatorTtsProvider } from '@opencreator/protocol';
 import { readFile } from 'node:fs/promises';
 import type { CreatorServicesConfigStore } from '../../creator-services/config-store.js';
 import type { CreatorCommandDispatcher } from '../command-dispatcher.js';
@@ -448,11 +449,7 @@ export function createStickmanVideoWorkflow(input: {
       };
     }
     const config = await input.configStore.read();
-    const provider = job.state.ttsProvider === 'openai'
-      || job.state.ttsProvider === 'aliyun'
-      || job.state.ttsProvider === 'edge-tts'
-      || job.state.ttsProvider === 'minimax'
-      || job.state.ttsProvider === 'volcengine'
+    const provider = isCreatorTtsProvider(job.state.ttsProvider)
       ? job.state.ttsProvider
       : config.tts.provider;
     if (provider === 'edge-tts') {

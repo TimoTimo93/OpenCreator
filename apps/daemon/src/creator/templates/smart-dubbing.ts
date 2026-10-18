@@ -1,4 +1,4 @@
-import { smartDubbingStyles } from '@opencreator/protocol';
+import { creatorTtsProviders, smartDubbingStyles } from '@opencreator/protocol';
 import { z } from 'zod';
 import type { CreatorTemplateDefinition } from './types.js';
 
@@ -11,7 +11,7 @@ export function createSmartDubbingTemplate(): CreatorTemplateDefinition {
     renderer: 'smart-dubbing',
     inputSchema: z.object({
       text: z.string().max(5_000).default(''),
-      ttsProvider: z.enum(['openai', 'aliyun', 'minimax', 'volcengine']).optional(),
+      ttsProvider: z.enum(creatorTtsProviders).optional(),
       ttsModel: z.string().max(256).optional(),
       voiceCode: z.string().max(256).optional(),
       voiceName: z.string().max(256).optional(),

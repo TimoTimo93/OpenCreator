@@ -1,4 +1,5 @@
 import {
+  isCreatorTtsProvider,
   smartDubbingStyles,
   type CreatorArtifact,
   type CreatorJson,
@@ -36,7 +37,7 @@ type DubbingResult = {
   artifact: CreatorArtifact;
   fileName: string;
   size: number;
-  provider: Exclude<CreatorTtsProvider, 'edge-tts'>;
+  provider: CreatorTtsProvider;
   model: string;
   voice: string;
   voiceName: string;
@@ -560,7 +561,7 @@ function readLatestResult(artifacts: CreatorArtifact[]): DubbingResult | undefin
     artifact,
     fileName: readString(metadata.fileName) || `OpenCreator-dubbing.${readFormat(metadata.format)}`,
     size: readNonNegativeNumber(metadata.bytes),
-    provider: provider === 'aliyun' || provider === 'minimax' || provider === 'volcengine' ? provider : 'openai',
+    provider: provider ?? 'openai',
     model: readString(metadata.model),
     voice: readString(metadata.voiceCode),
     voiceName: readString(metadata.voiceName) || readString(metadata.voiceCode),
@@ -579,6 +580,8 @@ function providerLabel(
   if (provider === 'minimax') return 'MiniMax';
   if (provider === 'volcengine') return l('火山引擎', 'Volcengine');
   if (provider === 'edge-tts') return 'Edge TTS';
+  if (provider === 'elevenlabs') return 'ElevenLabs TTS';
+  if (provider === 'vieneu') return l('VieNeu-TTS (cục bộ)', 'VieNeu-TTS (local)');
   return 'OpenAI TTS';
 }
 
@@ -616,9 +619,7 @@ function readString(value: CreatorJson | undefined): string {
 }
 
 function readProvider(value: CreatorJson | undefined): CreatorTtsProvider | undefined {
-  return value === 'openai' || value === 'aliyun' || value === 'minimax' || value === 'edge-tts' || value === 'volcengine'
-    ? value
-    : undefined;
+  return isCreatorTtsProvider(value) ? value : undefined;
 }
 
 function readStyle(value: CreatorJson | undefined): SmartDubbingStyle {

@@ -1,4 +1,5 @@
 import {
+  isCreatorTtsProvider,
   readCreatorResultSnapshots,
   type CreatorArtifact,
   type CreatorJson,
@@ -1271,11 +1272,7 @@ function stickmanWorkflowStep(value: unknown): number {
 }
 
 function isTtsProvider(value: unknown): value is CreatorTtsProvider {
-  return value === 'openai'
-    || value === 'aliyun'
-    || value === 'minimax'
-    || value === 'edge-tts'
-    || value === 'volcengine';
+  return isCreatorTtsProvider(value);
 }
 
 function ttsCredentialsConfigured(

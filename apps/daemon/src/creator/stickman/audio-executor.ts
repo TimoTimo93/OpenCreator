@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CreatorArtifact, CreatorServicesConfig } from '@opencreator/protocol';
+import { isCreatorTtsProvider } from '@opencreator/protocol';
 import type { CreatorServicesConfigStore } from '../../creator-services/config-store.js';
 import type { KrillinTtsService } from '../krillin/tts-service.js';
 import type { CreatorExecutor, CreatorExecutorInput } from '../executor.js';
@@ -288,12 +289,11 @@ async function buildAudioTiming(
 
 function resolveTtsSelection(stage: CreatorExecutorInput, config: CreatorServicesConfig) {
   const gateway = gatewayCreatorBinding(config);
-  const provider = gateway ? 'openai' : stage.job.state.ttsProvider === 'openai'
-    || stage.job.state.ttsProvider === 'aliyun'
-    || stage.job.state.ttsProvider === 'edge-tts'
-    || stage.job.state.ttsProvider === 'minimax'
-    || stage.job.state.ttsProvider === 'volcengine'
-    ? stage.job.state.ttsProvider
+  const stateProvider = stage.job.state.ttsProvider;
+  const provider = gateway
+    ? 'openai'
+    : isCreatorTtsProvider(stateProvider)
+    ? stateProvider
     : config.tts.provider;
   if (provider === undefined) {
     throw new CreatorExecutorError(

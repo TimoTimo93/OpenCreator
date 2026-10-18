@@ -12,6 +12,7 @@ import type {
 import {
   creatorPreflightFailure,
   imagePromptRequiresReference,
+  isCreatorTtsProvider,
   resolveEffectiveTranscriptionProvider
 } from '@opencreator/protocol';
 import { access, mkdir, readFile } from 'node:fs/promises';
@@ -510,7 +511,7 @@ async function checkInputs(
 function readTtsProvider(job: CreatorJob, config: CreatorServicesConfig): CreatorServicesConfig['tts']['provider'] {
   if (gatewayCreatorBinding(config)) return 'openai';
   const value = job.state.ttsProvider;
-  return value === 'openai' || value === 'aliyun' || value === 'edge-tts' || value === 'minimax' || value === 'volcengine' ? value : config.tts.provider;
+  return isCreatorTtsProvider(value) ? value : config.tts.provider;
 }
 function readVideoProvider(job: CreatorJob, config: CreatorServicesConfig): CreatorServicesConfig['video']['provider'] {
   const value = job.state.provider;

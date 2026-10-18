@@ -1,3 +1,4 @@
+import { creatorTtsProviders } from '@opencreator/protocol';
 import { z } from 'zod';
 import type { CreatorTemplateDefinition } from './types.js';
 import { creatorSubtitleStyleSchema } from '../presets/module-schemas.js';
@@ -33,7 +34,7 @@ function createVideoTranslationTemplateDefinition(version: 1 | 2): CreatorTempla
         ? { subtitleStyle: creatorSubtitleStyleSchema }
         : {}),
       dubbing: z.boolean().default(false),
-      ttsProvider: z.enum(['openai', 'aliyun', 'edge-tts', 'minimax', 'volcengine']).optional(),
+      ttsProvider: z.enum(creatorTtsProviders).optional(),
       ttsModel: z.string().optional(),
       voiceCode: z.string().optional(),
       voiceName: z.string().optional(),

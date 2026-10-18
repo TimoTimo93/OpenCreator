@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  creatorTtsProviders,
   stickmanOutputPresetDefaults,
   stickmanOutputPresets,
   stickmanRatios
@@ -56,7 +57,7 @@ const stickmanInputSchema = z.preprocess(value => {
   targetDurationSeconds: z.number().positive().max(600).default(30),
   sourceLanguage: z.string().default('auto'),
   targetLanguage: z.string().default('zh-CN'),
-  ttsProvider: z.enum(['openai', 'aliyun', 'edge-tts', 'minimax', 'volcengine']).optional(),
+  ttsProvider: z.enum(creatorTtsProviders).optional(),
   ttsModel: z.string().optional(),
   voiceCode: z.string().optional(),
   voiceName: z.string().optional(),

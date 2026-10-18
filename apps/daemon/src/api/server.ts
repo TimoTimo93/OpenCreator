@@ -1028,7 +1028,8 @@ export async function buildServer(input: BuildServerInput) {
     }));
     creatorExecutors.push(createSmartDubbingExecutor({
       ttsService: krillinTtsService,
-      isOfficial: () => gatewayAccount.peekState().source === 'gateway'
+      isOfficial: () => gatewayAccount.peekState().source === 'gateway',
+      synthesizeLocal: synthesizeLocalSpeech
     }));
     creatorExecutors.push(createImageExecutor({
       ledger: creatorProviderRequestLedger,

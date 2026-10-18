@@ -143,6 +143,95 @@ describe('creator smart dubbing', () => {
     expect(content.statusCode).toBe(200);
     expect(content.rawPayload).toEqual(audio);
   });
+
+  it('accepts the ElevenLabs and VieNeu providers configured in AI services', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'creator-smart-dubbing-providers-'));
+    const config = createDefaultCreatorServicesConfig();
+    const synthesize = vi.fn(async () => ({
+      content: Buffer.from('provider-audio'),
+      mime: 'audio/mpeg' as const,
+      provider: 'vieneu' as const,
+      model: 'v3turbo',
+      voiceId: 'Hải Đăng',
+      format: 'mp3' as const
+    }));
+    server = await buildServer({
+      token: 'secret',
+      dataDir: tempDir,
+      codexHome: join(tempDir, 'codex-home'),
+      creatorExecutors: [createSmartDubbingExecutor({ ttsService: { synthesize } })],
+      creatorServicesConfigStore: {
+        async read() { return structuredClone(config); },
+        async write(next) { return structuredClone(next); },
+        async reset() { return structuredClone(config); }
+      },
+      codexProviderCredentialStore: {
+        async readApiKey() { return undefined; },
+        async writeApiKey() {}
+      }
+    });
+
+    for (const ttsProvider of ['elevenlabs', 'vieneu'] as const) {
+      const created = await request('POST', '/creator/jobs', {
+        projectId: 'project_dubbing',
+        templateId: 'smart-dubbing',
+        creationKey: `smart-dubbing-${ttsProvider}`,
+        state: { ttsProvider, text: 'Xin chào, đây là thử nghiệm.' }
+      });
+      expect(created.statusCode).toBe(201);
+      expect(created.json().job.state.ttsProvider).toBe(ttsProvider);
+    }
+  });
+
+  it('dubs with the local engine when Edge TTS is the configured provider', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'creator-smart-dubbing-edge-'));
+    const config = createDefaultCreatorServicesConfig();
+    const audio = Buffer.from('creator-smart-dubbing-edge-audio');
+    const synthesize = vi.fn();
+    const synthesizeLocal = vi.fn(async () => ({ audio, format: 'mp3' as const }));
+    server = await buildServer({
+      token: 'secret',
+      dataDir: tempDir,
+      codexHome: join(tempDir, 'codex-home'),
+      creatorExecutors: [createSmartDubbingExecutor({ ttsService: { synthesize }, synthesizeLocal })],
+      creatorServicesConfigStore: {
+        async read() { return structuredClone(config); },
+        async write(next) { return structuredClone(next); },
+        async reset() { return structuredClone(config); }
+      },
+      codexProviderCredentialStore: {
+        async readApiKey() { return undefined; },
+        async writeApiKey() {}
+      }
+    });
+
+    const created = await request('POST', '/creator/jobs', {
+      projectId: 'project_dubbing',
+      templateId: 'smart-dubbing',
+      creationKey: 'smart-dubbing-edge',
+      state: { ttsProvider: 'edge-tts', text: 'Xin chào, đây là thử nghiệm.' }
+    });
+    expect(created.statusCode).toBe(201);
+    const job = created.json().job;
+
+    const started = await request('POST', `/creator/jobs/${job.id}/actions`, {
+      action: 'run-stage',
+      expectedRevision: job.revision,
+      input: { stageId: 'tts' }
+    });
+    expect(started.statusCode).toBe(200);
+
+    const completed = await waitForCompletedJob(job.id);
+    expect(synthesize).not.toHaveBeenCalled();
+    expect(synthesizeLocal).toHaveBeenCalledWith(expect.objectContaining({
+      text: 'Xin chào, đây là thử nghiệm.',
+      voice: expect.any(String)
+    }));
+    const artifact = completed.artifacts.find((item: { kind: string }) => (
+      item.kind === 'dubbed_audio'
+    ));
+    expect(artifact).toMatchObject({ status: 'completed', metadata: { provider: 'edge-tts', format: 'mp3' } });
+  });
 });
 
 async function waitForCompletedJob(jobId: string) {
