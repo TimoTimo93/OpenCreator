@@ -9,7 +9,9 @@ export const AGENT_CAPABILITY_SCOPES = [
   'schedule:run_now',
   'creator:context',
   'creator:artifact:read',
-  'creator:action'
+  'creator:action',
+  'drama:read',
+  'drama:download'
 ] as const;
 
 export type AgentCapabilityScope = typeof AGENT_CAPABILITY_SCOPES[number];
@@ -142,7 +144,8 @@ const MUTATION_SCOPES = new Set<AgentCapabilityScope>([
   'schedule:pause',
   'schedule:resume',
   'schedule:run_now',
-  'creator:action'
+  'creator:action',
+  'drama:download'
 ]);
 
 export function createAgentCapabilityTokenStore(

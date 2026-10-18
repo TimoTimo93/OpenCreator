@@ -8,10 +8,13 @@ import {
   AGENT_SCHEDULE_TOOL_NAMES,
   type AgentScheduleToolName
 } from './schedule-tools.js';
+import { DRAMA_TOOL_NAMES } from './drama-tools.js';
 import { AGENT_SCHEDULE_MCP_ROUTE } from './internal-routes.js';
+import { AGENT_DRAMA_MCP_ROUTE } from './mcp-routes.js';
 
 export const AGENT_SCHEDULE_MCP_SERVER_NAME = 'opencreator_schedule';
 export const AGENT_CREATOR_MCP_SERVER_NAME = 'opencreator_tools';
+export const AGENT_DRAMA_MCP_SERVER_NAME = 'opencreator_drama';
 export const AGENT_CREATOR_MCP_ROUTE = '/internal/agent-tools/mcp/creator';
 export const AGENT_TOOL_BASE_URL_ENV = 'OPENCREATOR_AGENT_TOOL_URL';
 export const AGENT_TOOL_CAPABILITY_TOKEN_ENV = 'OPENCREATOR_AGENT_CAPABILITY_TOKEN';
@@ -81,6 +84,8 @@ export function createAgentScheduleRunInjector(input: {
   getBaseUrl(): string | undefined;
   env?: NodeJS.ProcessEnv;
   scheduleToolsEnabled?: boolean;
+  /** Gáº¯n cÃ´ng cá»¥ Há»“ng Quáº£ cho thread há»™i thoáº¡i thÆ°á»ng (máº·c Ä‘á»‹nh báº­t, cháº¡y lá»‹ch chá»‰ Ä‘á»c lá»‹ch). */
+  includeDrama?: boolean;
 }): AgentScheduleRunInjector {
   return {
     prepare(run) {
@@ -90,7 +95,14 @@ export function createAgentScheduleRunInjector(input: {
       if (input.scheduleToolsEnabled === false) return undefined;
 
       const allowed = allowedTools(run.createdBy, run.thread);
-      const scopes = allowed.map(tool => tool.scope);
+      const scheduleScopes = allowed.map(tool => tool.scope);
+      const includeDrama = (input.includeDrama ?? true)
+        && run.createdBy === 'api'
+        && run.thread.purpose !== 'schedule_task';
+      const dramaScopes: AgentCapabilityScope[] = includeDrama
+        ? ['drama:read', 'drama:download']
+        : [];
+      const scopes = [...scheduleScopes, ...dramaScopes];
       const issued = input.capabilities.issue({
         runId: run.runId,
         threadId: run.thread.id,
@@ -99,7 +111,17 @@ export function createAgentScheduleRunInjector(input: {
       });
       const noProxy = loopbackNoProxy(input.env ?? process.env);
       return {
-        mcpServers: [{
+        mcpServers: [
+          ...(includeDrama ? [{
+            name: AGENT_DRAMA_MCP_SERVER_NAME,
+            url: `${baseUrl}${AGENT_DRAMA_MCP_ROUTE}`,
+            bearerTokenEnvVar: AGENT_TOOL_CAPABILITY_TOKEN_ENV,
+            enabledTools: [...DRAMA_TOOL_NAMES],
+            required: true,
+            startupTimeoutSec: 10,
+            toolTimeoutSec: 180
+          }] : []),
+          {
           name: AGENT_SCHEDULE_MCP_SERVER_NAME,
           url: `${baseUrl}${AGENT_SCHEDULE_MCP_ROUTE}`,
           bearerTokenEnvVar: AGENT_TOOL_CAPABILITY_TOKEN_ENV,
@@ -124,6 +146,8 @@ export function createAgentScheduleProcessInjector(input: {
   env?: NodeJS.ProcessEnv;
   includeSchedule?: boolean;
   includeCreator?: boolean;
+  /** Gáº¯n MCP Há»“ng Quáº£ vÃ o process (máº·c Ä‘á»‹nh báº­t cho runs creator). */
+  includeDrama?: boolean;
 }): AgentScheduleProcessInjector {
   return {
     create() {
@@ -131,10 +155,14 @@ export function createAgentScheduleProcessInjector(input: {
       if (baseUrl === undefined) return undefined;
       const includeSchedule = input.includeSchedule ?? true;
       const includeCreator = input.includeCreator ?? true;
+      const includeDrama = input.includeDrama ?? true;
       const maxScopes: AgentCapabilityScope[] = [
         ...(includeSchedule ? TOOL_SCOPES.map(tool => tool.scope) : []),
         ...(includeCreator
           ? ['creator:context', 'creator:artifact:read', 'creator:action'] as AgentCapabilityScope[]
+          : []),
+        ...(includeDrama
+          ? ['drama:read', 'drama:download'] as AgentCapabilityScope[]
           : [])
       ];
       if (maxScopes.length === 0) return undefined;
@@ -153,6 +181,15 @@ export function createAgentScheduleProcessInjector(input: {
             startupTimeoutSec: 10,
             toolTimeoutSec: 30
           }] : []),
+          ...(includeDrama ? [{
+            name: AGENT_DRAMA_MCP_SERVER_NAME,
+            url: `${baseUrl}${AGENT_DRAMA_MCP_ROUTE}`,
+            bearerTokenEnvVar: AGENT_TOOL_CAPABILITY_TOKEN_ENV,
+            enabledTools: [...DRAMA_TOOL_NAMES],
+            required: true,
+            startupTimeoutSec: 10,
+            toolTimeoutSec: 180
+          }] : []),
           ...(includeCreator ? [{
             name: AGENT_CREATOR_MCP_SERVER_NAME,
             url: `${baseUrl}${AGENT_CREATOR_MCP_ROUTE}`,
@@ -169,7 +206,12 @@ export function createAgentScheduleProcessInjector(input: {
         },
         activate(run) {
           const allowed = allowedTools(run.createdBy, run.thread);
-          const scopes = run.scopes ?? allowed.map(tool => tool.scope);
+          const dramaScopes: AgentCapabilityScope[] =
+            run.createdBy === 'api' && run.thread.purpose !== 'schedule_task'
+              ? ['drama:read', 'drama:download']
+              : [];
+          const scopes = run.scopes
+            ?? [...allowed.map(tool => tool.scope), ...dramaScopes];
           lease.activate({
             runId: run.runId,
             threadId: run.thread.id,

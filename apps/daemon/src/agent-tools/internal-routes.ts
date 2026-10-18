@@ -29,6 +29,20 @@ export type AgentScheduleActor = ScheduleAgentActor;
 
 type MaybePromise<T> = T | Promise<T>;
 
+/**
+ * Phản chiếu API thành phần Hồng Quả cho các route nội bộ của trợ lý.
+ * Trạng thái "chưa cài / đang bận" của manager được đẩy thẳng lên trình trợ lý.
+ */
+export type AgentDramaOperations = {
+  apiFetch(path: string, options?: {
+    method?: 'GET' | 'POST';
+    query?: Record<string, string>;
+    body?: unknown;
+    timeoutMs?: number;
+  }): Promise<unknown>;
+  translateTitles(titles: readonly string[], language: 'vi' | 'en'): Promise<Record<string, string>>;
+};
+
 export type AgentScheduleOperations = {
   getActorThread(actor: AgentScheduleActor): MaybePromise<RuntimeThread | undefined>;
   listSchedules(actor: AgentScheduleActor): MaybePromise<ScheduleResponse[]>;
@@ -105,6 +119,7 @@ export async function registerAgentToolRoutes(
     capabilities: AgentCapabilityTokenStore;
     schedules: AgentScheduleOperations;
     creator?: CreatorToolOperations;
+    drama?: AgentDramaOperations;
   }
 ): Promise<void> {
   if (input.creator !== undefined) {
@@ -206,6 +221,118 @@ export async function registerAgentToolRoutes(
       }
     );
   }
+  if (input.drama !== undefined) {
+    const drama = input.drama;
+
+    /** Chấp quyền + bọc lỗi thành phần; run() trả payload hoặc reply đã gửi. */
+    async function flexDrama(
+      request: FastifyRequest,
+      reply: FastifyReply,
+      scope: AgentCapabilityScope,
+      run: () => Promise<unknown>
+    ): Promise<unknown> {
+      const grant = authorizeRequest(request, reply, input.capabilities, scope);
+      if (grant === undefined) return reply;
+      try {
+        return await run();
+      } catch (error) {
+        const candidate = error as { code?: string; statusCode?: number; message?: string };
+        const statusCode = candidate.statusCode ?? 502;
+        if (statusCode >= 500) {
+          console.warn(`Drama agent tool failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        return reply.code(statusCode).send(
+          internalApiError(candidate.code ?? 'creator_hongguo_unavailable', candidate.message ?? 'Hongguo component request failed')
+        );
+      }
+    }
+
+    server.get(`${AGENT_TOOL_ROUTE_PREFIX}/drama/search`, async (request, reply) => {
+      return flexDrama(request, reply, 'drama:read', async () => {
+        const query = request.query as Record<string, string | undefined>;
+        const keyword = query.keyword ?? '';
+        if (keyword === '') {
+          return reply.code(400).send(apiError('VALIDATION_FAILED', 'query.keyword must not be empty'));
+        }
+        const payload = await drama.apiFetch('/api/v1/search-series', {
+          query: asStringRecord({ keyword, page: query.page ?? '1' }),
+          timeoutMs: 150_000
+        }) as { success?: boolean; error?: string; results?: Array<{ series_title?: string }> } | undefined;
+        if (payload?.success !== true) return payload;
+        const titles = (payload.results ?? [])
+          .map(item => item.series_title)
+          .filter((title): title is string => typeof title === 'string');
+        const translations = await translateSafely(drama, titles);
+        return { ...payload, ...(Object.keys(translations).length === 0 ? {} : { translatedTitles: translations }) };
+      });
+    });
+    server.get(`${AGENT_TOOL_ROUTE_PREFIX}/drama/browse`, async (request, reply) => {
+      return flexDrama(request, reply, 'drama:read', () => drama.apiFetch('/api/v1/browse-list', {
+        query: asStringRecord(request.query),
+        timeoutMs: 150_000
+      }));
+    });
+    server.get(`${AGENT_TOOL_ROUTE_PREFIX}/drama/series`, async (request, reply) => {
+      return flexDrama(request, reply, 'drama:read', async () => {
+        const query = request.query as Record<string, string | undefined>;
+        const seriesId = query.seriesId ?? '';
+        if (seriesId === '') {
+          return reply.code(400).send(apiError('VALIDATION_FAILED', 'query.seriesId must not be empty'));
+        }
+        return await drama.apiFetch('/api/v1/search-resolve', {
+          query: { seriesId },
+          timeoutMs: 150_000
+        });
+      });
+    });
+    server.get(`${AGENT_TOOL_ROUTE_PREFIX}/drama/series-episodes`, async (request, reply) => {
+      return flexDrama(request, reply, 'drama:read', async () => {
+        const query = request.query as Record<string, string | undefined>;
+        const seriesId = query.seriesId ?? '';
+        if (seriesId === '') {
+          return reply.code(400).send(apiError('VALIDATION_FAILED', 'query.seriesId must not be empty'));
+        }
+        return await drama.apiFetch('/api/v1/series-episodes', {
+          query: { seriesId },
+          timeoutMs: 150_000
+        });
+      });
+    });
+    server.get(`${AGENT_TOOL_ROUTE_PREFIX}/drama/tasks`, async (request, reply) => {
+      return flexDrama(request, reply, 'drama:read', () => drama.apiFetch('/api/v1/download-tasks'));
+    });
+    server.post(`${AGENT_TOOL_ROUTE_PREFIX}/drama/download-batch`, async (request, reply) => {
+      const grant = authorizeRequest(request, reply, input.capabilities, 'drama:download');
+      if (grant === undefined) return;
+      const body = (typeof request.body === 'object' && request.body !== null
+        ? request.body
+        : {}) as Record<string, unknown>;
+      const seriesId = typeof body.seriesId === 'string' && body.seriesId !== '' ? body.seriesId : undefined;
+      const episodes = Array.isArray(body.episodes) ? body.episodes : undefined;
+      if (seriesId === undefined || episodes === undefined || episodes.length === 0) {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.seriesId and body.episodes (non-empty) are required'));
+      }
+      const validEpisodes = episodes.filter(episode =>
+        typeof episode === 'object' && episode !== null
+        && typeof (episode as { vid?: unknown }).vid === 'string'
+        && typeof (episode as { vid_index?: unknown }).vid_index === 'number'
+      );
+      if (validEpisodes.length !== episodes.length) {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'each episode needs a vid string and a vid_index number'));
+      }
+      return flexDrama(request, reply, 'drama:download', () => drama.apiFetch('/api/v1/download-batch', {
+        method: 'POST',
+        body: {
+          seriesId,
+          ...(typeof body.seriesTitle === 'string' && body.seriesTitle !== ''
+            ? { seriesTitle: body.seriesTitle }
+            : {}),
+          episodes: validEpisodes,
+          ...(typeof body.quality === 'string' && body.quality !== '' ? { quality: body.quality } : {})
+        }
+      }));
+    });
+  }
   server.get<{ Params: { id: string } }>(
     `${AGENT_TOOL_ROUTE_PREFIX}/schedules/:id`,
     async (request, reply) => {
@@ -305,6 +432,26 @@ function readRequiredString(value: unknown, field: string): string {
 function readRequiredInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new TypeError(`${field} must be a non-negative integer`);
   return value as number;
+}
+
+/** Giữ lại các cặp key=value chuỗi của query; phần còn lại không tương hợp bị bỏ qua. */
+function asStringRecord(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null) return {};
+  const out: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === 'string' && raw !== '') out[key] = raw;
+    else if (typeof raw === 'number' && Number.isFinite(raw)) out[key] = String(raw);
+  }
+  return out;
+}
+
+/** Dịch tên phim cho trình trợ lý; lỗi dịch không cản trở kết quả tìm kiếm. */
+async function translateSafely(
+  drama: AgentDramaOperations,
+  titles: readonly string[]
+): Promise<Record<string, string>> {
+  if (titles.length === 0) return {};
+  return await drama.translateTitles(titles, 'vi').catch(() => ({}));
 }
 
 async function registerBoundActionRoute(

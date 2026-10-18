@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createAgentCapabilityTokenStore } from '../../src/agent-tools/capability-token.js';
 import {
   AGENT_CREATOR_MCP_SERVER_NAME,
+  AGENT_DRAMA_MCP_SERVER_NAME,
   AGENT_SCHEDULE_MCP_SERVER_NAME,
   createAgentScheduleProcessInjector,
   createAgentScheduleRunInjector
@@ -28,6 +29,19 @@ describe('agent tool run injection', () => {
 
     expect(injection?.mcpServers).toEqual([
       expect.objectContaining({
+        name: AGENT_DRAMA_MCP_SERVER_NAME,
+        url: 'http://127.0.0.1:43123/internal/agent-tools/mcp/drama',
+        bearerTokenEnvVar: 'OPENCREATOR_AGENT_CAPABILITY_TOKEN',
+        enabledTools: [
+          'drama_search',
+          'drama_browse_rankings',
+          'drama_series_detail',
+          'drama_series_episodes',
+          'drama_download_status',
+          'drama_download_episodes'
+        ]
+      }),
+      expect.objectContaining({
         name: AGENT_SCHEDULE_MCP_SERVER_NAME,
         url: 'http://127.0.0.1:43123/internal/agent-tools/mcp',
         bearerTokenEnvVar: 'OPENCREATOR_AGENT_CAPABILITY_TOKEN',
@@ -50,6 +64,9 @@ describe('agent tool run injection', () => {
     expect(tokens.authorize(token, { scope: 'schedule:create' })).toMatchObject({
       runId: 'run-user',
       threadId: 'thread-1'
+    });
+    expect(tokens.authorize(token, { scope: 'drama:read' })).toMatchObject({
+      runId: 'run-user'
     });
     tokens.close();
   });
@@ -116,6 +133,11 @@ describe('agent tool run injection', () => {
       expect.objectContaining({
         name: AGENT_SCHEDULE_MCP_SERVER_NAME,
         url: 'http://127.0.0.1:43123/internal/agent-tools/mcp',
+        bearerTokenEnvVar: 'OPENCREATOR_AGENT_CAPABILITY_TOKEN'
+      }),
+      expect.objectContaining({
+        name: AGENT_DRAMA_MCP_SERVER_NAME,
+        url: 'http://127.0.0.1:43123/internal/agent-tools/mcp/drama',
         bearerTokenEnvVar: 'OPENCREATOR_AGENT_CAPABILITY_TOKEN'
       }),
       expect.objectContaining({
@@ -199,9 +221,11 @@ describe('agent tool run injection', () => {
     }).create();
 
     expect(schedule?.mcpServers.map(server => server.name)).toEqual([
-      AGENT_SCHEDULE_MCP_SERVER_NAME
+      AGENT_SCHEDULE_MCP_SERVER_NAME,
+      AGENT_DRAMA_MCP_SERVER_NAME
     ]);
     expect(creator?.mcpServers.map(server => server.name)).toEqual([
+      AGENT_DRAMA_MCP_SERVER_NAME,
       AGENT_CREATOR_MCP_SERVER_NAME
     ]);
 

@@ -87,7 +87,13 @@ describe('creator codex adapter', () => {
       runId: 'creator-run-1',
       jobId: 'job-1',
       projectId: 'project-1',
-      capabilityScopes: ['creator:context', 'creator:artifact:read', 'creator:action'],
+      capabilityScopes: [
+        'creator:context',
+        'creator:artifact:read',
+        'creator:action',
+        'drama:read',
+        'drama:download'
+      ],
       requiredSkillNames: ['opencreator-runtime'],
       readThreadBeforeResume: false,
       timeoutMs: 20 * 60_000,

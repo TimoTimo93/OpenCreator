@@ -136,6 +136,7 @@ import {
 } from '../creator/templates/stickman-video-actions.js';
 import {
   registerCreatorMcpRoute,
+  registerDramaMcpRoute,
   registerAgentScheduleMcpRoute
 } from '../agent-tools/mcp-routes.js';
 import {
@@ -1594,15 +1595,6 @@ export async function buildServer(input: BuildServerInput) {
     memoryService
   });
   await registerScheduleRoutes(server, scheduleCoordinator, scheduler);
-  await registerAgentToolRoutes(server, {
-    capabilities: agentCapabilityTokens,
-    schedules: agentScheduleOperations,
-    creator: createCreatorToolOperations({
-      service: creatorService,
-      dispatcher: creatorCommandDispatcher,
-      contextBuilder: creatorAgentContextBuilder
-    })
-  });
   await krillinCodexLlmGateway.register(server);
   await krillinTtsGateway.register(server);
   if (input.agentToolsEnabled === true) {
@@ -1612,6 +1604,10 @@ export async function buildServer(input: BuildServerInput) {
     });
   }
   await registerCreatorMcpRoute(server, {
+    capabilities: agentCapabilityTokens,
+    getBaseUrl: () => resolveListeningOrigin(server.server.address())
+  });
+  await registerDramaMcpRoute(server, {
     capabilities: agentCapabilityTokens,
     getBaseUrl: () => resolveListeningOrigin(server.server.address())
   });
@@ -1665,6 +1661,28 @@ export async function buildServer(input: BuildServerInput) {
     log: message => console.warn(`[drama-title] ${message}`)
   });
   await registerCreatorDramaRoutes(server, creatorHongguoComponentManager, dramaTitleTranslator);
+  await registerAgentToolRoutes(server, {
+    capabilities: agentCapabilityTokens,
+    schedules: agentScheduleOperations,
+    creator: createCreatorToolOperations({
+      service: creatorService,
+      dispatcher: creatorCommandDispatcher,
+      contextBuilder: creatorAgentContextBuilder
+    }),
+    drama: creatorHongguoComponentManager === undefined
+      ? undefined
+      : {
+          apiFetch: (path, options) => creatorHongguoComponentManager!.apiFetch(path, {
+            method: options?.method,
+            query: options?.query,
+            body: options?.body,
+            timeoutMs: options?.timeoutMs ?? 150_000
+          }),
+          translateTitles: (titles, language) => (dramaTitleTranslator === undefined
+            ? Promise.resolve({})
+            : dramaTitleTranslator.translate([...titles], language))
+        }
+  });
   await registerImageGenerationRoutes(server, imageGenerationService);
   await registerCreatorRoutes(server, creatorService, creatorEvents, {
     sseHeartbeatMs: input.sseHeartbeatMs,

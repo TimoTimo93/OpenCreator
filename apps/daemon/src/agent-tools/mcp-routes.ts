@@ -20,7 +20,14 @@ import {
   type CreatorToolName
 } from './creator-tools.js';
 
+import {
+  createDramaToolDefinitions,
+  createDramaToolHttpClient,
+  type DramaToolName
+} from './drama-tools.js';
+
 export const AGENT_CREATOR_MCP_ROUTE = `${AGENT_TOOL_ROUTE_PREFIX}/mcp/creator`;
+export const AGENT_DRAMA_MCP_ROUTE = `${AGENT_TOOL_ROUTE_PREFIX}/mcp/drama`;
 
 export async function registerCreatorMcpRoute(
   fastify: FastifyInstance,
@@ -92,6 +99,89 @@ export async function registerCreatorMcpRoute(
   });
   fastify.get(AGENT_CREATOR_MCP_ROUTE, async (_request, reply) => reply.code(405).send(jsonRpcError('Method not allowed')));
   fastify.delete(AGENT_CREATOR_MCP_ROUTE, async (_request, reply) => reply.code(405).send(jsonRpcError('Method not allowed')));
+}
+
+/**
+ * Các công cụ Hồng Quả gắn theo scope trong capability token (không bị buộc vào jobId
+ * vì thao tác nằm ngoài vòng đời job creator).
+ */
+export async function registerDramaMcpRoute(
+  fastify: FastifyInstance,
+  input: { capabilities: AgentCapabilityTokenStore; getBaseUrl(): string | undefined }
+): Promise<void> {
+  fastify.post<{ Body: unknown }>(AGENT_DRAMA_MCP_ROUTE, async (request, reply) => {
+    const authorization = authorizeMcpRequest(request, reply, input.capabilities);
+    if (authorization === undefined) return;
+    const baseUrl = input.getBaseUrl();
+    if (baseUrl === undefined) return reply.code(503).send(jsonRpcError('OpenCreator runtime is not listening'));
+    const allowed = new Set(authorization.grant.scopes);
+    const readTools: DramaToolName[] = [
+      'drama_search',
+      'drama_browse_rankings',
+      'drama_series_detail',
+      'drama_series_episodes',
+      'drama_download_status'
+    ];
+    const enabledTools: DramaToolName[] = [];
+    for (const name of readTools) {
+      if (allowed.has('drama:read')) enabledTools.push(name);
+    }
+    if (allowed.has('drama:download')) enabledTools.push('drama_download_episodes');
+
+    const client = createDramaToolHttpClient({ baseUrl, token: authorization.token });
+    const definitions = createDramaToolDefinitions({ request: client.request });
+    const [{ McpServer }, { StreamableHTTPServerTransport }] = await Promise.all([
+      import('@modelcontextprotocol/sdk/server/mcp.js'),
+      import('@modelcontextprotocol/sdk/server/streamableHttp.js')
+    ]);
+    const mcpServer = new McpServer({ name: 'opencreator-drama-tools', version: '0.1.0' });
+    for (const name of enabledTools) {
+      const tool = definitions[name];
+      mcpServer.registerTool(name, {
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: name === 'drama_download_episodes'
+          ? { readOnlyHint: false }
+          : {
+              readOnlyHint: true,
+              destructiveHint: false,
+              idempotentHint: true,
+              openWorldHint: false
+            }
+      } as never, (async (args: unknown) => {
+        try {
+          const result = await (tool as { execute(args: unknown): Promise<unknown> }).execute(args);
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+            structuredContent: result as Record<string, unknown>
+          };
+        } catch (error) {
+          return {
+            isError: true,
+            content: [{ type: 'text' as const, text: error instanceof Error ? error.message : 'Drama tool failed' }]
+          };
+        }
+      }) as never);
+    }
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    let cleanupWork: Promise<void> | undefined;
+    const cleanup = () => cleanupWork ??= Promise.allSettled([transport.close(), mcpServer.close()]).then(() => undefined);
+    reply.raw.once('finish', () => void cleanup());
+    reply.raw.once('close', () => void cleanup());
+    reply.hijack();
+    try {
+      await mcpServer.connect(transport);
+      await transport.handleRequest(request.raw, reply.raw, request.body);
+    } catch {
+      if (!reply.raw.headersSent) {
+        reply.raw.writeHead(500, { 'content-type': 'application/json' });
+        reply.raw.end(JSON.stringify(jsonRpcError('Internal Drama MCP server error')));
+      } else if (!reply.raw.writableEnded) reply.raw.end();
+      await cleanup();
+    }
+  });
+  fastify.get(AGENT_DRAMA_MCP_ROUTE, async (_request, reply) => reply.code(405).send(jsonRpcError('Method not allowed')));
+  fastify.delete(AGENT_DRAMA_MCP_ROUTE, async (_request, reply) => reply.code(405).send(jsonRpcError('Method not allowed')));
 }
 
 export async function registerAgentScheduleMcpRoute(

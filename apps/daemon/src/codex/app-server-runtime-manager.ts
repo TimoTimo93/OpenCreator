@@ -428,8 +428,13 @@ function mergeInjections(
 ): AgentToolRunInjection | undefined {
   if (processInjection === undefined) return runtimeInjection;
   if (runtimeInjection === undefined) return processInjection;
+  // Trùng tên MCP server giữa mức process và mức run: giữ cấu hình mức process
+  // (token cấp phát dài hạn được activate lại theo từng turn).
+  const runtimeServers = runtimeInjection.mcpServers.filter(candidate =>
+    !processInjection.mcpServers.some(existingServer => existingServer.name === candidate.name)
+  );
   return {
-    mcpServers: [...processInjection.mcpServers, ...runtimeInjection.mcpServers],
+    mcpServers: [...processInjection.mcpServers, ...runtimeServers],
     env: { ...processInjection.env, ...runtimeInjection.env },
     builtInTools: runtimeInjection.builtInTools,
     configurationFingerprint: runtimeInjection.configurationFingerprint
