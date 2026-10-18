@@ -25,6 +25,13 @@ export const creatorSubtitleStyleSchema = z.object({
   secondaryColor: colorSchema.default('#D1D5DB'),
   outlineColor: colorSchema.default('#000000'),
   outlineWidth: z.number().min(0).max(8).default(2.5),
+  // Nền (tấm lót) phía sau chữ phụ đề: đè lên phụ đề gốc của phim khi lồng
+  // tiếng/dịch, làm chữ dễ đọc và che phụ đề cũ ở vị trí tương ứng.
+  background: z.object({
+    enabled: z.boolean().default(true),
+    color: colorSchema.default('#000000'),
+    opacity: z.number().min(0).max(1).default(0.55)
+  }).strict().default({}),
   shadow: z.object({
     enabled: z.boolean().default(true),
     color: colorSchema.default('#000000'),

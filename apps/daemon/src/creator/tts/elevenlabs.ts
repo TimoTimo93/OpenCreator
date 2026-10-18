@@ -92,6 +92,20 @@ export const QUOTA_ERROR_CODES = [429, 402, 456];
 export const QUOTA_ERROR_KEYWORDS = ['quota_exceeded', 'rate_limit_exceeded', 'insufficient_quota', 'overloaded_error', 'resource_exhausted', 'rate_limit'];
 export const KEY_EXHAUST_COOLDOWN_MS = 15 * 60 * 1000;
 
+/** Lấy lý do từ chối trong JSON lỗi của ElevenLabs (ví dụ "Invalid API key"). */
+export function elevenLabsRejectReason(body: string): string {
+  const trimmed = body.trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = JSON.parse(trimmed) as { detail?: { message?: string } | string };
+    const message = typeof parsed.detail === 'string' ? parsed.detail : parsed.detail?.message;
+    if (typeof message === 'string' && message.trim()) return ` — ElevenLabs: “${message.trim()}”`;
+  } catch {
+    if (trimmed.length <= 160 && /[A-Za-z]/.test(trimmed)) return ` — ElevenLabs: “${trimmed}”`;
+  }
+  return '';
+}
+
 export type KeyStatus = {
   status: 'active' | 'exhausted';
   expiresAt: number;
@@ -190,8 +204,7 @@ export class ElevenLabsTTS {
 
   public static async testApiKey(apiKey: string, baseUrl: string = ELEVENLABS_API_BASE): Promise<{ valid: boolean; error?: string; remainingQuota?: number }> {
     const trimmed = apiKey.trim();
-    if (!trimmed) return { valid: false, error: 'API Key trống' };
-    try {
+    if (!trimmed) return { valid: false, error: 'API Key trống' };    try {
       const url = `${baseUrl.replace(/\/+$/, '')}/v1/user`;
       const response = await fetch(url, {
         method: 'GET',
@@ -208,7 +221,9 @@ export class ElevenLabsTTS {
       if (QUOTA_ERROR_CODES.includes(response.status)) {
         return { valid: false, error: `Hết hạn mức (HTTP ${response.status})` };
       }
-      return { valid: false, error: `Lỗi xác thực (HTTP ${response.status})` };
+      // Trả kèm lý do từ ElevenLabs (ví dụ "Invalid API key") để người dùng tự kiểm
+      // tra được key trong khi máy chủ chỉ nói chung chung HTTP 40x.
+      return { valid: false, error: `Lỗi xác thực (HTTP ${response.status})${elevenLabsRejectReason(await response.text())}` };
     } catch (err) {
       return { valid: false, error: err instanceof Error ? err.message : String(err) };
     }

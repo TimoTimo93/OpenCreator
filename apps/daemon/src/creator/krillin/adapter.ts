@@ -370,14 +370,29 @@ export function buildKrillinSubtitleStyle(value: CreatorJson | undefined): Recor
   const style = parsed.data;
   const fontName = `${subtitleFontFamily(style.fontPreset)} ${subtitleWeightName(style.fontWeight)}`;
   const bold = style.fontWeight === 'bold';
+  // Nền đè phụ đề: BorderStyle 3 vẽ khối đặc phía sau dòng chữ (padding bằng
+  //Outline, màu theo outline_color). Khi bật nền thì tắt bóng/blur để chữ sắc và
+  // không bị nhòe thêm (phàn nàn trước đây của người dùng: chữ mới hơi mờ).
+  const plate = style.background;
   const backColor = assBackColor(style.shadow.color, style.shadow.opacity);
-  const shadow = style.shadow.enabled
+  const shadow = !plate.enabled && style.shadow.enabled
     ? Math.max(Math.abs(style.shadow.offsetX), Math.abs(style.shadow.offsetY))
     : 0;
-  const overrideTags = style.shadow.enabled
+  const overrideTags = !plate.enabled && style.shadow.enabled
     ? `\\xshad${formatAssNumber(style.shadow.offsetX)}\\yshad${formatAssNumber(style.shadow.offsetY)}\\blur${formatAssNumber(style.shadow.blur)}`
     : '';
   const sizes = subtitleFontSizes(style.fontSize);
+  // Màu nền đã gắn độ mờ (alpha) ngay vào outline colour; BorderStyle 3 hiển thị
+  // khối nền từ màu này. invAlpha: ASS dùng &HAA màu vía alpha ngược (255=trong suốt).
+  const plateColor = (color: string): string => {
+    const hex = color.slice(1).toUpperCase();
+    const alpha = Math.round(255 * (1 - plate.opacity)).toString(16).padStart(2, '0').toUpperCase();
+    return `&H${alpha}${hex.slice(4, 6)}${hex.slice(2, 4)}${hex.slice(0, 2)}`;
+  };
+  // Viền lót (khoảng nền rộng hơn chữ một chút) tỉ lệ theo cỡ chữ.
+  const platePadding = plate.enabled
+    ? Math.min(12, Math.max(3, Math.round(sizes.horizontalMajor * 0.4)))
+    : style.outlineWidth;
   const createStyle = (
     name: 'Major' | 'Minor',
     fontSize: number,
@@ -389,7 +404,7 @@ export function buildKrillinSubtitleStyle(value: CreatorJson | undefined): Recor
     font_size: fontSize,
     primary_color: primaryColor,
     secondary_color: primaryColor,
-    outline_color: style.outlineColor,
+    outline_color: plate.enabled ? plateColor(plate.color) : style.outlineColor,
     back_color: backColor,
     bold,
     italic: false,
@@ -399,12 +414,12 @@ export function buildKrillinSubtitleStyle(value: CreatorJson | undefined): Recor
     scale_y: 100,
     spacing: 0,
     angle: 0,
-    border_style: 1,
-    outline: style.outlineWidth,
+    border_style: plate.enabled ? 3 : 1,
+    outline: platePadding,
     shadow,
     alignment: 2,
-    margin_l: 10,
-    margin_r: 10,
+    margin_l: plate.enabled ? 10 + platePadding * 2 : 10,
+    margin_r: plate.enabled ? 10 + platePadding * 2 : 10,
     margin_v: marginV,
     encoding: 1,
     override_tags: overrideTags

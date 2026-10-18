@@ -4,6 +4,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, open, readdir, rename, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { basename, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import type { HongguoComponentStatus, HongguoDramaApiStatus, RuntimeErrorCode } from '@opencreator/protocol';
 import {
@@ -228,6 +229,16 @@ export async function createHongguoComponentManager(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
     try {
+      // Manifest cục bộ (file:): nói chuyện thẳng với đĩa, không cần HTTP.
+      if (endpoint.protocol === 'file:') {
+        const { readFile } = await import('node:fs/promises');
+        const payload: unknown = JSON.parse(await readFile(fileURLToPath(endpoint), 'utf8'));
+        const parsedLocal = manifestSchema.safeParse(payload);
+        if (!parsedLocal.success) {
+          throw new Error(`manifest is invalid: ${parsedLocal.error.issues[0]?.message ?? 'schema mismatch'}`);
+        }
+        return parsedLocal.data;
+      }
       const response = await fetchCreatorService({
         endpoint,
         method: 'GET',
@@ -368,6 +379,36 @@ export async function createHongguoComponentManager(
     const proxy = await deps.proxy?.();
     try {
       const endpoint = parseChannelUrl(latest.url);
+      // Artifact cục bộ (file:): sao chép thẳng từ đĩa, có báo tiến trình.
+      if (endpoint.protocol === 'file:') {
+        await mkdir(stagingRoot, { recursive: true });
+        const target = join(stagingRoot, 'artifact.zip');
+        const handle = await open(target, 'w');
+        try {
+          let received = 0;
+          const source = createReadStream(fileURLToPath(endpoint));
+          if (latest.bytes !== null) {
+            downloadProgress = { downloadedBytes: 0, totalBytes: latest.bytes, percent: 0 };
+          }
+          for await (const chunk of source) {
+            received += chunk.byteLength;
+            if (received > MAX_ARTIFACT_BYTES) throw new Error('artifact exceeds the maximum allowed size');
+            await handle.write(chunk);
+            downloadProgress = {
+              downloadedBytes: received,
+              totalBytes: latest.bytes,
+              percent: latest.bytes === null
+                ? null
+                : Math.min(100, Math.floor((received / latest.bytes) * 100))
+            };
+          }
+          if (received === 0) throw new Error('local artifact is empty');
+        } finally {
+          await handle.close();
+          abortController = null;
+        }
+        return;
+      }
       const response = await fetchCreatorService({
         endpoint,
         method: 'GET',
@@ -858,7 +899,7 @@ function parseChannelUrl(value: string): URL {
     throw new Error(`invalid update channel URL: ${value}`);
   }
   if (!isValidChannelUrl(value)) {
-    throw new Error(`update channel URL must use https (or local http): ${value}`);
+    throw new Error(`update channel URL must use https, a local file, or loopback http: ${value}`);
   }
   return url;
 }
@@ -871,6 +912,9 @@ function isValidChannelUrl(value: string): boolean {
     return false;
   }
   if (url.protocol === 'https:') return true;
+  // Kênh cục bộ: bản dựng Việt được cài ngay trong runtime của OpenCreator
+  // (file manifest + zip do OpenCreator tự phát hành trên máy này).
+  if (url.protocol === 'file:') return url.pathname !== '';
   if (url.protocol === 'http:') {
     return url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]';
   }
