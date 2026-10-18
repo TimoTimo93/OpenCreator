@@ -151,6 +151,8 @@ export type RuntimeErrorCode =
   | 'creator_hongguo_check_failed'
   | 'creator_hongguo_update_failed'
   | 'creator_hongguo_launch_failed'
+  | 'creator_pipeline_unavailable'
+  | 'creator_pipeline_item_not_found'
   | 'yt_dlp_update_recommended'
   | 'dependency_not_packaged'
   | 'unsupported_source'

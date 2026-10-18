@@ -29,8 +29,13 @@ describe('KrillinAI CLI protocol', () => {
   });
 
   it('passes saved legacy styles instead of silently using runtime defaults', () => {
-    const stage = { job: { templateId: 'video-translation', state: { subtitleFont: 'rounded', subtitleSize: 'large', subtitleColor: '#123456', subtitleShadowOffsetX: -4, subtitleShadowOffsetY: 6, subtitleShadowBlur: 2 } }, stageRun: { stageId: 'render-horizontal' } };
-    expect(buildKrillinStageOptions(stage as never).subtitleStyle).toMatchObject({ horizontal: { major: { font_name: 'OpenCreator Rounded Medium', font_size: 18, primary_color: '#123456', override_tags: '\\xshad-4\\yshad6\\blur2' } } });
+    const state = { subtitleFont: 'rounded', subtitleSize: 'large', subtitleColor: '#123456', subtitleShadowOffsetX: -4, subtitleShadowOffsetY: 6, subtitleShadowBlur: 2 };
+    // Nền đè (đặc tả mới) bật mặc định → tắt bóng/blur để chữ sắc; override_tags rỗng.
+    const withPlate = { job: { templateId: 'video-translation', state }, stageRun: { stageId: 'render-horizontal' } };
+    expect(buildKrillinStageOptions(withPlate as never).subtitleStyle).toMatchObject({ horizontal: { major: { font_name: 'OpenCreator Rounded Medium', font_size: 18, primary_color: '#123456', override_tags: '' } } });
+    // Tắt nền đè (truyền style hiện đại trực tiếp) → bóng của người dùng được giữ nguyên qua override_tags.
+    const withShadow = { job: { templateId: 'video-translation', state: { ...state, subtitleStyle: { fontPreset: 'rounded', fontWeight: 'medium', fontSize: 'large', primaryColor: '#123456', background: { enabled: false }, shadow: { enabled: true, color: '#000000', opacity: 0.6, offsetX: -4, offsetY: 6, blur: 2 } } } }, stageRun: { stageId: 'render-horizontal' } };
+    expect(buildKrillinStageOptions(withShadow as never).subtitleStyle).toMatchObject({ horizontal: { major: { font_name: 'OpenCreator Rounded Medium', font_size: 18, primary_color: '#123456', override_tags: '\\xshad-4\\yshad6\\blur2' } } });
   });
 
   it.each([true, false])('keeps edited vertical subtitles and renders the requested bilingual=%s mode', bilingual => {

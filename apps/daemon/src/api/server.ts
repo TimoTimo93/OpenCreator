@@ -259,6 +259,11 @@ import { createCodexAppServerHost } from '../codex/app-server-host-2026-07-28.js
 import { registerCreatorRoutes } from './routes.creator.js';
 import { registerCreatorRuntimeRoutes } from './routes.creator-runtime.js';
 import { registerCreatorDramaRoutes } from './routes.creator-drama.js';
+import { registerTranslationPipelineRoutes } from './routes.creator-translation-pipeline.js';
+import {
+  createTranslationPipelineService,
+  type TranslationPipelineService
+} from '../creator/translation-pipeline/pipeline.js';
 import { createDramaTitleTranslator } from '../creator/drama/title-translator.js';
 import { KRILLIN_TTS_ROUTE_PREFIX } from '../creator/krillin/tts-gateway.js';
 import { registerDiagnosticsRoutes } from './routes.diagnostics.js';
@@ -1661,6 +1666,37 @@ export async function buildServer(input: BuildServerInput) {
     log: message => console.warn(`[drama-title] ${message}`)
   });
   await registerCreatorDramaRoutes(server, creatorHongguoComponentManager, dramaTitleTranslator);
+  let translationPipeline: TranslationPipelineService | undefined;
+  try {
+    translationPipeline = createTranslationPipelineService({
+      dataDir,
+      creator: {
+        createJob: request => creatorService.createJob(request),
+        getJob: jobId => creatorService.getJob(jobId),
+        registerSourceVideo: (jobId, request) => creatorService.registerSourceVideo(jobId, request)
+      },
+      dispatcher: creatorCommandDispatcher,
+      projects: {
+        ensureDefaultProject: () => {
+          const project = projectManager.ensureDefaultProject();
+          return { projectId: project.id };
+        }
+      },
+      ffmpegPath: creatorFfmpegPath,
+      ffprobePath: creatorFfprobePath,
+      ensureRuntimeReady: async () => { await ensureKrillinRuntimeReady(); },
+      onUpdate: summary => {
+        // Web hỗ trợ lâu dài sẽ theo dõi sự kiện SSE riêng; log gọn cho diag.
+        console.log(`[translation-pipeline] queued=${summary.counts.queued} running=${summary.counts.running} completed=${summary.counts.completed} failed=${summary.counts.failed} merge=${summary.merge.status}`);
+      }
+    });
+    await translationPipeline.recover().catch(error => {
+      console.warn(`Translation pipeline recover failed: ${formatError(error)}`);
+    });
+  } catch (error) {
+    console.warn(`Translation pipeline init failed: ${formatError(error)}`);
+  }
+  await registerTranslationPipelineRoutes(server, translationPipeline);
   await registerAgentToolRoutes(server, {
     capabilities: agentCapabilityTokens,
     schedules: agentScheduleOperations,
