@@ -36,7 +36,7 @@ export type AppRoute =
   | { view: 'files'; threadId?: string; path?: string };
 
 export type AiServicesSection = 'text' | 'transcription' | 'tts' | 'image' | 'video';
-export type SettingsRouteTab = 'ai-services' | 'local-components' | 'platform-connections';
+export type SettingsRouteTab = 'ai-services' | 'api-keys' | 'local-components' | 'platform-connections';
 
 export function parseRoute(hash: string): AppRoute {
   const [path = '', query = ''] = hash.split('?', 2);
@@ -107,7 +107,7 @@ export function parseRoute(hash: string): AppRoute {
     }
     return {
       view: 'settings',
-      ...(tab === 'local-components' || tab === 'platform-connections'
+      ...(tab === 'local-components' || tab === 'platform-connections' || tab === 'api-keys'
         ? { tab }
         : tab === 'ai-services' || section !== undefined
           ? { tab: 'ai-services' as const }

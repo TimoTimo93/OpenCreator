@@ -48,6 +48,11 @@ const CreatorServicesSettingsView = lazy(async () => {
   return { default: module.CreatorServicesSettingsView };
 });
 
+const CreatorApiKeysSettingsView = lazy(async () => {
+  const module = await import('./CreatorApiKeysSettingsView.js');
+  return { default: module.CreatorApiKeysSettingsView };
+});
+
 export type RuntimeStatus = {
   connected: boolean;
   appVersion?: string;
@@ -105,6 +110,7 @@ export type OpenCreatorSettingsViewProps = {
 type SettingsTab =
   | 'general'
   | 'ai-services'
+  | 'api-keys'
   | 'platform-connections'
   | 'local-components'
   | 'plugins'
@@ -133,6 +139,7 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
   const tabs: Array<{ id: SettingsTab; label: string }> = [
     { id: 'general', label: t('settings.tab.general') },
     { id: 'ai-services', label: t('settings.tab.aiServices') },
+    { id: 'api-keys', label: l('API 配置', 'API configuration') },
     { id: 'platform-connections', label: l('平台连接', 'Platform connections') },
     { id: 'local-components', label: t('settings.tab.runtimeComponents') },
     { id: 'plugins', label: t('settings.tab.plugins') },
@@ -159,18 +166,21 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
   }, [props.gatewayAccountService, props.gatewayAccountState]);
 
   /**
-   * "Cấu hình API" (thay lối đăng nhập OpenCreator cũ): mở tab AI Services và
-   * nhảy thẳng tới mục khoá API. Trang có thể đang ở sẵn tab đó nên phải có phản
-   * hồi thấy được — cuộn tới khối cấu hình rồi nhấp nháy viền.
+   * "Cấu hình API" (thay lối đăng nhập OpenCreator cũ): mở thẳng mục Cấu hình API
+   * trong Cài đặt — nơi quản lý danh sách API Key Agnes AI và ElevenLabs. Trang có
+   * thể đang ở sẵn mục đó nên phải có phản hồi thấy được — cuộn tới khối khoá rồi
+   * nhấp nháy viền.
    */
   const revealApiSection = useCallback(() => {
     const reveal = (attempt = 0) => {
-      const panel = document.getElementById('creator-services-panel-text');
+      const panel = document.getElementById('creator-api-keys-panel');
       if (panel === null) {
         if (attempt < 8) window.setTimeout(() => reveal(attempt + 1), 60);
         return;
       }
-      panel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (typeof panel.scrollIntoView === 'function') {
+        panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
       panel.dataset.highlight = 'true';
       window.setTimeout(() => { delete panel.dataset.highlight; }, 1800);
     };
@@ -178,11 +188,9 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
   }, []);
 
   const openApiConfiguration = useCallback(() => {
-    setActiveTab('ai-services');
-    setApiSection('text');
+    setActiveTab('api-keys');
     revealApiSection();
   }, [revealApiSection]);
-
   // Nút "Cấu hình API" ở thanh bên có thể bấm khi trang cài đặt đã mở sẵn ở đúng
   // mục: lúc đó route không đổi nên React không render lại, phải tự cuộn/nhấp nháy
   // để người dùng thấy phản hồi.
@@ -291,6 +299,16 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
               /> : null}
             </Suspense>
           </>
+        ) : null}
+        {activeTab === 'api-keys' ? (
+          <Suspense fallback={
+            <p role="status">{l('正在加载 API Key 列表…', 'Loading API keys…')}</p>
+          }>
+            <CreatorApiKeysSettingsView
+              connected={props.runtimeStatus.connected}
+              service={props.creatorServicesService ?? null}
+            />
+          </Suspense>
         ) : null}
         {activeTab === 'local-components' && props.runtimeDependencies !== undefined ? (
           <RuntimeComponentsSettingsView

@@ -29,6 +29,7 @@ import {
   FileKey2,
   HardDriveDownload,
   Image,
+  KeyRound,
   Languages,
   LoaderCircle,
   Mic2,
@@ -44,7 +45,6 @@ import type { ConnectionService } from '../../services/connection-service.js';
 import { IssueList } from '../issues/IssuePresenter.js';
 import { usePageIssueState } from '../issues/page-issue-state.js';
 import { inferLlmProviderId, llmProviderOptions } from './llm-provider-selection.js';
-import { MultiApiKeyManager } from './MultiApiKeyManager.js';
 import './creator-services-settings.css';
 
 const CodexImageStatusNotice = lazy(async () => {
@@ -512,6 +512,33 @@ export function CreatorServicesSettingsView(props: {
   );
 }
 
+/**
+ * Trang Dịch vụ AI chỉ còn phần "Cấu hình tùy chỉnh" (Người mẫu/Phiên âm/Tiếng nói/
+ * Hình ảnh/Băng hình). Danh sách API Key Agnes AI và ElevenLabs được quản lý riêng
+ * trong mục "Cấu hình API" nên ở đây chỉ còn lối mở nhanh.
+ */
+function ApiKeysHint() {
+  const l = useLocalizedCopy();
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem', padding: '0.85rem 1rem', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)', background: 'rgba(255, 255, 255, 0.02)' }}>
+      <span style={{ fontSize: '0.85rem', color: '#a9b1c1' }}>
+        {l(
+          'Agnes AI 与 ElevenLabs 的 API Key 列表在“API 配置”中管理。',
+          'Agnes AI and ElevenLabs API key lists are managed in "API configuration".'
+        )}
+      </span>
+      <button
+        className="settings-secondary-button"
+        type="button"
+        onClick={() => window.dispatchEvent(new Event('opencreator:open-api-configuration'))}
+      >
+        <KeyRound size={15} aria-hidden="true" />
+        {l('打开 API 配置', 'Open API configuration')}
+      </button>
+    </div>
+  );
+}
+
 function TextModelSettings(props: SettingsGroupProps & {
   provider?: CodexProviderConfig;
   mode: TextModelMode;
@@ -600,22 +627,7 @@ function TextModelSettings(props: SettingsGroupProps & {
                 </select>
               </label>
             </div>
-            <MultiApiKeyManager
-              title="Danh sách API Key Agnes AI (agnes-ai.com)"
-              description="Hỗ trợ dán danh sách nhiều key (mỗi dòng một key). Tự động tách dòng, lưu và xoay vòng failover khi gặp lỗi 429/402."
-              apiKeys={props.config.llm.agnesAi?.apiKeys || []}
-              onChange={keys => props.update(config => {
-                if (!config.llm.agnesAi) {
-                  config.llm.agnesAi = { baseUrl: props.baseUrl || 'https://apihub.agnes-ai.com/v1', apiKeys: [], model: props.model || 'agnes-3.0-pro' };
-                }
-                config.llm.agnesAi.apiKeys = keys;
-                if (keys[0]) {
-                  config.llm.apiKey = keys[0];
-                  props.onProviderChange({ baseUrl: props.baseUrl || 'https://apihub.agnes-ai.com/v1', model: props.model || 'agnes-3.0-pro', apiKey: keys[0] });
-                }
-              })}
-              onTestKey={async (key) => props.service?.testApiKey ? props.service.testApiKey({ provider: 'agnes-ai', key, baseUrl: props.baseUrl || props.config.llm.agnesAi?.baseUrl }) : { valid: true }}
-            />
+            <ApiKeysHint />
           </div>
         ) : props.mode === 'custom' ? (
           <>
@@ -651,16 +663,7 @@ function TextModelSettings(props: SettingsGroupProps & {
                   Khi dịch vụ AI tại <code>http://localhost:20128</code> hết hạn mức hoặc gặp lỗi 429/402, hệ thống tự động xoay vòng sang danh sách API Key của Agnes AI để đảm bảo công việc dịch thuật video không bị dừng.
                 </p>
                 <div style={{ marginTop: '0.75rem' }}>
-                  <MultiApiKeyManager
-                    title="Danh sách API Key Agnes AI dự phòng (agnes-ai.com)"
-                    description="Dán các API Key Agnes AI vào đây để sẵn sàng tự động chuyển tiếp khi 9router hết quota."
-                    apiKeys={props.config.llm.agnesAi?.apiKeys || []}
-                    onChange={keys => props.update(config => {
-                      if (!config.llm.agnesAi) config.llm.agnesAi = { baseUrl: 'https://apihub.agnes-ai.com/v1', apiKeys: [], model: 'agnes-3.0-pro' };
-                      config.llm.agnesAi.apiKeys = keys;
-                    })}
-                    onTestKey={async (key) => props.service?.testApiKey ? props.service.testApiKey({ provider: 'agnes-ai', key, baseUrl: props.config.llm.agnesAi?.baseUrl }) : { valid: true }}
-                  />
+                  <ApiKeysHint />
                 </div>
               </div>
             ) : null}
@@ -1070,16 +1073,7 @@ function TtsSettings(props: SettingsGroupProps) {
               </select>
             </label>
           </div>
-          <MultiApiKeyManager
-            title="Danh sách API Key ElevenLabs (Tự động xoay vòng Failover)"
-            description="Hỗ trợ dán hàng loạt API Key (mỗi dòng một key). Khi một key hết quota (mã 429, 402, 456), hệ thống tự động đổi sang key tiếp theo và tự phục hồi sau 15 phút."
-            apiKeys={props.config.tts.elevenlabs?.apiKeys || []}
-            onChange={keys => props.update(config => {
-              if (!config.tts.elevenlabs) config.tts.elevenlabs = { baseUrl: 'https://api.elevenlabs.io', apiKeys: [], model: 'eleven_multilingual_v2', defaultVoiceId: 'f5q6kePPoQAjCPYG6moa' };
-              config.tts.elevenlabs.apiKeys = keys;
-            })}
-            onTestKey={async (key) => props.service?.testApiKey ? props.service.testApiKey({ provider: 'elevenlabs', key, baseUrl: props.config.tts.elevenlabs?.baseUrl }) : { valid: true }}
-          />
+          <ApiKeysHint />
         </div>
       ) : null}
       {provider === 'vieneu' ? (

@@ -3282,5 +3282,7 @@
   "{{0}}No more specific cause was confirmed.": "{{0}}Ingen mer specifik orsak har bekräftats.",
   "{{model}} does not support image input": "{{model}} stöder inte bildinmatning",
   "{{model}}, unavailable": "{{model}}, inte tillgänglig",
-  "{{name}}, view connector": "{{name}}, visa anslutare"
+  "{{name}}, view connector": "{{name}}, visa anslutare",
+  "Agnes AI and ElevenLabs API key lists are managed in \"API configuration\".": "Listorna med API-nycklar för Agnes AI och ElevenLabs hanteras i \"API-konfiguration\".",
+  "Open API configuration": "Öppna API-konfiguration"
 }

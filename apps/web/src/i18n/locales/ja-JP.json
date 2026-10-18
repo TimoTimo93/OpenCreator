@@ -3282,5 +3282,7 @@
   "{{0}}No more specific cause was confirmed.": "{{0}}これ以上の具体的な原因は確認されていません。",
   "{{model}} does not support image input": "{{model}} は画像入力をサポートしていません",
   "{{model}}, unavailable": "{{model}}、利用不可",
-  "{{name}}, view connector": "{{name}}、ビューコネクタ"
+  "{{name}}, view connector": "{{name}}、ビューコネクタ",
+  "Agnes AI and ElevenLabs API key lists are managed in \"API configuration\".": "Agnes AI と ElevenLabs の API キー一覧は「API 設定」で管理します。",
+  "Open API configuration": "API 設定を開く"
 }

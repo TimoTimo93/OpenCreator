@@ -3282,5 +3282,7 @@
   "{{0}}No more specific cause was confirmed.": "{{0}}Aucune cause plus spécifique n'a été confirmée.",
   "{{model}} does not support image input": "{{model}} ne prend pas en charge la saisie d'images",
   "{{model}}, unavailable": "{{model}}, indisponible",
-  "{{name}}, view connector": "{{name}}, afficher le connecteur"
+  "{{name}}, view connector": "{{name}}, afficher le connecteur",
+  "Agnes AI and ElevenLabs API key lists are managed in \"API configuration\".": "Les listes de clés API d’Agnes AI et d’ElevenLabs sont gérées dans « Configuration de l’API ».",
+  "Open API configuration": "Ouvrir la configuration de l’API"
 }

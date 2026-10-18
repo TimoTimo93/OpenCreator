@@ -625,7 +625,7 @@ export function AppController(props: AppControllerProps) {
     // Trang tài khoản đã bị bỏ khỏi giao diện, nên kết quả thanh toán quay về
     // mục “Cấu hình API” trong Cài đặt (nơi quản lý khoá dịch vụ).
     void billingOrderId;
-    props.onNavigate({ view: 'settings', tab: 'ai-services', section: 'text' });
+    props.onNavigate({ view: 'settings', tab: 'api-keys' });
   }), [hostBridge, props.onNavigate]);
   const platformConnectionsService = useMemo(() => runtimeClient === null ? null : createPlatformConnectionsService(runtimeClient), [runtimeClient]);
   const [gatewayAccountState, setGatewayAccountState] = useState<GatewayAccountState>();
@@ -4590,7 +4590,7 @@ export function AppController(props: AppControllerProps) {
                 if (gatewayAccountState?.source === 'gateway') {
                   settingsReturnRouteRef.current = props.route;
                   dispatch({ type: 'open_settings' });
-                  navigateToRoute({ view: 'settings', tab: 'ai-services', section: 'text' });
+                  navigateToRoute({ view: 'settings', tab: 'api-keys' });
                   return;
                 }
                 setAgentSetup('needed');
@@ -4974,7 +4974,7 @@ export function AppController(props: AppControllerProps) {
             closeMobileSidebar();
             settingsReturnRouteRef.current = props.route;
             dispatch({ type: 'open_settings' });
-            navigateToRoute({ view: 'settings', tab: 'ai-services', section: 'text' });
+            navigateToRoute({ view: 'settings', tab: 'api-keys' });
             // Trang cài đặt có thể đã mở sẵn ở đúng mục nên route không đổi:
             // phát sự kiện để trang cuộn tới khối khoá API và nhấp nháy viền.
             window.dispatchEvent(new Event('opencreator:open-api-configuration'));

@@ -98,7 +98,8 @@
 }
 
 /* Nhấp nháy khối cấu hình sau khi bấm "Cấu hình API" để thấy rõ đã điều hướng tới đâu. */
-.creator-services-form[data-highlight='true'] {
+.creator-services-form[data-highlight='true'],
+.creator-services-settings[data-highlight='true'] {
   animation: creator-services-highlight 1.8s ease-out;
 }
 

@@ -1,11 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { createDefaultCreatorServicesConfig, type CreatorServicesConfig, type GatewayAccountState } from '@opencreator/protocol';
 import { ConfirmDialogProvider } from '../../components/dialogs/ConfirmDialogProvider.js';
 import { LanguageProvider } from '../../i18n/LanguageProvider.js';
 import { languagePreferenceStorageKey } from '../../i18n/language.js';
 import { OpenCreatorSettingsView } from './OpenCreatorSettingsView.js';
-import type { GatewayAccountState } from '@opencreator/protocol';
 import type { GatewayAccountSettingsService } from '../../services/gateway-account-service.js';
 import { createGatewayAccountService } from '../../services/gateway-account-service.js';
 import type { CreatorServicesSettingsService } from '../../services/creator-services-service.js';
@@ -103,7 +103,9 @@ describe('OpenCreatorSettingsView', () => {
     expect(onOpenPersonalCenter).not.toHaveBeenCalled();
     expect(service.setSource).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '官方服务' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '配置 API' })).toBeInTheDocument();
+    // "Cấu hình API" mở hẳn mục quản lý API Key, không mở nghi thức đăng nhập.
+    expect(await screen.findByRole('heading', { name: 'API 配置' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'API 配置' })).toHaveAttribute('aria-current', 'page');
   });
   it('keeps signed-in accounts in official settings and restores custom settings after sign-out', async () => {
     const gateway: GatewayAccountState = { source: 'gateway', authState: 'signed_in', activationState: 'ready', account: { id: 'a', email: 'a@example.test', verified: true }, bindingVersion: null, models: [], activationError: null };
@@ -122,14 +124,33 @@ describe('OpenCreatorSettingsView', () => {
     const gateway: GatewayAccountState = { source: 'manual', authState: 'signed_out', activationState: 'inactive', account: null, bindingVersion: null, models: [], activationError: null };
     const service: GatewayAccountSettingsService = { getState: vi.fn(async () => gateway), setSource: vi.fn(), selectModel: vi.fn(), start: vi.fn(), cancel: vi.fn(), logout: vi.fn(), activate: vi.fn(), getBalance: vi.fn(), getSummary: vi.fn(), getPlans: vi.fn(), getOrders: vi.fn(), getOrder: vi.fn(), getCreditGrants: vi.fn(), checkout: vi.fn(), portal: vi.fn() };
     render(<OpenCreatorSettingsView runtimeStatus={runtimeStatus} gatewayAccountService={service} gatewayAccountState={gateway} initialTab="general" onBack={vi.fn()}/>);
-    expect(screen.getByRole('button', { name: /AI 服务/ })).not.toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'API 配置' })).not.toHaveAttribute('aria-current', 'page');
 
     // Nút "Cấu hình API" ở thanh bên phát sự kiện này khi trang cài đặt đã mở sẵn:
-    // tab phải chuyển sang AI 服务 để người dùng thấy phản hồi.
+    // tab phải chuyển sang Cấu hình API để người dùng thấy phản hồi.
     await act(async () => {
       window.dispatchEvent(new Event('opencreator:open-api-configuration'));
     });
-    await waitFor(() => expect(screen.getByRole('button', { name: /AI 服务/ })).toHaveAttribute('aria-current', 'page'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'API 配置' })).toHaveAttribute('aria-current', 'page'));
+  });
+  it('manages the Agnes AI and ElevenLabs key lists from the API configuration tab', async () => {
+    const gateway: GatewayAccountState = { source: 'manual', authState: 'signed_out', activationState: 'inactive', account: null, bindingVersion: null, models: [], activationError: null };
+    const service: GatewayAccountSettingsService = { getState: vi.fn(async () => gateway), setSource: vi.fn(), selectModel: vi.fn(), start: vi.fn(), cancel: vi.fn(), logout: vi.fn(), activate: vi.fn(), getBalance: vi.fn(), getSummary: vi.fn(), getPlans: vi.fn(), getOrders: vi.fn(), getOrder: vi.fn(), getCreditGrants: vi.fn(), checkout: vi.fn(), portal: vi.fn() };
+    const config = createDefaultCreatorServicesConfig();
+    config.llm.agnesAi = { baseUrl: 'https://apihub.agnes-ai.com/v1', apiKeys: ['sk-agnes'], model: 'agnes-3.0-pro' };
+    config.tts.elevenlabs = { baseUrl: 'https://api.elevenlabs.io', apiKeys: ['sk-eleven'], model: 'eleven_multilingual_v2', defaultVoiceId: 'f5q6kePPoQAjCPYG6moa' };
+    const creatorServicesService = {
+      getConfig: vi.fn(async () => ({ config, configuredCredentials: [] })),
+      saveConfig: vi.fn(async (next: CreatorServicesConfig) => ({ config: next, configuredCredentials: [] })),
+      testApiKey: vi.fn(async () => ({ valid: true }))
+    } as unknown as CreatorServicesSettingsService;
+    render(<OpenCreatorSettingsView runtimeStatus={runtimeStatus} gatewayAccountService={service} gatewayAccountState={gateway} creatorServicesService={creatorServicesService} initialTab="api-keys" onBack={vi.fn()} />);
+
+    expect(await screen.findByRole('heading', { name: 'API 配置' })).toBeInTheDocument();
+    expect(screen.getByText('Agnes AI API Key 列表（agnes-ai.com）')).toBeInTheDocument();
+    expect(screen.getByText('ElevenLabs API Key 列表（自动轮换故障转移）')).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: '保存 API Key 列表' }));
+    await waitFor(() => expect(creatorServicesService.saveConfig).toHaveBeenCalled());
   });
   it('keeps account and subscription management out of settings', () => {
     render(<OpenCreatorSettingsView runtimeStatus={{ connected: false }} onBack={vi.fn()}/>);
