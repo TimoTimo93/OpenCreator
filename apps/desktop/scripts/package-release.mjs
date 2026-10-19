@@ -378,7 +378,7 @@ function electronBuilderArguments(
 ) {
   const args = [
   '--publish',
-  process.env.OPENCREATOR_DESKTOP_PUBLISH?.toUpperCase() ?? 'never'
+  process.env.OPENCREATOR_DESKTOP_PUBLISH?.toLowerCase() ?? 'never'
 ];
 // Publishing a fork release targets a different GitHub repository; keep the
 // in-repo publish config (official) untouched for potential upstream PRs.
@@ -393,8 +393,7 @@ if (
     '--config.publish.repo='
       + (process.env.OPENCREATOR_DESKTOP_PUBLISH_REPO ?? 'OpenCreator')
   );
-}
-  let nextEnv = { ...baseEnv };
+}  let nextEnv = { ...baseEnv };
   let macSigning = {
     mode: targetPlatform === 'darwin' ? 'adhoc' : 'not-applicable',
     teamId: undefined,
