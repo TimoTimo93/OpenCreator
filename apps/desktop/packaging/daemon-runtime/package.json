@@ -23,7 +23,8 @@
     "toml": "4.2.0",
     "yaml": "2.9.0",
     "yauzl": "3.4.0",
-    "zod": "3.25.76"
+    "zod": "3.25.76",
+    "fingerprint-generator": "^2.1.89"
   },
   "pnpm": {
     "overrides": {
