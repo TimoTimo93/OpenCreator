@@ -513,7 +513,7 @@ function registerIpcHandlers(input: {
   handle(desktopIpc.quit, input.development, () => input.quit());
   handle(desktopIpc.readUpdaterState, input.development, () => input.updater.getSnapshot());
   handle(desktopIpc.updaterCheckNow, input.development, async () => {
-    await input.updater.checkNow();
+    await input.updater.checkNow(true);
     return input.updater.getSnapshot();
   });
   handle(desktopIpc.updaterInstallNow, input.development, () => {

@@ -169,7 +169,7 @@ const packageWithSigningEnvironment = async builderEnv => {
       resolve(packageRoot, 'resources', 'app-update.yml'),
       [
         'provider: github',
-        'owner: krillinai',
+        `owner: ${process.env.OPENCREATOR_DESKTOP_PUBLISH_OWNER ?? 'krillinai'}`,
         'repo: OpenCreator',
         'updaterCacheDirName: opencreator-updater',
         ''
@@ -376,7 +376,24 @@ function electronBuilderArguments(
   baseEnv,
   options
 ) {
-  const args = ['--publish', 'never'];
+  const args = [
+  '--publish',
+  process.env.OPENCREATOR_DESKTOP_PUBLISH?.toUpperCase() ?? 'never'
+];
+// Publishing a fork release targets a different GitHub repository; keep the
+// in-repo publish config (official) untouched for potential upstream PRs.
+const publishOwnerOverride = process.env.OPENCREATOR_DESKTOP_PUBLISH_OWNER;
+if (
+  publishOwnerOverride !== undefined
+  && process.env.OPENCREATOR_DESKTOP_PUBLISH !== undefined
+  && process.env.OPENCREATOR_DESKTOP_PUBLISH.toUpperCase() !== 'NEVER'
+) {
+  args.push(
+    '--config.publish.owner=' + publishOwnerOverride,
+    '--config.publish.repo='
+      + (process.env.OPENCREATOR_DESKTOP_PUBLISH_REPO ?? 'OpenCreator')
+  );
+}
   let nextEnv = { ...baseEnv };
   let macSigning = {
     mode: targetPlatform === 'darwin' ? 'adhoc' : 'not-applicable',

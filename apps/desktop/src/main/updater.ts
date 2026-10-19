@@ -30,7 +30,7 @@ export type DesktopUpdateCheckStore = {
 
 export type DesktopUpdaterController = {
   dispose(): void;
-  checkNow(): Promise<void>;
+  checkNow(force?: boolean): Promise<void>;
   userInstallNow(): void;
   getState(): DesktopUpdaterState;
   getSnapshot(): DesktopUpdaterSnapshot;
@@ -51,6 +51,7 @@ export function startUpdater(input: {
   arch?: string;
   locale?: string;
   isCustomBuild?: boolean;
+  feedOwner?: string;
   resourcesPath?: string;
   checkStore?: DesktopUpdateCheckStore;
   initialCheckDelayMs?: number;
@@ -77,6 +78,12 @@ export function startUpdater(input: {
     ?? ((options: Electron.MessageBoxOptions) => dialog.showMessageBox(options));
   const locale = input.locale
     ?? (typeof app.getLocale === 'function' ? app.getLocale() : 'en');
+  const feedOwner = input.feedOwner
+    ?? readFeedOwnerFromYml(input.resourcesPath ?? process.resourcesPath);
+  // The custom-build warning only applies while updates come from the official
+  // repository: fork-feed releases carry the extended modules themselves.
+  const warnedCustomBuild = input.isCustomBuild === true
+    && feedOwner === 'krillinai';
 
   if (!isPackaged) {
     return createInactiveController(state);
@@ -159,14 +166,14 @@ export function startUpdater(input: {
     emit();
     activeOperation = (async () => {
       try {
-        const copy = buildUpdateDialogCopy(locale, version, input.isCustomBuild === true);
+        const copy = buildUpdateDialogCopy(locale, version, warnedCustomBuild);
         const choice = await showMessageBox({
           type: 'info',
           title: copy.title,
           message: copy.message,
           detail: copy.detail,
           buttons: [copy.updateLabel, copy.laterLabel],
-          defaultId: input.isCustomBuild ? 1 : 0,
+          defaultId: warnedCustomBuild ? 1 : 0,
           cancelId: 1
         });
         if (choice.response !== 0 || disposed || state !== 'available') return;
@@ -195,14 +202,14 @@ export function startUpdater(input: {
     }
     activeOperation = (async () => {
       try {
-        const copy = buildReadyDialogCopy(locale, info.version, input.isCustomBuild === true);
+        const copy = buildReadyDialogCopy(locale, info.version, warnedCustomBuild);
         const choice = await showMessageBox({
           type: 'info',
           title: copy.title,
           message: copy.message,
           detail: copy.detail,
           buttons: [copy.updateLabel, copy.laterLabel],
-          defaultId: input.isCustomBuild ? 1 : 0,
+          defaultId: warnedCustomBuild ? 1 : 0,
           cancelId: 1
         });
         if (choice.response !== 0 || disposed) return;
@@ -234,12 +241,16 @@ export function startUpdater(input: {
     }
   };
 
-  const checkNow = async () => {
-    if (
-      disposed
-      || activeOperation !== undefined
-      || !['idle', 'error'].includes(state)
-    ) {
+  const checkNow = async (force = false) => {
+    if (disposed || activeOperation !== undefined) {
+      return;
+    }
+    if (!force && !['idle', 'error'].includes(state)) {
+      return;
+    }
+    // A staged installer from an earlier consented flow stays usable even if
+    // a new check runs; do not flip it back to 'available'.
+    if (force && state === 'downloaded') {
       return;
     }
     state = 'checking';
@@ -375,6 +386,20 @@ function defaultCheckStorePath(): string {
   } catch {
     return join(process.cwd(), 'update-check.json');
   }
+}
+
+function readFeedOwnerFromYml(resourcesPath: string | undefined): string {
+  if (typeof resourcesPath === 'string') {
+    try {
+      const yml = readFileSync(join(resourcesPath, 'app-update.yml'), 'utf8');
+      const owner = yml.match(/^\s*owner:\s*(\S+)\s*$/m);
+      const name = owner?.[1];
+      if (name) return name;
+    } catch {
+      // No packaged feed config: the fallback resolver targets the official repo.
+    }
+  }
+  return 'krillinai';
 }
 
 function createFileCheckStore(path: string): DesktopUpdateCheckStore {
