@@ -11,11 +11,12 @@ import type {
 } from '@opencreator/protocol';
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, realpathSync, rmdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, renameSync, rmdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { nanoid } from 'nanoid';
 import { readOpenCreatorConfig, resolveOpenCreatorPaths } from '@opencreator/config';
+import { sanitizeWindowsFileName } from '../creator/translation-pipeline/batch-merge.js';
 import { expandHome } from '../platform/paths.js';
 import {
   normalizeDatabaseTimestamp,
@@ -174,6 +175,63 @@ export function createProjectManager(input: CreateProjectManagerInput): ProjectM
       }
     },
 
+    ensureProjectByName(name: string): { id: string; folder: string; name: string } {
+      const requested = normalizeManagedProjectName(name);
+      // Project active cùng tên (không phân biệt hoa thường) → dùng lại, không
+      // tạo trùng. Thư mục có thể đã bị đổi tên theo record — folder là cwd hiện hành.
+      const existing = projects.listProjects('active').find(row =>
+        row.name.trim().toLowerCase() === requested.toLowerCase()
+      );
+      if (existing !== undefined) {
+        return { id: existing.id, folder: existing.cwd, name: existing.name };
+      }
+
+      // Chưa có → tạo project mới với thư mục đặt THEO TÊN PHIM đã sanitize
+      // (`<managedRoot>/<Tên phim>` — khác pattern `project-<id>` nhưng đúng
+      // mong muốn "project theo tên phim"); trùng tên thư mục → hậu tố " (2)".
+      try {
+        mkdirSync(managedProjectRoot(), { recursive: true });
+      } catch {
+        throw new ProjectManagerError(
+          'PROJECT_DIRECTORY_UNAVAILABLE',
+          'The OpenCreator managed project directory is unavailable'
+        );
+      }
+      const base = sanitizeWindowsFileName(requested, 'project');
+      let cwd: string | undefined;
+      for (let attempt = 0; attempt < 5 && cwd === undefined; attempt += 1) {
+        const candidate = uniqueDirectoryName(managedProjectRoot(), base);
+        try {
+          mkdirSync(candidate);
+          cwd = candidate;
+        } catch {
+          if (!existsSync(candidate)) {
+            throw new ProjectManagerError(
+              'PROJECT_DIRECTORY_UNAVAILABLE',
+              'Could not create the project directory'
+            );
+          }
+        }
+      }
+      if (cwd === undefined) {
+        throw new ProjectManagerError(
+          'PROJECT_DIRECTORY_CONFLICT',
+          'Could not create a unique project directory'
+        );
+      }
+      try {
+        const project = createProjectRecord({ cwd, name: requested });
+        return { id: project.id, folder: project.cwd, name: project.name };
+      } catch (error) {
+        try {
+          rmdirSync(cwd);
+        } catch {
+          // Only remove the directory when it is still empty.
+        }
+        throw error;
+      }
+    },
+
     createMigratedProject(request: CreateMigratedProjectInput): ProjectResponse {
       return createMigratedProjectRecord(request);
     },
@@ -244,20 +302,55 @@ export function createProjectManager(input: CreateProjectManagerInput): ProjectM
 
     updateProject(id: string, request: UpdateProjectRequest): ProjectResponse {
       const existing = getRequiredProject(id);
-      projects.updateProjectConfig({
-        id,
-        name: request.name === undefined
-          ? existing.name
-          : normalizeProjectName(request.name, existing.cwd),
-        profile: request.profile === undefined
-          ? existing.profile
-          : normalizeProfile(request.profile),
-        model: request.model === undefined ? existing.model : request.model,
-        reasoning: request.reasoning === undefined
-          ? existing.reasoning
-          : request.reasoning,
-        sandbox: request.sandbox ?? existing.sandbox
-      });
+      const nextName = request.name === undefined
+        ? existing.name
+        : normalizeManagedProjectName(request.name);
+      // Tên mới ≠ tên cũ → đổi tên THƯ MỤC trên đĩa trước (fs.rename trong cùng
+      // managed root — atomic); lỗi (thư mục bị khóa, run đang chạy file trong
+      // đó) ném lỗi trước khi ghi record nên tên cũ được giữ nguyên.
+      const renamedDirectory = nextName === existing.name
+        ? undefined
+        : renameProjectDirectory(existing, nextName);
+      try {
+        input.db.transaction(() => {
+          projects.updateProjectConfig({
+            id,
+            name: nextName,
+            profile: request.profile === undefined
+              ? existing.profile
+              : normalizeProfile(request.profile),
+            model: request.model === undefined ? existing.model : request.model,
+            reasoning: request.reasoning === undefined
+              ? existing.reasoning
+              : request.reasoning,
+            sandbox: request.sandbox ?? existing.sandbox
+          });
+          if (renamedDirectory !== undefined) {
+            // Record theo thư mục mới (cwd + canonicalCwd) và các thread của
+            // project cùng trỏ sang thư mục đã đổi tên.
+            projects.replaceProjectDirectory({
+              id,
+              cwd: renamedDirectory.cwd,
+              canonicalCwd: renamedDirectory.canonicalCwd
+            });
+            threads.updateProjectThreadsDirectory({
+              projectId: existing.id,
+              cwd: renamedDirectory.cwd,
+              canonicalCwd: renamedDirectory.canonicalCwd
+            });
+          }
+        })();
+      } catch (error) {
+        if (renamedDirectory !== undefined) {
+          // Hoàn tác rename để đĩa khớp record cũ (best-effort).
+          try {
+            renameSync(renamedDirectory.cwd, existing.cwd);
+          } catch {
+            // Không hoàn tác được thì giữ thư mục mới; lần cập nhật sau sẽ khớp.
+          }
+        }
+        throw error;
+      }
       return mapProjectRow(projects.getProject(id)!);
     },
 
@@ -383,6 +476,42 @@ export function createProjectManager(input: CreateProjectManagerInput): ProjectM
     }
     return project;
   }
+
+  /**
+   * Đổi tên thư mục project trên đĩa cho khớp tên mới:
+   *
+   * - chỉ áp dụng cho thư mục do OpenCreator quản lý (nằm TRỰC TIẾP dưới
+   *   managed root); project trỏ tới thư mục ngoài do người dùng tự chọn thì
+   *   chỉ đổi tên record, không đụng đĩa;
+   * - tên thư mục qua `sanitizeWindowsFileName` (một nguồn sự thật với
+   *   batch-merge; tên thiết bị Windows → hậu tố `-movie`);
+   * - trùng thư mục đã có → hậu tố ` (2)`, ` (3)`...;
+   * - trả về undefined khi không cần/không thể rename (tên khớp, thư mục mất).
+   */
+  function renameProjectDirectory(
+    existing: ProjectRow,
+    nextName: string
+  ): { cwd: string; canonicalCwd: string } | undefined {
+    const parent = dirname(existing.cwd);
+    if (resolve(parent) !== managedProjectRoot()) return undefined;
+    if (!existsSync(existing.cwd)) return undefined;
+    const target = uniqueDirectoryName(
+      parent,
+      sanitizeWindowsFileName(nextName, 'project'),
+      existing.cwd
+    );
+    if (target === resolve(existing.cwd)) return undefined;
+    try {
+      renameSync(existing.cwd, target);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ProjectManagerError(
+        'PROJECT_DIRECTORY_CONFLICT',
+        `Không đổi tên được thư mục project — thư mục đang bị khóa hoặc có tiến trình đang chạy trong đó: ${message}`
+      );
+    }
+    return { cwd: target, canonicalCwd: realpathSync(target) };
+  }
 }
 
 const LOCAL_STORAGE_V1_MIGRATION_KEY = 'local-storage-v1';
@@ -403,11 +532,32 @@ function readStoredMigrationResult(value: string): StoredLocalStorageV1Migration
   return JSON.parse(value) as StoredLocalStorageV1MigrationResult;
 }
 
+/**
+ * Chọn đường dẫn thư mục trống `<parent>/<base>`; đã có → hậu tố ` (2)`,
+ * ` (3)`... So sánh đường dẫn theo kiểu Windows (không phân biệt hoa thường)
+ * để rename chỉ đổi CHỮ HOA/thường không bị coi là trùng với chính nó.
+ */
+function uniqueDirectoryName(parent: string, base: string, selfPath?: string): string {
+  const self = selfPath === undefined ? undefined : resolve(selfPath);
+  const samePath = (left: string, right: string): boolean =>
+    left.toLowerCase() === right.toLowerCase();
+  const first = join(parent, base);
+  if (!existsSync(first)) return first;
+  if (self !== undefined && samePath(first, self)) return first;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = join(parent, `${base} (${index})`);
+    if (!existsSync(candidate)) return candidate;
+  }
+  throw new ProjectManagerError(
+    'PROJECT_DIRECTORY_CONFLICT',
+    'Could not allocate a unique project directory name'
+  );
+}
+
 function requireAvailableDirectory(
   value: string,
   homeDir: string
-): { cwd: string; canonicalCwd: string } {
-  const cwd = normalizeProjectPath(value, homeDir);
+): { cwd: string; canonicalCwd: string } {  const cwd = normalizeProjectPath(value, homeDir);
   try {
     if (!statSync(cwd).isDirectory()) throw new Error('not a directory');
     return { cwd, canonicalCwd: realpathSync(cwd) };

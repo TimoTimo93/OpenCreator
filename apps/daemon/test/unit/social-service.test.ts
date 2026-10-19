@@ -353,3 +353,84 @@ describe('social service — listDownloads (media picker)', () => {
     }
   });
 });
+
+describe('social service — autoPublishAfterTranslate (công tắc theo cụm)', () => {
+  it('createCluster/updateCluster lưu công tắc và overview trả lại', async () => {
+    const { service } = await makeService();
+    const created = service.createCluster({ name: 'C', autoPublishAfterTranslate: true });
+    expect(created.clusters[0]!.autoPublishAfterTranslate).toBe(true);
+    const clusterId = created.clusters[0]!.id;
+    const updated = service.updateCluster(clusterId, { autoPublishAfterTranslate: false });
+    expect(updated.clusters[0]!.autoPublishAfterTranslate).toBe(false);
+    const reEnabled = service.updateCluster(clusterId, { autoPublishAfterTranslate: true });
+    expect(reEnabled.clusters[0]!.autoPublishAfterTranslate).toBe(true);
+  });
+
+  it('mặc định cụm mới không bật tự nạp', async () => {
+    const { service } = await makeService();
+    const created = service.createCluster({ name: 'C' });
+    expect(created.clusters[0]!.autoPublishAfterTranslate).toBe(false);
+  });
+});
+
+describe('social service — enqueueAfterTranslate (hook tự nạp đăng)', () => {
+  it('chỉ nạp cho cụm ĐANG bật; cụm tắt không có job; title ghép " — Tập n"', async () => {
+    const { service } = await makeService();
+    service.createCluster({ name: 'Bật', autoPublishAfterTranslate: true, defaultScheduleTimes: ['19:30'] });
+    service.createCluster({ name: 'Tắt', autoPublishAfterTranslate: false });
+    const clusters = service.getOverview().clusters;
+    const enabled = clusters.find(cluster => cluster.name === 'Bật')!;
+    const disabled = clusters.find(cluster => cluster.name === 'Tắt')!;
+
+    const result = service.enqueueAfterTranslate({
+      path: 'D:/dich/tap-5.mp4',
+      title: 'Long Hổ Riệu',
+      episodeIndex: 5
+    });
+    expect(result.accepted).toBe(1);
+    expect(result.clusters).toEqual([enabled.id]);
+    const jobs = service.getOverview().jobs;
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.clusterId).toBe(enabled.id);
+    expect(jobs[0]!.clusterId).not.toBe(disabled.id);
+    expect(jobs[0]!.title).toBe('Long Hổ Riệu — Tập 5');
+    // scheduledAt bỏ trống → tự xếp khung giờ vàng (tương lai, không phải rác).
+    expect(new Date(jobs[0]!.scheduledAt).getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it('không có cụm nào bật → không nạp gì (banner web cũ vẫn là đường thủ công)', async () => {
+    const { service } = await makeService();
+    service.createCluster({ name: 'Tắt hẳn', autoPublishAfterTranslate: false });
+    const result = service.enqueueAfterTranslate({ path: 'D:/dich/tap-1.mp4', title: 'Phim', episodeIndex: 1 });
+    expect(result.accepted).toBe(0);
+    expect(result.clusters).toEqual([]);
+    expect(service.getOverview().jobs).toHaveLength(0);
+  });
+
+  it('không có episodeIndex → title giữ nguyên (không đuôi " — Tập")', async () => {
+    const { service } = await makeService();
+    service.createCluster({ name: 'Bật', autoPublishAfterTranslate: true });
+    const result = service.enqueueAfterTranslate({ path: 'D:/dich/full.mp4', title: 'Phim hay' });
+    expect(result.accepted).toBe(1);
+    expect(service.getOverview().jobs[0]!.title).toBe('Phim hay');
+  });
+
+  it('nạp lặp cùng path → duplicate (không tạo job thứ hai)', async () => {
+    const { service } = await makeService();
+    service.createCluster({ name: 'Bật', autoPublishAfterTranslate: true });
+    const first = service.enqueueAfterTranslate({ path: 'D:/dich/tap-2.mp4', title: 'Phim', episodeIndex: 2 });
+    expect(first.accepted).toBe(1);
+    const second = service.enqueueAfterTranslate({ path: 'D:/dich/tap-2.mp4', title: 'Phim', episodeIndex: 2 });
+    expect(second.accepted).toBe(0);
+    expect(service.getOverview().jobs).toHaveLength(1);
+  });
+
+  it('path rỗng → không nạp, không ném', async () => {
+    const { service } = await makeService();
+    service.createCluster({ name: 'Bật', autoPublishAfterTranslate: true });
+    const result = service.enqueueAfterTranslate({ path: '   ', title: 'Phim' });
+    expect(result.accepted).toBe(0);
+    expect(result.clusters).toEqual([]);
+    expect(service.getOverview().jobs).toHaveLength(0);
+  });
+});

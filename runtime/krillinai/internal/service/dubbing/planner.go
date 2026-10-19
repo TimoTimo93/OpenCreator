@@ -36,7 +36,10 @@ func (p *Planner) Plan(cues []Cue, language types.StandardLanguageCode) ([]PlanI
 
 	plan := make([]PlanItem, len(cues))
 	for i, cue := range cues {
-		clean := CleanTextForSpeech(cue.Text)
+		clean := ""
+		if !cue.Silence {
+			clean = CleanTextForSpeech(cue.Text)
+		}
 		estimate, confidence, err := p.estimator.Estimate(clean, language)
 		if err != nil {
 			return nil, nil, err
@@ -60,6 +63,7 @@ func (p *Planner) Plan(cues []Cue, language types.StandardLanguageCode) ([]PlanI
 			OriginalText:       cue.Text,
 			CleanText:          clean,
 			SpokenText:         spoken,
+			Silence:            cue.Silence,
 			EstimatedDuration:  estimate,
 			EstimateConfidence: confidence,
 			RewriteAttempts:    rewriteAttempts,

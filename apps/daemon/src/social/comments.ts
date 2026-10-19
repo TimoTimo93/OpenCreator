@@ -4,13 +4,16 @@
  * - Facebook: Graph API đọc bình luận video Page và đăng reply (ổn định nhất,
  *   token Page mã hoá sẵn).
  * - YouTube: mở trang watch của video công khai bằng trình duyệt cụm → lấy
- *   bình luận; trả lời bằng nút Reply trên trang (best-effort).
- * - TikTok: quét đang hạn chế (đọc sẽ thêm sau — đăng reply qua DOM rủi ro
- *   bế tắc), luôn để pending, không tự đăng.
+ *   bình luận; trả lời bằng nút Reply trên trang (best-effort, khớp comment
+ *   theo author + text vì DOM không lộ comment id).
+ * - TikTok: quét bình luận qua DOM trang video (id thật `data-comment-id`
+ *   nếu có, không thì id tổng hợp ổn định `tt:<videoId>:<hash>`), tự trả lời
+ *   bằng nút Reply trên trang (best-effort).
  *
  * Guardrails: bỏ comment/quảng cáo, cap reply/ngày, dedupe theo comment id,
  * reset "pending"→"failed" sẽ không chạy lại vô hạn (chỉ nhắc ở UI).
  */
+import { readFile } from 'node:fs/promises';
 import {
   countCommentRowsRepliedSince,
   listClusterRows,
@@ -32,6 +35,139 @@ const MAX_BROWSER_VIDEOS_PER_CLUSTER = 2;
 export const MAX_AUTO_REPLIES_PER_DAY = 25;
 /** Từ khoá quảng cáo/spam: bỏ qua, không trả lời. */
 const SPAM_KEYWORDS = ['http://', 'https://', 'hotline', 'zalo', 'viber', 'wap', 'kèmبحabe', 'giao dịch', 'sale'];
+
+// ---------------------------------------------------------------------------
+// Selector DOM cho quét/reply (config-driven — platform đổi DOM chỉ cần sửa
+// selectors.json; đọc lỗi thì rơi về mặc định bên dưới).
+// ---------------------------------------------------------------------------
+
+type TikTokCommentSelectors = {
+  /** Nút mở khu vực bình luận trên trang video (best-effort, không thấy thì bỏ). */
+  comment_open_btn: string;
+  comment_item: string;
+  comment_text: string;
+  /** Tác giả comment trên trang video (Studio không có key riêng). */
+  comment_author: string;
+  /** Vùng cuộn danh sách bình luận. */
+  comment_container: string;
+  /** Attribute chứa comment id thật (nền tảng có lộ thì dùng, không thì tổng hợp). */
+  comment_id_attr: string;
+  reply_trigger_btn: string;
+  reply_input: string;
+  reply_submit_btn: string;
+};
+
+type YouTubeWatchSelectors = {
+  comment_thread: string;
+  comment_author: string;
+  comment_content: string;
+  reply_button: string;
+  reply_input: string;
+  reply_submit_btn: string;
+};
+
+export type CommentSelectorConfig = {
+  tiktok: TikTokCommentSelectors;
+  youtube: YouTubeWatchSelectors;
+};
+
+const DEFAULT_COMMENT_SELECTORS: CommentSelectorConfig = {
+  tiktok: {
+    comment_open_btn: "[data-e2e='comment-icon'], [data-e2e='comment-count'], [data-e2e='comments-link'], button[aria-label*='Bình luận'], button[aria-label*='comment']",
+    comment_item: "div[data-e2e='comment-item'], div[class*='CommentItem']",
+    comment_text: "span[data-e2e='comment-level-1'], p[data-e2e='comment-text'], div[data-e2e='comment-text'], div[class*='comment-text']",
+    comment_author: "a[data-e2e='comment-author'], [data-e2e='comment-author'], a[href*='/@']",
+    comment_container: "[data-e2e='comments-list'], div[class*='CommentList'], div[class*='comment-list']",
+    comment_id_attr: 'data-comment-id',
+    reply_trigger_btn: "span[data-e2e='comment-reply-btn'], button:has-text('Trả lời'), button:has-text('Reply')",
+    reply_input: "div[contenteditable='true'], textarea[placeholder*='Trả lời'], textarea[placeholder*='Reply']",
+    reply_submit_btn: "button[data-e2e='comment-post'], button:has-text('Đăng'), button:has-text('Send')"
+  },
+  youtube: {
+    comment_thread: 'ytd-comment-thread-renderer',
+    comment_author: '#author-text, #author-simple-name',
+    comment_content: '#content-text',
+    reply_button: "#reply-button, button[aria-label*='Phản hồi'], button[aria-label*='Reply'], ytd-button-renderer#reply-button button",
+    reply_input: '#contenteditable-root',
+    reply_submit_btn: '#submit-button, ytd-button-renderer#submit-button button'
+  }
+};
+
+const SELECTORS_PATH = new URL('./platforms/selectors.json', import.meta.url);
+
+async function loadCommentSelectors(): Promise<CommentSelectorConfig> {
+  try {
+    const raw = JSON.parse(await readFile(SELECTORS_PATH, 'utf8')) as {
+      tiktok_studio?: Record<string, unknown>;
+      youtube_watch?: Record<string, unknown>;
+    };
+    const tk = raw.tiktok_studio ?? {};
+    const yt = raw.youtube_watch ?? {};
+    const pick = (source: Record<string, unknown>, key: string, fallback: string): string => {
+      const value = source[key];
+      return typeof value === 'string' && value.trim() !== '' ? value : fallback;
+    };
+    const fallback = DEFAULT_COMMENT_SELECTORS;
+    return {
+      tiktok: {
+        comment_open_btn: pick(tk, 'comment_open_btn', fallback.tiktok.comment_open_btn),
+        comment_item: pick(tk, 'comment_item', fallback.tiktok.comment_item),
+        comment_text: pick(tk, 'comment_text', fallback.tiktok.comment_text),
+        comment_author: pick(tk, 'video_comment_author', fallback.tiktok.comment_author),
+        comment_container: pick(tk, 'video_comment_container', fallback.tiktok.comment_container),
+        comment_id_attr: pick(tk, 'video_comment_id_attr', fallback.tiktok.comment_id_attr),
+        reply_trigger_btn: pick(tk, 'reply_trigger_btn', fallback.tiktok.reply_trigger_btn),
+        reply_input: pick(tk, 'reply_input', fallback.tiktok.reply_input),
+        reply_submit_btn: pick(tk, 'reply_submit_btn', fallback.tiktok.reply_submit_btn)
+      },
+      youtube: {
+        comment_thread: pick(yt, 'comment_thread', fallback.youtube.comment_thread),
+        comment_author: pick(yt, 'comment_author', fallback.youtube.comment_author),
+        comment_content: pick(yt, 'comment_content', fallback.youtube.comment_content),
+        reply_button: pick(yt, 'reply_button', fallback.youtube.reply_button),
+        reply_input: pick(yt, 'reply_input', fallback.youtube.reply_input),
+        reply_submit_btn: pick(yt, 'reply_submit_btn', fallback.youtube.reply_submit_btn)
+      }
+    };
+  } catch {
+    // selectors.json không đọc được → dùng mặc định, không chết scan.
+    return DEFAULT_COMMENT_SELECTORS;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Trang DOM tối thiểu (Patchright Page nói riêng không được import vào đây —
+// dùng structural typing như phần quét YouTube sẵn có).
+// ---------------------------------------------------------------------------
+
+type SocialDomLocator = {
+  first(): SocialDomLocator;
+  nth(index: number): SocialDomLocator;
+  /** Locator lồng nhau (row.locator(...)) — giữ phạm vi của locator hiện tại. */
+  locator(selector: string): SocialDomLocator;
+  count(): Promise<number>;
+  isVisible(): Promise<boolean>;
+  click(): Promise<void>;
+  fill(text: string): Promise<void>;
+  type(text: string, options?: { delay?: number }): Promise<void>;
+  press(key: string): Promise<void>;
+  textContent(): Promise<string | null>;
+  getAttribute(name: string): Promise<string | null>;
+  scrollIntoViewIfNeeded(): Promise<void>;
+  waitFor(options?: { state?: string; timeout?: number }): Promise<void>;
+};
+
+type SocialDomPage = {
+  url(): string;
+  close(): Promise<void>;
+  waitForTimeout(ms: number): Promise<void>;
+  evaluate<T, Arg = undefined>(fn: (arg: Arg) => T, arg?: Arg): Promise<T>;
+  locator(selector: string): SocialDomLocator;
+  keyboard?: {
+    type(text: string, options?: { delay?: number }): Promise<void>;
+    press(key: string): Promise<void>;
+  };
+};
 
 export type SocialLlmConfig = {
   baseUrl: string;
@@ -115,6 +251,8 @@ export function createSocialComments(input: SocialCommentsInput): SocialComments
     let newComments = 0;
     let repliesAttempted = 0;
     let repliesSent = 0;
+    // Selector DOM đọc một lần mỗi lượt quét (dùng cho scrape + reply).
+    const selectors = await loadCommentSelectors();
 
     for (const clusterRow of clusterRows) {
       clustersScanned += 1;
@@ -181,7 +319,36 @@ export function createSocialComments(input: SocialCommentsInput): SocialComments
           }
         }
       }
-      // TikTok: chưa có đường đọc comment ổn định — bỏ qua một cách tường minh.
+      // --- TikTok (browser, best-effort) ---
+      const tkHandle = parseTikTokHandle(cluster.tk_profile_url ?? '');
+      if (tkHandle !== '') {
+        const videos = jobs.filter(row => row.tk_status === 'published' && (row.tk_video_id ?? '').trim() !== '')
+          .slice(0, MAX_BROWSER_VIDEOS_PER_CLUSTER);
+        for (const video of videos) {
+          const videoUrl = buildTikTokVideoUrl(tkHandle, video.tk_video_id!);
+          if (videoUrl === null) continue;
+          try {
+            const scraped = await scrapeTikTokComments(input.worker, cluster.id, video.tk_video_id!, videoUrl, selectors.tiktok);
+            videosScanned += 1;
+            for (const comment of scraped) {
+              const inserted = upsertCommentRow(input.db, {
+                jobId: video.id,
+                clusterId: cluster.id,
+                platform: 'tiktok',
+                externalVideoId: video.tk_video_id!,
+                externalCommentId: comment.id,
+                author: comment.author === '' ? 'Người dùng' : comment.author,
+                text: comment.text.slice(0, 1_000),
+                commentCreatedAt: null,
+                nowISO: now()
+              });
+              if (inserted) newComments += 1;
+            }
+          } catch (error) {
+            errors.push(`tiktok/${cluster.name}: ${message(error)}`);
+          }
+        }
+      }
     }
 
     // --- AI auto-reply ---
@@ -201,8 +368,17 @@ export function createSocialComments(input: SocialCommentsInput): SocialComments
           }
           repliesAttempted += 1;
           const text = await generateReply(llmConfig, cluster.auto_reply_prompt ?? '', comment);
-          const sent = await postReply(fetchFn, clusterRow, comment, text, input.decryptToken);
-          if (sent) {
+          const outcome = await postReply(
+            fetchFn,
+            input.worker,
+            clusterRow.id,
+            clusterRow,
+            comment,
+            text,
+            input.decryptToken,
+            selectors
+          );
+          if (outcome.ok) {
             repliesSent += 1;
             remaining -= 1;
             updateCommentRow(input.db, comment.id, {
@@ -214,7 +390,7 @@ export function createSocialComments(input: SocialCommentsInput): SocialComments
             updateCommentRow(input.db, comment.id, {
               reply_status: 'failed',
               reply_text: text,
-              skipped_reason: 'Cần trả lời thủ công / nền tảng chưa hỗ trợ tự động'
+              skipped_reason: outcome.reason
             });
           }
         }
@@ -330,16 +506,29 @@ async function fetchFacebookComments(
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
+/** Kết quả một lần đăng reply tự động. */
+type ReplyOutcome = { ok: boolean; reason: string | null };
+
+/** Lý do chung khi nền tảng chưa hỗ trợ/không thể tự đăng. */
+const MANUAL_REPLY_REASON = 'Cần trả lời thủ công / nền tảng chưa hỗ trợ tự động';
+/** Lý do khi DOM reply đã thử nhưng không xác nhận được thành công. */
+const DOM_REPLY_FAIL_REASON = 'Chưa tự đăng được — trả lời tay';
+
 async function postReply(
   fetchFn: typeof fetch,
+  worker: SocialWorker,
+  clusterId: string,
   cluster: SocialClusterRow,
   comment: SocialCommentRowLike,
   text: string,
-  decryptToken: (token: string | null) => string
-): Promise<boolean> {
+  decryptToken: (token: string | null) => string,
+  selectors: CommentSelectorConfig
+): Promise<ReplyOutcome> {
   if (comment.platform === 'facebook') {
     const token = decryptToken(cluster.fb_page_token_encrypted);
-    if (token === '' || comment.external_comment_id.trim() === '') return false;
+    if (token === '' || comment.external_comment_id.trim() === '') {
+      return { ok: false, reason: 'Chưa cấu hình token Page — trả lời tay' };
+    }
     try {
       const response = await fetchFn(
         `https://graph.facebook.com/${FB_API_VERSION}/${encodeURIComponent(comment.external_comment_id)}/comments`,
@@ -352,15 +541,308 @@ async function postReply(
           body: new URLSearchParams({ message: text }).toString()
         }
       );
-      return response.ok;
+      return response.ok ? { ok: true, reason: null } : { ok: false, reason: MANUAL_REPLY_REASON };
     } catch (error) {
       void error;
-      return false;
+      return { ok: false, reason: MANUAL_REPLY_REASON };
     }
   }
-  // YouTube/TikTok: đăng reply qua DOM phức tạp — để "failed" cho chế độ thủ công.
-  void text;
-  return false;
+  if (comment.platform === 'youtube' && comment.external_video_id.trim() !== '') {
+    const sent = await postYouTubeReplyViaDom(worker, clusterId, comment, text, selectors.youtube)
+      .catch((): boolean => false);
+    return sent ? { ok: true, reason: null } : { ok: false, reason: DOM_REPLY_FAIL_REASON };
+  }
+  if (comment.platform === 'tiktok') {
+    const videoUrl = buildTikTokVideoUrl(parseTikTokHandle(cluster.tk_profile_url ?? ''), comment.external_video_id);
+    if (videoUrl !== null) {
+      const sent = await postTikTokReplyViaDom(worker, clusterId, videoUrl, comment, text, selectors.tiktok)
+        .catch((): boolean => false);
+      return sent ? { ok: true, reason: null } : { ok: false, reason: DOM_REPLY_FAIL_REASON };
+    }
+  }
+  return { ok: false, reason: MANUAL_REPLY_REASON };
+}
+
+// ---------------------------------------------------------------------------
+// DOM helpers chung (mẫu best-effort theo platforms/tiktok.ts uploadFlow)
+// ---------------------------------------------------------------------------
+
+/** Bấm vào element nếu thấy — không thấy/DOM đổi thì bỏ qua, không chặn luồng. */
+async function clickIfVisible(page: SocialDomPage, selector: string): Promise<void> {
+  try {
+    const target = page.locator(selector).first();
+    if (await target.isVisible().catch(() => false)) {
+      await target.click();
+      await page.waitForTimeout(600);
+    }
+  } catch {
+    // Không chặn luồng.
+  }
+}
+
+/** Cuộn khu vực bình luận một nhịp (chạy trong page — hàm tự đủ, không tham chiếu ngoài). */
+function scrollCommentsDom(payload: { containerSel: string }): undefined {
+  const container = payload.containerSel !== '' ? document.querySelector(payload.containerSel) : null;
+  if (container !== null && typeof container.scrollBy === 'function') {
+    container.scrollBy(0, 1_200);
+  } else {
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+  return undefined;
+}
+
+/**
+ * Thu bình luận TikTok trong page — hàm tự đủ (Playwright serialize từng dòng,
+ * không được tham chiếu biến ngoài). Trả nguyên liệu: id thật (nếu có) + thứ tự.
+ */
+function collectTikTokCommentsDom(payload: {
+  itemSel: string;
+  textSel: string;
+  authorSel: string;
+  idAttr: string;
+  max: number;
+}): Array<{ author: string; text: string; realId: string | null; order: number }> {
+  const out: Array<{ author: string; text: string; realId: string | null; order: number }> = [];
+  const nodes = Array.from(document.querySelectorAll(payload.itemSel)) as Element[];
+  nodes.slice(0, payload.max).forEach((node, index) => {
+    const textNode = payload.textSel !== '' ? node.querySelector(payload.textSel) : null;
+    const text = (textNode?.textContent ?? '').trim();
+    if (text === '') return;
+    let author = '';
+    if (payload.authorSel !== '') {
+      const authorNode = node.querySelector(payload.authorSel);
+      author = (authorNode?.textContent ?? '').trim();
+    }
+    if (author === '') {
+      // Fallback: link @handle trong item.
+      const link = node.querySelector("a[href*='@']");
+      const handle = /\/@([\w.-]+)/.exec(link?.getAttribute('href') ?? '')?.[1];
+      if (handle !== undefined) author = `@${handle}`;
+    }
+    let realId: string | null = null;
+    if (payload.idAttr !== '') {
+      realId = node.getAttribute(payload.idAttr)
+        ?? node.querySelector(`[${payload.idAttr}]`)?.getAttribute(payload.idAttr)
+        ?? null;
+    }
+    out.push({ author, text: text.slice(0, 1_000), realId: realId === '' ? null : realId, order: index });
+  });
+  return out;
+}
+
+/** FNV-1a 32-bit — hash chuỗi ổn định giữa các lần chạy/khởi động lại. */
+export function stableHash(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Id tổng hợp TikTok khi DOM không lộ comment id: PHẢI ỔN ĐỊNH giữa các lần
+ * quét (unique(platform, external_comment_id) phụ thuộc nó) — dùng
+ * `tt:<videoId>:<hash(author|text|order)>`.
+ */
+export function syntheticTikTokCommentId(videoId: string, author: string, text: string, order: number): string {
+  return `tt:${videoId}:${stableHash(`${author}|${text}|${order}`)}`;
+}
+
+function normalizeDomText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** Khớp comment đã lưu với dòng DOM (YT/TikTok không lộ id) theo author + text. */
+function commentMatchesDom(domAuthor: string, domText: string, comment: SocialCommentRowLike): boolean {
+  const storedText = normalizeDomText(comment.text);
+  const domNormalized = normalizeDomText(domText);
+  if (storedText === '' || domNormalized === '') return false;
+  if (domNormalized !== storedText && !domNormalized.includes(storedText.slice(0, 120))) return false;
+  const storedAuthor = normalizeDomText(comment.author).replace(/^@/, '');
+  if (storedAuthor === '') return true;
+  return normalizeDomText(domAuthor).replace(/^@/, '').includes(storedAuthor);
+}
+
+/** `tiktok.com/@user` / `https://www.tiktok.com/@user` → `user`. */
+export function parseTikTokHandle(profileUrl: string): string {
+  const match = /@([\w.-]+)/.exec(profileUrl.trim());
+  return match?.[1] ?? '';
+}
+
+function buildTikTokVideoUrl(handle: string, videoId: string): string | null {
+  if (handle === '' || videoId.trim() === '') return null;
+  return `https://www.tiktok.com/@${handle}/video/${encodeURIComponent(videoId)}`;
+}
+
+/** Điền text + bấm gửi reply (ưu tiên input trong comment, fallback mức trang). */
+async function fillAndSubmitReply(
+  page: SocialDomPage,
+  scope: SocialDomLocator | undefined,
+  selectors: { reply_input: string; reply_submit_btn: string },
+  text: string
+): Promise<boolean | null> {
+  const scopes: Array<SocialDomLocator | undefined> = scope !== undefined ? [scope, undefined] : [undefined];
+  for (const current of scopes) {
+    try {
+      const input = current === undefined
+        ? page.locator(selectors.reply_input).first()
+        : current.locator(selectors.reply_input).first();
+      if (!(await input.isVisible().catch(() => false))) continue;
+      await input.click().catch(() => undefined);
+      await input.fill(text).catch(async () => {
+        // contenteditable đôi khi từ chối fill — gõ tay qua keyboard.
+        if (page.keyboard !== undefined) {
+          await page.keyboard.type(text, { delay: 30 }).catch(() => undefined);
+        }
+      });
+      const submit = current === undefined
+        ? page.locator(selectors.reply_submit_btn).first()
+        : current.locator(selectors.reply_submit_btn).first();
+      if (!(await submit.isVisible().catch(() => false))) continue;
+      await submit.click();
+      await page.waitForTimeout(3_000);
+      // Xác nhận: editor bị xoá/biến mất → nền tảng đã nhận; vẫn còn chữ → thất bại.
+      const stillVisible = await input.isVisible().catch(() => false);
+      const leftover = (await input.textContent().catch(() => 'unverified')) ?? '';
+      return !stillVisible || leftover.trim() === '';
+    } catch {
+      continue; // Bước DOM lỗi → thử phạm vi khác, không chết luồng.
+    }
+  }
+  return null;
+}
+
+/** Tự trả lời YouTube qua DOM trang watch (best-effort, khớp author + text). */
+async function postYouTubeReplyViaDom(
+  worker: SocialWorker,
+  clusterId: string,
+  comment: SocialCommentRowLike,
+  text: string,
+  selectors: YouTubeWatchSelectors
+): Promise<boolean> {
+  return worker.withClusterBrowser(clusterId, async handle => {
+    const page = (await handle
+      .newPage(`https://www.youtube.com/watch?v=${encodeURIComponent(comment.external_video_id)}`)) as unknown as SocialDomPage;
+    try {
+      await page.waitForTimeout(6_000);
+      // Cuộn xuống để phần bình luận được lười nạp.
+      await page.evaluate(() => { window.scrollTo(0, 1_400); }).catch(() => undefined);
+      await page.waitForTimeout(3_000);
+      const threads = page.locator(selectors.comment_thread);
+      const count = await threads.count().catch(() => 0);
+      for (let index = 0; index < count; index += 1) {
+        const row = threads.nth(index);
+        const author = (await row.locator(selectors.comment_author).first().textContent().catch((): string | null => '')) ?? '';
+        const body = (await row.locator(selectors.comment_content).first().textContent().catch((): string | null => '')) ?? '';
+        if (!commentMatchesDom(author, body, comment)) continue;
+        const replyButton = row.locator(selectors.reply_button).first();
+        if (!(await replyButton.isVisible().catch(() => false))) continue;
+        await replyButton.click();
+        await page.waitForTimeout(1_500);
+        const outcome = await fillAndSubmitReply(page, row, selectors, text);
+        if (outcome !== null) return outcome;
+      }
+      return false;
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  });
+}
+
+/** Tự trả lời TikTok qua DOM trang video (best-effort, khớp author + text). */
+async function postTikTokReplyViaDom(
+  worker: SocialWorker,
+  clusterId: string,
+  videoUrl: string,
+  comment: SocialCommentRowLike,
+  text: string,
+  selectors: TikTokCommentSelectors
+): Promise<boolean> {
+  return worker.withClusterBrowser(clusterId, async handle => {
+    const page = (await handle.newPage(videoUrl)) as unknown as SocialDomPage;
+    try {
+      await page.waitForTimeout(6_000);
+      await clickIfVisible(page, selectors.comment_open_btn);
+      // Cuộn vài lần để danh sách bình luận nạp đủ (TikTok lười nạp).
+      for (let round = 0; round < 3; round += 1) {
+        await page
+          .evaluate(scrollCommentsDom, { containerSel: selectors.comment_container })
+          .catch(() => undefined);
+        await page.waitForTimeout(2_500);
+      }
+      const items = page.locator(selectors.comment_item);
+      const count = await items.count().catch(() => 0);
+      for (let index = 0; index < count; index += 1) {
+        const item = items.nth(index);
+        const author = (await item.locator(selectors.comment_author).first().textContent().catch((): string | null => '')) ?? '';
+        const body = (await item.locator(selectors.comment_text).first().textContent().catch((): string | null => '')) ?? '';
+        if (!commentMatchesDom(author, body, comment)) continue;
+        await item.scrollIntoViewIfNeeded().catch(() => undefined);
+        const trigger = item.locator(selectors.reply_trigger_btn).first();
+        if (!(await trigger.isVisible().catch(() => false))) continue;
+        await trigger.click();
+        await page.waitForTimeout(1_200);
+        const outcome = await fillAndSubmitReply(page, item, selectors, text);
+        if (outcome !== null) return outcome;
+      }
+      return false;
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  });
+}
+
+/** Quét bình luận TikTok bằng trình duyệt của cụm (trang video công khai). */
+async function scrapeTikTokComments(
+  worker: SocialWorker,
+  clusterId: string,
+  videoId: string,
+  videoUrl: string,
+  selectors: TikTokCommentSelectors
+): Promise<Array<{ id: string; author: string; text: string }>> {
+  return worker.withClusterBrowser(clusterId, async handle => {
+    const page = (await handle.newPage(videoUrl)) as unknown as SocialDomPage;
+    try {
+      await page.waitForTimeout(6_000);
+      // Mở khu vực bình luận nếu trang ẩn sẵn (best-effort).
+      await clickIfVisible(page, selectors.comment_open_btn);
+      // Cuộn vài lần để danh sách bình luận lười nạp.
+      for (let round = 0; round < 3; round += 1) {
+        await page
+          .evaluate(scrollCommentsDom, { containerSel: selectors.comment_container })
+          .catch(() => undefined);
+        await page.waitForTimeout(2_500);
+      }
+      type TikTokCommentDom = { author: string; text: string; realId: string | null; order: number };
+      const extracted = await page.evaluate<TikTokCommentDom[], {
+        itemSel: string;
+        textSel: string;
+        authorSel: string;
+        idAttr: string;
+        max: number;
+      }>(collectTikTokCommentsDom, {
+        itemSel: selectors.comment_item,
+        textSel: selectors.comment_text,
+        authorSel: selectors.comment_author,
+        idAttr: selectors.comment_id_attr,
+        max: 25
+      }).catch((): TikTokCommentDom[] => []);
+      // Id thật ưu tiên; không có → id tổng hợp ổn định (dedupe giữa các lượt quét).
+      return extracted.map(entry => {
+        const realId = typeof entry.realId === 'string' ? entry.realId : null;
+        return {
+          id: realId !== null && realId.trim() !== ''
+            ? realId.trim()
+            : syntheticTikTokCommentId(videoId, entry.author, entry.text, entry.order),
+          author: entry.author,
+          text: entry.text
+        };
+      });
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  });
 }
 
 export function mapCommentRow(

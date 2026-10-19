@@ -507,7 +507,11 @@ export type NotificationOutboxKind =
   | 'schedule_succeeded'
   | 'schedule_failed'
   | 'schedule_canceled'
-  | 'schedule_waiting_approval';
+  | 'schedule_waiting_approval'
+  // Sự kiện generic (không gắn thread/run — dịch xong 1 tập, đăng đa kênh xong).
+  | 'translation_episode_done'
+  | 'social_job_done'
+  | 'social_job_failed';
 
 export type NotificationOutboxItem = {
   id: string;

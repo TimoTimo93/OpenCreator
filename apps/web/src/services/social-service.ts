@@ -30,6 +30,8 @@ export type SocialClusterSummary = {
   tkProfileUrl: string;
   autoReplyEnabled: boolean;
   autoReplyPrompt: string;
+  /** GĐ4: bật tự nạp đăng sau khi dịch xong (daemon hook, công tắc theo cụm). */
+  autoPublishAfterTranslate: boolean;
   loginStatus: { youtube: string; tiktok: string; facebook: string };
   browserOpen: boolean;
   createdAt: string;
@@ -128,6 +130,8 @@ export type SocialClusterInput = {
   /** GĐ3: bật AI tự trả lời bình luận cho cụm. */
   autoReplyEnabled?: boolean;
   autoReplyPrompt?: string;
+  /** GĐ4: bật tự nạp đăng sau khi dịch xong (daemon tự xếp khung giờ vàng). */
+  autoPublishAfterTranslate?: boolean;
 };
 
 export type SocialEnqueueItem = {
@@ -288,9 +292,23 @@ export type SocialVideoStat = {
   previousViews: number | null;
 };
 
+export type SocialHistoryPoint = {
+  value: number;
+  capturedAt: string;
+};
+
+/** Chuỗi lịch sử cho sparkline (daemon gắn cho metrics followers/views). */
+export type SocialMetricHistory = {
+  clusterId: string;
+  platform: string;
+  metric: string;
+  points: SocialHistoryPoint[];
+};
+
 export type SocialStatsOverview = {
   channels: SocialChannelStat[];
   videos: SocialVideoStat[];
+  history?: SocialMetricHistory[];
   lastRefreshAt: string | null;
   refreshError: string | null;
 };

@@ -18,6 +18,12 @@ const DubAlignedSuffix = "dub_aligned.srt"
 // accepted when aligning subtitle blocks to the dubbing plan by position.
 const dubPlanTimingTolerance = 1.0
 
+// dubPlanTileTolerance bounds how far a plan item window may sit from a
+// subtitle block edge (in seconds) when a block is matched to a group of plan
+// items tiling its window. Tight enough to never swallow a neighbouring cue,
+// loose enough for exporters that round timestamps.
+const dubPlanTileTolerance = 0.05
+
 // cueTimingMatchEpsilon compares SRT-derived timestamps with plan timings.
 const cueTimingMatchEpsilon = 0.001
 
@@ -145,10 +151,15 @@ func matchDubTimings(plan []PlanItem, blocks []subtitleBlock) ([][2]float64, err
 	for i, block := range blocks {
 		idx, ok := byTiming[[2]float64{block.Start, block.End}]
 		if !ok {
-			allMatched = false
-			break
+			timing, tiled := matchTiledDubItems(plan, block)
+			if !tiled {
+				allMatched = false
+				break
+			}
+			timings[i] = timing
+			continue
 		}
-		timings[i] = [2]float64{plan[idx].NewStart, plan[idx].NewEnd}
+		timings[i] = dubTimingForItem(plan[idx], block)
 	}
 	if allMatched {
 		return timings, nil
@@ -162,7 +173,56 @@ func matchDubTimings(plan []PlanItem, blocks []subtitleBlock) ([][2]float64, err
 			math.Abs(block.End-plan[i].OriginalEnd) > dubPlanTimingTolerance {
 			return nil, fmt.Errorf("subtitle cue %d timing does not match the dubbing plan", i+1)
 		}
-		timings[i] = [2]float64{plan[i].NewStart, plan[i].NewEnd}
+		timings[i] = dubTimingForItem(plan[i], block)
 	}
 	return timings, nil
+}
+
+// dubTimingForItem returns the dub timeline for one matched plan item.
+// Items that had content but produce no speech (silenced echoes, noise-only
+// cues) keep the source timing: their subtitle must not collapse onto the
+// tiny silence window. Minimal plans without text fields stay re-timed.
+func dubTimingForItem(item PlanItem, block subtitleBlock) [2]float64 {
+	if item.Silence || (item.OriginalText != "" && strings.TrimSpace(item.SpokenText) == "") {
+		return [2]float64{block.Start, block.End}
+	}
+	return [2]float64{item.NewStart, item.NewEnd}
+}
+
+// matchTiledDubItems matches a subtitle block to consecutive plan items whose
+// original windows tile the block window — the shape produced when a long cue
+// is split into parts. The block is then timed to the union of the fitted
+// part windows. Requires at least two items so loose single-item windows can
+// never fake a match.
+func matchTiledDubItems(plan []PlanItem, block subtitleBlock) ([2]float64, bool) {
+	first := -1
+	last := -1
+	for i, item := range plan {
+		if item.OriginalStart < block.Start-dubPlanTileTolerance || item.OriginalEnd > block.End+dubPlanTileTolerance {
+			continue
+		}
+		if first < 0 || item.OriginalStart < plan[first].OriginalStart {
+			first = i
+		}
+		if last < 0 || item.OriginalEnd > plan[last].OriginalEnd {
+			last = i
+		}
+	}
+	if first < 0 || first == last {
+		return [2]float64{}, false
+	}
+
+	if math.Abs(plan[first].OriginalStart-block.Start) > dubPlanTileTolerance ||
+		math.Abs(plan[last].OriginalEnd-block.End) > dubPlanTileTolerance {
+		return [2]float64{}, false
+	}
+	for i := first; i < last; i++ {
+		if plan[i].OriginalStart < block.Start-dubPlanTileTolerance || plan[i].OriginalEnd > block.End+dubPlanTileTolerance {
+			return [2]float64{}, false
+		}
+		if math.Abs(plan[i+1].OriginalStart-plan[i].OriginalEnd) > dubPlanTileTolerance {
+			return [2]float64{}, false
+		}
+	}
+	return [2]float64{plan[first].NewStart, plan[last].NewEnd}, true
 }

@@ -245,3 +245,60 @@ describe('social db — kv', () => {
     expect(kvGet(db, 'queue_state')).toBe('running');
   });
 });
+
+describe('social db — auto_publish_after_translate (tự nạp đăng sau dịch)', () => {
+  it('schema mới có cột INTEGER default 0; createClusterRow + mapCluster round-trip', async () => {
+    const db = await openTempDb();
+    const columns = db.pragma('table_info(social_clusters)') as Array<{ name: string; dflt_value: string | null }>;
+    const column = columns.find(info => info.name === 'auto_publish_after_translate');
+    expect(column).toBeDefined();
+    expect(column!.dflt_value).toBe('0');
+
+    makeCluster(db, { autoPublishAfterTranslate: true });
+    const row = getClusterRow(db, 'cluster_a')!;
+    expect(row.auto_publish_after_translate).toBe(1);
+    expect(mapCluster(row).autoPublishAfterTranslate).toBe(true);
+
+    // Không truyền → mặc định tắt.
+    createClusterRow(db, {
+      id: 'cluster_b', name: 'Cụm B', seriesName: '', proxyServer: '',
+      fbMode: 'graph_api', fbPageId: '', fbPageTokenEncrypted: null,
+      defaultScheduleTimes: ['19:30'], defaultDescription: '',
+      nowISO: '2026-03-15T00:00:00.000Z'
+    });
+    expect(mapCluster(getClusterRow(db, 'cluster_b')!).autoPublishAfterTranslate).toBe(false);
+  });
+
+  it('updateClusterRow đổi được cột riêng lẻ', async () => {
+    const db = await openTempDb();
+    makeCluster(db);
+    expect(mapCluster(getClusterRow(db, 'cluster_a')!).autoPublishAfterTranslate).toBe(false);
+    updateClusterRow(db, 'cluster_a', { auto_publish_after_translate: 1 });
+    expect(mapCluster(getClusterRow(db, 'cluster_a')!).autoPublishAfterTranslate).toBe(true);
+    updateClusterRow(db, 'cluster_a', { auto_publish_after_translate: 0 });
+    expect(mapCluster(getClusterRow(db, 'cluster_a')!).autoPublishAfterTranslate).toBe(false);
+  });
+
+  it('DB cũ thiếu cột → migrateColumns cộng lại (default 0, giữ nguyên dữ liệu)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'social-db-mig2-'));
+    const path = join(dir, 'social.sqlite');
+    const first = openSocialDatabase(path);
+    try {
+      makeCluster(first);
+      first.exec('ALTER TABLE social_clusters DROP COLUMN auto_publish_after_translate');
+    } finally {
+      closeSocialDatabase(first);
+    }
+    const reopened = openSocialDatabase(path);
+    try {
+      const columns = reopened.pragma('table_info(social_clusters)') as Array<{ name: string }>;
+      expect(columns.some(info => info.name === 'auto_publish_after_translate')).toBe(true);
+      const cluster = mapCluster(getClusterRow(reopened, 'cluster_a')!);
+      expect(cluster.name).toBe('Cụm A');
+      expect(cluster.autoPublishAfterTranslate).toBe(false);
+    } finally {
+      closeSocialDatabase(reopened);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

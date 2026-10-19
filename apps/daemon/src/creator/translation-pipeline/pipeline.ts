@@ -44,6 +44,13 @@ export type PipelineEpisode = {
   durationSeconds: number | null;
   merged: boolean;
   mergeRunId: string | null;
+  /** GĐ4: project do A3 chỉ định khi nạp (routes.translation-batch passthrough). */
+  projectId?: string | null;
+  /**
+   * GĐ4: thời điểm hook tự nạp đăng đã chạy thành công cho mục này — chống nạp
+   * lặp khi daemon khởi động lại (recover chỉ đuổi mục CHƯA đánh dấu).
+   */
+  socialEnqueuedAt?: string | null;
 };
 
 export type TranslationPipelineMerge = {
@@ -72,6 +79,8 @@ export type PipelineEnqueueRequest = {
   title?: string;
   seriesKey?: string | null;
   episodeIndex?: number | null;
+  /** GĐ4: project đích (A3 gửi kèm khi nạp cả bộ); rỗng/không có → project mặc định. */
+  projectId?: string;
 };
 
 export type TranslationPipelineService = {
@@ -109,10 +118,30 @@ export type TranslationPipelineServiceInput = {
     }): { job: CreatorJob; artifact: CreatorArtifact; deduplicated: boolean };
   };
   dispatcher: Pick<CreatorCommandDispatcher, 'dispatchWorkflow'>;
-  projects: { ensureDefaultProject(): { projectId: string } };
+  projects: {
+    ensureDefaultProject(): { projectId: string };
+    /**
+     * GĐ4: kiểm project theo id (item.projectId do A3 nạp kèm). Không có →
+     * translateEpisode fallback về project mặc định (không chết giữa chừng).
+     */
+    getProject?(projectId: string): { projectId: string } | undefined;
+  };
   ffmpegPath: string | undefined;
   ffprobePath: string | undefined;
   ensureRuntimeReady(): Promise<void>;
+  /**
+   * GĐ4 — hook tự nạp đăng sau dịch, cài ở server.ts (điều khiển từ DAEMON):
+   * gọi mỗi khi một tập dịch xong; cài đặt sẽ thông báo trong app + xếp video
+   * vào hàng đợi đăng của các cụm đang bật "autoPublishAfterTranslate".
+   * Ném lỗi ở đây KHÔNG làm mục dịch thất bại — pipeline chỉ log cảnh báo và
+   * giữ socialEnqueuedAt trống để lần chạy sau (recover) thử lại.
+   */
+  onEpisodeCompleted?(info: {
+    projectId?: string;
+    videoPath: string;
+    title: string;
+    episodeIndex?: number;
+  }): Promise<void>;
   /** Đè kiểm tra media khi kiểm thử (mặc định: ffprobe thật). */
   probeSourceMedia?(path: string): Promise<MediaProbe>;
   /** Đè logic ghép video khi kiểm thử (mặc định: ffmpeg thật). */
@@ -249,7 +278,11 @@ export function createTranslationPipelineService(
             outputVideoPath: null,
             durationSeconds: null,
             merged: false,
-            mergeRunId: null
+            mergeRunId: null,
+            projectId: typeof request.projectId === 'string' && request.projectId.trim() !== ''
+              ? request.projectId.trim()
+              : null,
+            socialEnqueuedAt: null
           });
           accepted += 1;
         }
@@ -328,7 +361,15 @@ export function createTranslationPipelineService(
         }
         if (draft.merge.status === 'running') draft.merge = idleMerge();
       });
-      void pump();
+      void (async () => {
+        // GĐ4: mục đã hoàn thành mà CHƯA nạp đăng (hook rớt giữa chừng trước
+        // khi daemon tắt) → đuổi lại đúng 1 lần; mục đã đánh dấu thì bỏ qua
+        // (chống nạp lặp khi khởi động lại).
+        if (input.onEpisodeCompleted !== undefined) {
+          await replayEpisodeCompletedCallbacks();
+        }
+        void pump();
+      })();
       return Promise.resolve();
     },
     close(): Promise<void> {
@@ -394,9 +435,11 @@ export function createTranslationPipelineService(
     // Tái dùng job cũ nếu lần trước bị nửa chừng (creationKey ổn định).
     const existing = item.jobId === null ? undefined : input.creator.getJob(item.jobId);
     let job = existing;
+    let usedProjectId = input.projects.ensureDefaultProject().projectId;
     if (job === undefined) {
+      usedProjectId = resolveProjectId(item);
       job = await input.creator.createJob({
-        projectId: input.projects.ensureDefaultProject().projectId,
+        projectId: usedProjectId,
         templateId: 'video-translation',
         creationKey: `translation-pipeline:${item.id}`
       });
@@ -435,12 +478,73 @@ export function createTranslationPipelineService(
       throw new Error('Dịch xong nhưng không tìm thấy video ngang trong artifacts');
     }
     const probe = await probeSource(video.path);
+    const outputPath = normalizePath(video.path);
     applyItem(item.id, {
       status: 'completed',
-      outputVideoPath: normalizePath(video.path),
+      outputVideoPath: outputPath,
       durationSeconds: Math.round(probe.duration),
       error: null
     });
+    // GĐ4: báo daemon "tập này đã dịch xong" (thông báo + tự nạp đăng theo cụm).
+    await afterEpisodeCompleted(item.id, {
+      projectId: usedProjectId,
+      videoPath: outputPath,
+      title: item.title,
+      episodeIndex: item.episodeIndex === null ? undefined : item.episodeIndex
+    });
+  }
+
+  /** Dựng project cho job dịch: item.projectId còn tồn tại → dùng, không → mặc định. */
+  function resolveProjectId(item: PipelineEpisode): string {
+    const requested = item.projectId?.trim();
+    if (requested !== undefined && requested !== '' && input.projects.getProject !== undefined) {
+      const project = input.projects.getProject(requested);
+      if (project !== undefined) return project.projectId;
+      console.warn(`[translation-pipeline] project "${requested}" không còn — dùng project mặc định cho "${item.title}"`);
+    }
+    return input.projects.ensureDefaultProject().projectId;
+  }
+
+  /**
+   * Gọi hook tự nạp đăng: bỏ qua nếu mục đã đánh dấu socialEnqueuedAt (chống nạp
+   * lặp khi restart); thành công mới đánh dấu — thất bại giữ trống để lần chạy
+   * sau (recover) thử lại. Lỗi hook không bao giờ làm mục dịch chuyển trạng thái.
+   */
+  async function afterEpisodeCompleted(episodeId: string, info: {
+    projectId?: string;
+    videoPath: string;
+    title: string;
+    episodeIndex?: number;
+  }): Promise<void> {
+    if (input.onEpisodeCompleted === undefined) return;
+    const current = readState().items.find(candidate => candidate.id === episodeId);
+    if (current === undefined) return;
+    if (current.socialEnqueuedAt !== undefined && current.socialEnqueuedAt !== null
+      && current.socialEnqueuedAt !== '') return;
+    try {
+      await input.onEpisodeCompleted(info);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[translation-pipeline] tự nạp đăng sau dịch thất bại cho "${info.title}": ${message}`);
+      return;
+    }
+    applyItem(episodeId, { socialEnqueuedAt: now() });
+  }
+
+  /** Đuổi lại hook cho các mục đã completed mà chưa đánh dấu (daemon rớt giữa hook). */
+  async function replayEpisodeCompletedCallbacks(): Promise<void> {
+    if (input.onEpisodeCompleted === undefined) return;
+    for (const item of readState().items) {
+      if (item.status !== 'completed' || item.outputVideoPath === null) continue;
+      if (item.socialEnqueuedAt !== undefined && item.socialEnqueuedAt !== null
+        && item.socialEnqueuedAt !== '') continue;
+      await afterEpisodeCompleted(item.id, {
+        projectId: item.projectId ?? undefined,
+        videoPath: item.outputVideoPath,
+        title: item.title,
+        episodeIndex: item.episodeIndex === null ? undefined : item.episodeIndex
+      });
+    }
   }
 
   async function dispatchSettings(jobId: string, patch: Record<string, CreatorJson>): Promise<void> {

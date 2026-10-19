@@ -71,14 +71,19 @@ func buildMuxArgs(inputVideo, inputAudio, outputVideo string) []string {
 }
 
 func BuildDubCues(plan []PlanItem) []Cue {
-	cues := make([]Cue, len(plan))
-	for i, item := range plan {
-		cues[i] = Cue{
-			Index: i + 1,
+	cues := make([]Cue, 0, len(plan))
+	for _, item := range plan {
+		if item.Silence || strings.TrimSpace(item.SpokenText) == "" {
+			// Silenced echoes and noise-only cues must not flash as blank
+			// entries in the dub-facing subtitle.
+			continue
+		}
+		cues = append(cues, Cue{
+			Index: len(cues) + 1,
 			Start: item.NewStart,
 			End:   item.NewEnd,
 			Text:  item.SpokenText,
-		}
+		})
 	}
 	return cues
 }

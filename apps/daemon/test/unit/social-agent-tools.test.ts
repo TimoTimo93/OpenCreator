@@ -78,7 +78,13 @@ async function setup(options: { scopes?: string[]; browserLauncher?: boolean } =
   return { server, token, service, capabilities, openedUrls, definitions: createSocialToolDefinitions({ request: injectClient.request }) };
 }
 
-function request(server: FastifyInstance, token: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: unknown) {
+function request(
+  server: FastifyInstance,
+  token: string,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  url: string,
+  payload?: Record<string, unknown>
+) {
   return server.inject({
     method,
     url,
@@ -295,5 +301,21 @@ describe('social MCP route', () => {
     expect(names).toContain('social_overview');
     expect(names).toContain('social_enqueue_videos');
     expect(names).toContain('social_reschedule_job');
+  });
+});
+
+describe('social_update_cluster — autoPublishAfterTranslate', () => {
+  it('tool nhận autoPublishAfterTranslate → PATCH nội bộ lưu công tắc (scope manage)', async () => {
+    const fixture = await setup();
+    await fixture.definitions.social_create_cluster.execute({ name: 'Cụm Tự Nạp' });
+    const overview = (await request(fixture.server!, fixture.token, 'GET', '/internal/agent-tools/social/overview')).json();
+    const clusterId = overview.clusters[0].id;
+    const updated = await fixture.definitions.social_update_cluster.execute({
+      clusterId,
+      autoPublishAfterTranslate: true
+    });
+    const cluster = (updated as { clusters: Array<{ id: string; autoPublishAfterTranslate: boolean }> })
+      .clusters.find(candidate => candidate.id === clusterId)!;
+    expect(cluster.autoPublishAfterTranslate).toBe(true);
   });
 });

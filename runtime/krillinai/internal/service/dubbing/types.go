@@ -48,6 +48,10 @@ type Cue struct {
 	Start float64
 	End   float64
 	Text  string
+	// Silence marks a cue that must not be voiced. PrepareSpeechCues sets it
+	// for ASR echo copies: the cue keeps its timeline slot but produces no
+	// speech, so the dub voice never repeats the line.
+	Silence bool
 }
 
 func (c Cue) Duration() float64 {
@@ -63,6 +67,7 @@ type PlanItem struct {
 	OriginalText       string  `json:"original_text"`
 	CleanText          string  `json:"clean_text"`
 	SpokenText         string  `json:"spoken_text"`
+	Silence            bool    `json:"silence,omitempty"`
 	EstimatedDuration  float64 `json:"estimated_duration"`
 	EstimateConfidence float64 `json:"estimate_confidence"`
 	ActualDuration     float64 `json:"actual_duration"`
@@ -82,10 +87,14 @@ type Chunk struct {
 }
 
 type Report struct {
-	Warnings       []string `json:"warnings"`
-	FailedIndexes  []int    `json:"failed_indexes"`
-	MaxSpeedFactor float64  `json:"max_speed_factor"`
-	RewriteCount   int      `json:"rewrite_count"`
+	Warnings            []string `json:"warnings"`
+	FailedIndexes       []int    `json:"failed_indexes"`
+	MaxSpeedFactor      float64  `json:"max_speed_factor"`
+	RewriteCount        int      `json:"rewrite_count"`
+	EchoSilencedCues    int      `json:"echo_silenced_cues"`
+	EchoSilencedIndexes []int    `json:"echo_silenced_indexes,omitempty"`
+	SplitCues           int      `json:"split_cues"`
+	SplitParts          int      `json:"split_parts"`
 }
 
 type CommandRunner func(args []string) error

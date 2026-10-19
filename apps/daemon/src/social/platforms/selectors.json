@@ -46,10 +46,22 @@
     "post_btn": "button[data-e2e='post_video_button'], button:has-text('Lên lịch'), button:has-text('Đăng'), button:has-text('Schedule')",
     "unreplied_filter": "div[role='tab']:has-text('Chưa trả lời'), div[role='tab']:has-text('Unreplied')",
     "comment_item": "div[data-e2e='comment-item'], div[class*='CommentItem']",
-    "comment_text": "span[data-e2e='comment-level-1'], div[class*='comment-text']",
+    "comment_text": "span[data-e2e='comment-level-1'], p[data-e2e='comment-text'], div[data-e2e='comment-text'], div[class*='comment-text']",
+    "comment_open_btn": "[data-e2e='comment-icon'], [data-e2e='comment-count'], [data-e2e='comments-link'], button[aria-label*='Bình luận'], button[aria-label*='comment']",
+    "video_comment_author": "a[data-e2e='comment-author'], [data-e2e='comment-author'], a[href*='/@']",
+    "video_comment_container": "[data-e2e='comments-list'], div[class*='CommentList'], div[class*='comment-list']",
+    "video_comment_id_attr": "data-comment-id",
     "reply_trigger_btn": "span[data-e2e='comment-reply-btn'], button:has-text('Trả lời'), button:has-text('Reply')",
     "reply_input": "div[contenteditable='true'], textarea[placeholder*='Trả lời'], textarea[placeholder*='Reply']",
     "reply_submit_btn": "button[data-e2e='comment-post'], button:has-text('Đăng'), button:has-text('Send')"
+  },
+  "youtube_watch": {
+    "comment_thread": "ytd-comment-thread-renderer",
+    "comment_author": "#author-text, #author-simple-name",
+    "comment_content": "#content-text",
+    "reply_button": "#reply-button, button[aria-label*='Phản hồi'], button[aria-label*='Reply'], ytd-button-renderer#reply-button button",
+    "reply_input": "#contenteditable-root, ytd-comment-simplebox-renderer #contenteditable-root",
+    "reply_submit_btn": "#submit-button, ytd-button-renderer#submit-button button"
   },
   "facebook_browser": {
     "business_home_url": "https://business.facebook.com/latest/home",

@@ -58,6 +58,10 @@ export async function registerTranslationPipelineRoutes(
           : candidate.seriesKey === null ? { seriesKey: null } : {}),
         ...(typeof candidate.episodeIndex === 'number'
           ? { episodeIndex: candidate.episodeIndex }
+          : {}),
+        // GĐ4: passthrough project đích (A3 gửi khi nạp cả bộ).
+        ...(typeof candidate.projectId === 'string' && candidate.projectId.trim() !== ''
+          ? { projectId: candidate.projectId.trim() }
           : {})
       });
     }

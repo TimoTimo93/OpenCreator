@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, normalize } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { CreatorArtifact, CreatorJob, CreatorJson } from '@opencreator/protocol';
+import type { CreatorCommandDispatcher } from '../../src/creator/command-dispatcher.js';
 import {
   createTranslationPipelineService,
   type TranslationPipelineSummary
@@ -105,7 +106,7 @@ function makeFakeDispatcher(jobs: Map<string, FakeJobEntry>, stageDelayMs: numbe
         errorMessage: null,
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString()
-      } as CreatorJob['stages'][number]);
+      } as unknown as CreatorJob['stages'][number]);
       if (stageId === 'render-horizontal') {
         const sourceArtifact = entry.artifacts.find(artifact => artifact.kind === 'source_video');
         const videoPath = sourceArtifact === undefined
@@ -126,8 +127,13 @@ function makeFakeDispatcher(jobs: Map<string, FakeJobEntry>, stageDelayMs: numbe
     }, stageDelayMs);
   };
   return {
+    // Mock trả receipt tối giản — cast qua unknown để khớp kiểu dispatcher thật.
     dispatcher: {
-      dispatchWorkflow(jobId: string, request: { action: string; input: Record<string, CreatorJson> }) {
+      dispatchWorkflow(
+        jobId: string,
+        request: { action: string; input: Record<string, CreatorJson>; expectedRevision?: number; idempotencyKey?: string },
+        _identity?: { scopeKey?: string | null; inputFingerprint?: string | null; parentStageRunId?: string | null; resumedFromStageRunId?: string | null }
+      ) {
         const entry = jobs.get(jobId);
         if (entry === undefined) throw new Error('missing job');
         entry.job.revision += 1;
@@ -146,23 +152,42 @@ function makeFakeDispatcher(jobs: Map<string, FakeJobEntry>, stageDelayMs: numbe
           commandReceipt: { stageRunId: `${request.input.stageId}_run`, status: 'committed' }
         };
       }
-    }
+    } as unknown as Pick<CreatorCommandDispatcher, 'dispatchWorkflow'>,
+    jobs
   };
 }
 
 async function makeService(options: {
   failProbeIndex?: number;
   stageDelayMs?: number;
+  /** Dùng lại dataDir của instance trước (giả lập restart đọc cùng pipeline.json). */
+  dataDir?: string;
+  onEpisodeCompleted?: (info: {
+    projectId?: string;
+    videoPath: string;
+    title: string;
+    episodeIndex?: number;
+  }) => Promise<void>;
+  getProject?: (projectId: string) => { projectId: string } | undefined;
 } = {}): Promise<{
   service: ReturnType<typeof build>;
   dataDir: string;
   sourcePaths: string[];
   mergeCalls: Array<Array<string>>;
+  createJobRequests: Array<{ projectId: string; creationKey?: string }>;
 }> {
-  const dataDir = await mkdtemp(join(tmpdir(), 'oc-pipeline-test-'));
+  const dataDir = options.dataDir ?? await mkdtemp(join(tmpdir(), 'oc-pipeline-test-'));
   trackTempDir(dataDir);
   const { creator, jobs } = makeFakeCreator();
   const { dispatcher } = makeFakeDispatcher(jobs, options.stageDelayMs ?? 20);
+  const createJobRequests: Array<{ projectId: string; creationKey?: string }> = [];
+  const creatorWithCapture = {
+    ...creator,
+    createJob: (request: { projectId: string; creationKey?: string }): CreatorJob => {
+      createJobRequests.push(request);
+      return creator.createJob(request);
+    }
+  };
   const sourcePaths = await Promise.all([
     join(dataDir, 'tap-01.mp4'),
     join(dataDir, 'tap-02.mp4')
@@ -173,9 +198,13 @@ async function makeService(options: {
   const mergeCalls: Array<Array<string>> = [];
   const service = createTranslationPipelineService({
     dataDir,
-    creator,
+    creator: creatorWithCapture,
     dispatcher,
-    projects: { ensureDefaultProject: () => ({ projectId: 'project_1' }) },
+    projects: {
+      ensureDefaultProject: () => ({ projectId: 'project_1' }),
+      ...(options.getProject === undefined ? {} : { getProject: options.getProject })
+    },
+    ...(options.onEpisodeCompleted === undefined ? {} : { onEpisodeCompleted: options.onEpisodeCompleted }),
     ffmpegPath: 'ffmpeg',
     ffprobePath: 'ffprobe',
     ensureRuntimeReady: async () => undefined,
@@ -201,7 +230,7 @@ async function makeService(options: {
   function build() {
     return service;
   }
-  return { service: build(), dataDir, sourcePaths, mergeCalls };
+  return { service: build(), dataDir, sourcePaths, mergeCalls, createJobRequests };
 }
 
 async function waitForSettle(service: {
@@ -308,5 +337,119 @@ describe('translation pipeline service', () => {
     const { service } = await makeService();
     await service.recover();
     expect(service.getSummary().items).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GĐ4 — Hook tự nạp đăng sau dịch (điều khiển từ daemon)
+// ---------------------------------------------------------------------------
+
+describe('translation pipeline — hook onEpisodeCompleted', () => {
+  async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error('waitFor timeout');
+      await new Promise(resolvePromise => setTimeout(resolvePromise, 20));
+    }
+  }
+
+  it('dịch xong 1 tập → hook nhận đúng videoPath/title/episode và state ghi socialEnqueuedAt', async () => {
+    const hookCalls: Array<{ projectId?: string; videoPath: string; title: string; episodeIndex?: number }> = [];
+    const { service, sourcePaths } = await makeService({
+      onEpisodeCompleted: async info => {
+        hookCalls.push(info);
+      },
+      getProject: projectId => ({ projectId })
+    });
+    service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 3', episodeIndex: 3, projectId: 'project_9' }]);
+    await waitForSettle(service);
+    expect(hookCalls).toHaveLength(1);
+    expect(hookCalls[0]!.title).toBe('Tập 3');
+    expect(hookCalls[0]!.episodeIndex).toBe(3);
+    expect(hookCalls[0]!.projectId).toBe('project_9');
+    expect(hookCalls[0]!.videoPath).toContain('tap-01.mp4.dub.mp4');
+    await waitFor(() => service.getSummary().items[0]!.socialEnqueuedAt != null);
+    expect(service.getSummary().items[0]!.socialEnqueuedAt).toBeTruthy();
+  });
+
+  it('hook ném lỗi → mục vẫn completed, không đánh socialEnqueuedAt (lần sau thử lại)', async () => {
+    const { service, sourcePaths } = await makeService({
+      onEpisodeCompleted: async () => {
+        throw new Error('social db khóa');
+      }
+    });
+    service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
+    const after = await waitForSettle(service);
+    expect(after.counts.completed).toBe(1);
+    expect(after.counts.failed).toBe(0);
+    expect(after.items[0]!.socialEnqueuedAt ?? null).toBeNull();
+  });
+
+  it('restart (service mới cùng dataDir): recover KHÔNG gọi lại hook khi socialEnqueuedAt đã ghi', async () => {
+    const hookCalls: Array<{ videoPath: string }> = [];
+    const first = await makeService({
+      onEpisodeCompleted: async info => {
+        hookCalls.push(info);
+      }
+    });
+    first.service.enqueue([{ path: first.sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
+    await waitForSettle(first.service);
+    expect(hookCalls).toHaveLength(1);
+    await waitFor(() => first.service.getSummary().items[0]!.socialEnqueuedAt != null);
+    // Giả lập restart: instance mới đọc lại state đĩa + recover().
+    const second = await makeService({
+      dataDir: first.dataDir,
+      onEpisodeCompleted: async info => {
+        hookCalls.push(info);
+      }
+    });
+    await second.service.recover();
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 150));
+    expect(hookCalls).toHaveLength(1); // không nạp lặp
+  });
+
+  it('restart với mục completed CHƯA đánh dấu (rớt giữa hook) → recover gọi hook đúng 1 lần rồi tự ghi', async () => {
+    const first = await makeService(); // không cắm hook → dịch xong, không đánh dấu
+    first.service.enqueue([{ path: first.sourcePaths[0]!, title: 'Tập 2', episodeIndex: 2 }]);
+    await waitForSettle(first.service);
+    expect(first.service.getSummary().items[0]!.socialEnqueuedAt ?? null).toBeNull();
+
+    const hookCalls: Array<{ videoPath: string; title: string }> = [];
+    const second = await makeService({
+      dataDir: first.dataDir,
+      onEpisodeCompleted: async info => {
+        hookCalls.push(info);
+      }
+    });
+    await second.service.recover();
+    await waitFor(() => hookCalls.length === 1);
+    await waitFor(() => second.service.getSummary().items[0]!.socialEnqueuedAt != null);
+    // recover lần nữa vẫn không gọi lại (đã đánh dấu).
+    await second.service.recover();
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 120));
+    expect(hookCalls).toHaveLength(1);
+  });
+
+  it('item.projectId tồn tại → createJob dùng project đó; project biến mất → fallback mặc định', async () => {
+    const { service, sourcePaths, createJobRequests } = await makeService({
+      getProject: projectId => projectId === 'project_9' ? { projectId: 'project_9' } : undefined
+    });
+    service.enqueue([
+      { path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1, projectId: 'project_9' },
+      { path: sourcePaths[1]!, title: 'Tập 2', episodeIndex: 2, projectId: 'project_lost' }
+    ]);
+    await waitForSettle(service);
+    const usedIds = createJobRequests.map(request => request.projectId);
+    expect(usedIds).toContain('project_9');
+    expect(usedIds).toContain('project_1'); // fallback mặc định
+    expect(service.getSummary().counts.completed).toBe(2);
+  });
+
+  it('không cắm hook → pipeline vẫn chạy bình thường (mặc định cũ)', async () => {
+    const { service, sourcePaths } = await makeService();
+    service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
+    const after = await waitForSettle(service);
+    expect(after.counts.completed).toBe(1);
+    expect(after.items[0]!.socialEnqueuedAt ?? null).toBeNull();
   });
 });

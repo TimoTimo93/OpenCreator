@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -216,6 +216,97 @@ describe('project API', () => {
     );
     expect(replace.statusCode).toBe(409);
     expect(replace.json().error.code).toBe('PROJECT_HAS_ACTIVE_RUN');
+  });
+
+  it('renames the managed project directory on disk when the project is renamed', async () => {
+    const setup = await createSetup();
+    const threads = createThreadRepository(setup.db);
+    const created = await request('POST', '/projects/managed', { name: 'Tên Cũ' });
+    expect(created.statusCode).toBe(201);
+    const project = created.json().project as { id: string; cwd: string; canonicalCwd: string };
+    threads.insertThread({
+      id: 'thread_rename',
+      title: 'Owned',
+      projectId: project.id,
+      origin: 'opencreator_created',
+      cwd: project.cwd,
+      canonicalCwd: project.canonicalCwd,
+      workspaceMode: 'external',
+      profile: 'default',
+      sandbox: 'workspace-write',
+      status: 'active',
+      purpose: 'conversation'
+    });
+
+    const invalid = await request('PATCH', `/projects/${project.id}`, { name: '../escape' });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error.code).toBe('PROJECT_NAME_INVALID');
+
+    const updated = await request('PATCH', `/projects/${project.id}`, { name: 'Tên Mới' });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().project).toMatchObject({
+      id: project.id,
+      name: 'Tên Mới',
+      cwd: join(tempDir, 'OpenCreator', 'Tên Mới'),
+      directoryState: 'available'
+    });
+    expect(existsSync(project.cwd)).toBe(false);
+    expect(existsSync(join(tempDir, 'OpenCreator', 'Tên Mới'))).toBe(true);
+    // Thread của project trỏ sang thư mục đã đổi tên.
+    expect(threads.getThread('thread_rename')).toMatchObject({
+      cwd: join(tempDir, 'OpenCreator', 'Tên Mới'),
+      canonical_cwd: realpathSync(join(tempDir, 'OpenCreator', 'Tên Mới'))
+    });
+
+    const listed = await request('GET', '/projects');
+    expect(listed.json().projects).toEqual([
+      expect.objectContaining({ id: project.id, name: 'Tên Mới' })
+    ]);
+  });
+
+  it('rejects renaming a project with an active run and keeps the directory', async () => {
+    const setup = await createSetup();
+    const created = await request('POST', '/projects/managed', { name: 'Tên Cũ' });
+    expect(created.statusCode).toBe(201);
+    const project = created.json().project as { id: string; cwd: string; canonicalCwd: string };
+    createThreadRepository(setup.db).insertThread({
+      id: 'thread_running',
+      projectId: project.id,
+      origin: 'opencreator_created',
+      cwd: project.cwd,
+      canonicalCwd: project.canonicalCwd,
+      workspaceMode: 'external',
+      profile: 'default',
+      sandbox: 'workspace-write',
+      status: 'active',
+      purpose: 'conversation'
+    });
+    createRunRepository(setup.db).insertRun({
+      id: 'run_running',
+      threadId: 'thread_running',
+      publicStatus: 'running',
+      internalStatus: 'running',
+      createdBy: 'api',
+      profile: 'default',
+      cwd: project.cwd,
+      canonicalCwd: project.canonicalCwd,
+      workspaceMode: 'external',
+      sandbox: 'workspace-write',
+      codexVersion: 'codex-cli test',
+      codexBin: 'codex',
+      codexHome: join(tempDir, 'codex-home'),
+      normalizerVersion: 1
+    });
+
+    const renamed = await request('PATCH', `/projects/${project.id}`, { name: 'Tên Mới' });
+    expect(renamed.statusCode).toBe(409);
+    expect(renamed.json().error.code).toBe('PROJECT_HAS_ACTIVE_RUN');
+    // Thư mục gốc `project-<id>` không bị đổi tên; thư mục theo tên mới không xuất hiện.
+    expect(existsSync(project.cwd)).toBe(true);
+    expect(existsSync(join(tempDir, 'OpenCreator', 'Tên Mới'))).toBe(false);
+    expect(
+      setup.db.prepare('SELECT name FROM projects WHERE id = ?').get(project.id)
+    ).toEqual({ name: 'Tên Cũ' });
   });
 
   it('migrates local storage projects once and classifies owned, unassigned and discovered threads', async () => {

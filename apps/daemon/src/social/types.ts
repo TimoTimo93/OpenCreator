@@ -65,6 +65,8 @@ export type SocialCluster = {
   autoReplyEnabled: boolean;
   /** GĐ3: chỉ dẫn riêng cho AI khi soạn câu trả lời. */
   autoReplyPrompt: string;
+  /** GĐ4: bật tự nạp đăng sau khi dịch xong (pipeline hook của daemon). */
+  autoPublishAfterTranslate: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -144,9 +146,25 @@ export type SocialVideoStat = {
   previousViews: number | null;
 };
 
+export type SocialHistoryPoint = {
+  value: number;
+  capturedAt: string;
+};
+
+/** Một chuỗi lịch sử (sparkline): N điểm gần nhất tăng dần theo capturedAt. */
+export type SocialMetricHistory = {
+  clusterId: string;
+  platform: SocialPlatform;
+  /** Hiện chỉ gắn 2 metric chính: 'followers' | 'views'. */
+  metric: string;
+  points: SocialHistoryPoint[];
+};
+
 export type SocialStatsOverview = {
   channels: SocialChannelStat[];
   videos: SocialVideoStat[];
+  /** Lịch sử đo cho sparkline (tùy chọn — server cũ không trả). */
+  history?: SocialMetricHistory[];
   lastRefreshAt: string | null;
   refreshError: string | null;
 };

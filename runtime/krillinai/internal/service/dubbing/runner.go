@@ -66,12 +66,16 @@ func (r *Runner) Run(ctx context.Context) (Result, error) {
 	}
 
 	cleanedCues := cleanCuesForSpeech(cues)
-	if err := WriteSRTFile(filepath.Join(dubbingDir, DubbingInputFileName), cleanedCues); err != nil {
+	// Shape the speech timeline before planning: echo copies become silence
+	// cues and overlong cues are split, so the voice neither repeats ASR echo
+	// lines nor needs extreme speed fitting on one giant segment.
+	preparedCues, prepStats := PrepareSpeechCues(cleanedCues)
+	if err := WriteSRTFile(filepath.Join(dubbingDir, DubbingInputFileName), preparedCues); err != nil {
 		return Result{}, err
 	}
 
 	planner := NewPlanner(r.deps.Config, NewStatisticalEstimator(), NewLLMOptimizer(r.deps.Chat))
-	plan, chunks, err := planner.Plan(cues, r.deps.Language)
+	plan, chunks, err := planner.Plan(preparedCues, r.deps.Language)
 	if err != nil {
 		return Result{}, err
 	}
@@ -95,6 +99,7 @@ func (r *Runner) Run(ctx context.Context) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	report = mergeSpeechPrepStats(report, prepStats)
 
 	dubSRT := filepath.Join(dubbingDir, DubSubtitleFileName)
 	if err := WriteSRTFile(dubSRT, NormalizeDubCues(BuildDubCues(fitted))); err != nil {
@@ -170,6 +175,21 @@ func cleanCuesForSpeech(cues []Cue) []Cue {
 		cleaned[i].Text = CleanTextForSpeech(cleaned[i].Text)
 	}
 	return cleaned
+}
+
+// mergeSpeechPrepStats records the speech preparation decisions in the
+// dubbing report so echo silencing and cue splitting stay debuggable.
+func mergeSpeechPrepStats(report Report, stats SpeechPrepStats) Report {
+	report.EchoSilencedCues = stats.EchoSilenced
+	report.EchoSilencedIndexes = stats.EchoSilencedIndexes
+	report.SplitCues = stats.SplitCues
+	report.SplitParts = stats.SplitParts
+	if stats.EchoSilenced > 0 || stats.SplitCues > 0 {
+		report.Warnings = append(report.Warnings, fmt.Sprintf(
+			"speech prep: silenced %d echo cue(s) within %.1fs window (kept first occurrence), split %d long cue(s) into %d part(s)",
+			stats.EchoSilenced, echoWindowSeconds, stats.SplitCues, stats.SplitParts))
+	}
+	return report
 }
 
 func ensureParentDir(path string) error {

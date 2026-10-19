@@ -24,9 +24,10 @@ type Harness = Awaited<ReturnType<typeof setupWorker>>;
 
 async function setupWorker(options: {
   executors?: Record<string, SocialExecutor>;
-  browserLauncher?: Parameters<typeof createSocialWorker>[0]['browserLauncher'];
+  browserLauncher?: NonNullable<Parameters<typeof createSocialWorker>[0]>['browserLauncher'];
   maxAttempts?: number;
   paused?: boolean;
+  notify?: NonNullable<Parameters<typeof createSocialWorker>[0]>['notify'];
 }) {
   const dir = await mkdtemp(join(tmpdir(), 'social-worker-'));
   const db = openSocialDatabase(join(dir, 'social.sqlite'));
@@ -51,7 +52,8 @@ async function setupWorker(options: {
     executors: options.executors as never,
     browserLauncher: options.browserLauncher,
     tickIntervalMs: 0,
-    maxAttempts: options.maxAttempts ?? 3
+    maxAttempts: options.maxAttempts ?? 3,
+    ...(options.notify === undefined ? {} : { notify: options.notify })
   });
   cleanup = async () => {
     await worker.close();
@@ -226,5 +228,34 @@ describe('social worker — vòng lặp đăng tuần tự', () => {
     worker.kick();
     await new Promise(resolve => setTimeout(resolve, 250));
     expect(getJobRow(db, 'job_future')?.yt_status).toBe('pending');
+  });
+});
+
+describe('social worker — notify sau commitPlatformResult', () => {
+  it('published/failed → notify kèm ngữ cảnh; skipped không notify', async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const harness = await setupWorker({
+      maxAttempts: 1,
+      notify: event => { events.push({ ...event }); },
+      executors: {
+        youtube: async () => ({ status: 'published', videoId: 'yt-1' }),
+        tiktok: async () => ({ status: 'failed', error: 'TikTok từ chối' }),
+        facebook: async () => ({ status: 'skipped', error: 'chưa cấu hình' })
+      }
+    });
+    harness.worker.kick();
+    await waitFor(() => mapJob(getJobRow(harness.db, 'job_1')!).platforms.facebook.status === 'skipped');
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const kinds = events.map(event => `${event['platform']}:${event['status']}`);
+    expect(kinds).toContain('youtube:published');
+    expect(kinds).toContain('tiktok:failed');
+    expect(kinds).not.toContain('facebook:skipped');
+    const published = events.find(event => event['platform'] === 'youtube')!;
+    expect(published).toMatchObject({
+      jobId: 'job_1', status: 'published', attempt: 1,
+      clusterName: 'Cụm A', jobTitle: 'Tập 1', videoId: 'yt-1', error: null
+    });
+    const failed = events.find(event => event['platform'] === 'tiktok')!;
+    expect(failed).toMatchObject({ status: 'failed', error: 'TikTok từ chối', attempt: 1 });
   });
 });

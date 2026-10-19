@@ -19,6 +19,7 @@ import {
   latestVideoStats,
   listClusterRows,
   listJobRows,
+  listStatsHistory,
   type SocialDB,
   type SocialJobRow,
   type SocialClusterRow
@@ -26,6 +27,8 @@ import {
 import type { SocialWorker } from './worker.js';
 import {
   type SocialChannelStat,
+  type SocialHistoryPoint,
+  type SocialMetricHistory,
   type SocialMetricName,
   type SocialStatsOverview,
   type SocialStatsRefreshResult,
@@ -309,9 +312,35 @@ export function createSocialAnalytics(input: SocialAnalyticsInput): SocialAnalyt
     return {
       channels,
       videos,
+      history: [...metricHistory('followers'), ...metricHistory('views')],
       lastRefreshAt: kvGet(input.db, 'stats_last_refresh_at') ?? null,
       refreshError: kvGet(input.db, 'stats_last_refresh_error') === '' ? null : (kvGet(input.db, 'stats_last_refresh_error') ?? null)
     };
+  }
+
+  /**
+   * Lịch sử (sparkline) cho 1 metric chính: gom listStatsHistory theo
+   * (cluster, platform) — điểm tăng dần theo thời gian, tối đa 30/chuỗi.
+   * Chỉ followers + views (2 metric chính), không gắn cho likes/videos.
+   */
+  function metricHistory(metric: 'followers' | 'views'): SocialMetricHistory[] {
+    const bySeries = new Map<string, SocialMetricHistory>();
+    for (const row of listStatsHistory(input.db, { metric })) {
+      const key = `${row.cluster_id}\n${row.platform}`;
+      let entry = bySeries.get(key);
+      if (entry === undefined) {
+        entry = {
+          clusterId: row.cluster_id,
+          platform: row.platform as SocialChannelStat['platform'],
+          metric,
+          points: []
+        };
+        bySeries.set(key, entry);
+      }
+      const point: SocialHistoryPoint = { value: row.value, capturedAt: row.captured_at };
+      entry.points.push(point);
+    }
+    return [...bySeries.values()];
   }
 }
 

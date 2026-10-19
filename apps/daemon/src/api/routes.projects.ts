@@ -98,6 +98,19 @@ export async function registerProjectRoutes(
       if (!body.ok) {
         return reply.code(400).send(apiError('VALIDATION_FAILED', body.message));
       }
+      const existing = manager.getProject(request.params.id);
+      if (existing === undefined) {
+        return reply.code(404).send(apiError('PROJECT_NOT_FOUND', 'Project not found'));
+      }
+      // Đổi tên project kéo theo rename thư mục trên đĩa — chặn khi project
+      // đang có run chạy (cùng cơ chế với archive/replace-directory).
+      const renaming = body.value.name !== undefined
+        && body.value.name.trim() !== existing.name;
+      if (renaming && runs.hasActiveRunForProject(existing.id)) {
+        return reply
+          .code(409)
+          .send(apiError('PROJECT_HAS_ACTIVE_RUN', 'Project has active run'));
+      }
       try {
         return { project: manager.updateProject(request.params.id, body.value) };
       } catch (error) {

@@ -324,6 +324,10 @@ export default function SocialWorkspace(props: {
               onCloseBrowser={cluster => void action(t('dashboard.social.browserClosed'), () => service.closeClusterBrowser(cluster.id))}
               onOpenLogin={openClusterLogin}
               onLoginPending={loginPending}
+              onToggleAutoPublish={(cluster, enabled) => void action(
+                t('dashboard.social.autoPublishSaved'),
+                () => service.updateCluster(cluster.id, { autoPublishAfterTranslate: enabled })
+              )}
               onEdit={cluster => setEditing(cluster)}
               onDelete={cluster => {
                 if (window.confirm(t('dashboard.social.confirmDelete', { name: cluster.name }))) {
@@ -727,6 +731,7 @@ function ClusterCard(props: {
   onOpenBrowser(): void;
   onCloseBrowser(): void;
   onOpenLogin(platform: SocialPlatformName): void;
+  onToggleAutoPublish(enabled: boolean): void;
   onEdit(): void;
   onDelete(): void;
 }) {
@@ -784,6 +789,18 @@ function ClusterCard(props: {
         {' · '}
         {t('dashboard.social.fbMode', { mode: cluster.fbMode === 'graph_api' ? 'Graph API' : 'Business Suite' })}
       </p>
+      <label
+        className="social-cluster-autopublish"
+        title={t('dashboard.social.autoPublishHint')}
+      >
+        <input
+          type="checkbox"
+          data-testid={`social-autopublish-${cluster.id}`}
+          checked={cluster.autoPublishAfterTranslate}
+          onChange={event => props.onToggleAutoPublish(event.target.checked)}
+        />
+        {' '}{t('dashboard.social.autoPublishToggle')}
+      </label>
       <div className="social-cluster-actions">
         {cluster.browserOpen
           ? <button type="button" className="social-btn social-btn-sm" onClick={props.onCloseBrowser}>{t('dashboard.social.closeBrowser')}</button>
@@ -805,6 +822,7 @@ function ChannelsPanel(props: {
   onCloseBrowser(cluster: SocialClusterSummary): void;
   onOpenLogin(cluster: SocialClusterSummary, platform: SocialPlatformName): Promise<void>;
   onLoginPending: string | null;
+  onToggleAutoPublish(cluster: SocialClusterSummary, enabled: boolean): void;
   onEdit(cluster: SocialClusterSummary): void;
   onDelete(cluster: SocialClusterSummary): void;
 }) {
@@ -834,6 +852,7 @@ function ChannelsPanel(props: {
               onOpenBrowser={() => props.onOpenBrowser(cluster)}
               onCloseBrowser={() => props.onCloseBrowser(cluster)}
               onOpenLogin={platform => void props.onOpenLogin(cluster, platform)}
+              onToggleAutoPublish={enabled => props.onToggleAutoPublish(cluster, enabled)}
               onEdit={() => props.onEdit(cluster)}
               onDelete={() => props.onDelete(cluster)}
             />

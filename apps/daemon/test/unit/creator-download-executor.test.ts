@@ -1009,7 +1009,7 @@ describe('creator download executor', () => {
       inputArtifacts: [probeArtifact]
     }));
 
-    const savedTo = result.outputs[0]?.metadata.savedTo;
+    const savedTo = result.outputs[0]?.metadata?.savedTo;
     expect(typeof savedTo).toBe('string');
     expect((savedTo as string).startsWith(downloadRoot)).toBe(true);
     expect(await readFile(savedTo as string, 'utf8')).toBe('download-video');
@@ -1038,8 +1038,8 @@ describe('creator download executor', () => {
       inputArtifacts: [probeArtifact]
     }));
 
-    expect(result.outputs[0]?.metadata.savedTo).toBeUndefined();
-    expect(result.outputs[0]?.metadata.fileName).toBe('download.mp4');
+    expect(result.outputs[0]?.metadata?.savedTo).toBeUndefined();
+    expect(result.outputs[0]?.metadata?.fileName).toBe('download.mp4');
   });
 
   it('extracts the selected audio option as an MP3 source artifact', async () => {

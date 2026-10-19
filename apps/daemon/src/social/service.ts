@@ -90,6 +90,8 @@ export type SocialClusterPatch = {
   tkProfileUrl?: string;
   autoReplyEnabled?: boolean;
   autoReplyPrompt?: string;
+  /** GĐ4: bật tự nạp đăng sau khi pipeline dịch xong (hook của daemon). */
+  autoPublishAfterTranslate?: boolean;
 };
 
 export type SocialService = {
@@ -118,7 +120,28 @@ export type SocialService = {
   /** GĐ3: bình luận gần đây + quét/AI trả lời theo yêu cầu. */
   listComments(clusterId?: string, limit?: number): SocialComment[];
   scanComments(clusterId?: string): Promise<SocialCommentScanResult>;
+  /**
+   * GĐ4 — tự nạp đăng sau dịch (hook gọi từ daemon khi pipeline dịch xong 1 tập):
+   * tìm mọi cụm đang bật autoPublishAfterTranslate và xếp video vào hàng đợi
+   * của từng cụm (không truyền scheduledAt → Auto-Slot khung giờ vàng).
+   */
+  enqueueAfterTranslate(request: SocialAfterTranslateRequest): {
+    accepted: number;
+    duplicates: string[];
+    /** id các cụm bật tự nạp đã xử lý (nạp mới hoặc trùng — để log/diag). */
+    clusters: string[];
+  };
   close(): Promise<void>;
+};
+
+export type SocialAfterTranslateRequest = {
+  /** File video đã dịch xong (đường dẫn tuyệt đối trên đĩa). */
+  path: string;
+  title: string;
+  /** null/undefined → không ghép đuôi " — Tập n". */
+  episodeIndex?: number | null;
+  /** Passthrough từ pipeline enqueue (A3) — chỉ mang theo, social không dùng. */
+  projectId?: string | null;
 };
 
 export class SocialError extends Error {
@@ -195,6 +218,7 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       tkProfileUrl: cluster.tkProfileUrl,
       autoReplyEnabled: cluster.autoReplyEnabled,
       autoReplyPrompt: cluster.autoReplyPrompt,
+      autoPublishAfterTranslate: cluster.autoPublishAfterTranslate,
       fbPageTokenConfigured: fbPageTokenEncrypted !== null && fbPageTokenEncrypted !== '',
       createdAt: cluster.createdAt,
       updatedAt: cluster.updatedAt
@@ -211,6 +235,66 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       screenshotDir,
       browserOpenClusters: worker.openClusterIds()
     };
+  }
+
+  function enqueueVideos(requests: readonly SocialEnqueueRequest[]): { summary: SocialOverview; accepted: number; duplicates: string[] } {
+    const duplicates: string[] = [];
+    let accepted = 0;
+    // Bản đồ "muộn nhất đang hẹn" theo cụm — để Auto-Slot không xếp trùng.
+    const lastScheduledByCluster = new Map<string, string | null>();
+    for (const row of listJobRows(db)) {
+      const current = lastScheduledByCluster.get(row.cluster_id) ?? null;
+      const time = new Date(row.scheduled_at).getTime();
+      if (!Number.isNaN(time) && (current === null || time > new Date(current).getTime())) {
+        lastScheduledByCluster.set(row.cluster_id, row.scheduled_at);
+      }
+    }
+    for (const request of requests) {
+      const cluster = getClusterRow(db, request.clusterId);
+      if (cluster === undefined) {
+        duplicates.push(request.path.trim());
+        continue;
+      }
+      const videoPath = request.path.trim();
+      if (videoPath === '') continue;
+      if (findActiveDuplicateJob(db, request.clusterId, videoPath) !== undefined) {
+        duplicates.push(videoPath);
+        continue;
+      }
+      const clusterModel = mapCluster(cluster);
+      let scheduledAt: string;
+      const requested = request.scheduledAt?.trim() ?? '';
+      if (requested !== '' && normalizeISO(requested) !== null) {
+        scheduledAt = requested;
+        // Job hẹn quá khứ/ís ít hơn 10 phút → coi như đăng ngay tại thời điểm đã chỉ.
+      } else {
+        const lastScheduled = lastScheduledByCluster.get(request.clusterId) ?? null;
+        scheduledAt = nextAvailableSlot({
+          nowISO: now(),
+          scheduleTimes: clusterModel.defaultScheduleTimes,
+          lastScheduledISO: lastScheduled
+        });
+        // Tận dụng Auto-Slot: cập nhật bản đồ để mục sau không đội đầu.
+        lastScheduledByCluster.set(request.clusterId, scheduledAt);
+      }
+      insertJobRow(db, {
+        id: `socialjob_${randomUUID().slice(0, 12)}`,
+        clusterId: request.clusterId,
+        clusterName: clusterModel.name,
+        videoPath,
+        thumbnailPath: request.thumbnailPath ?? null,
+        title: request.title !== undefined && request.title.trim() !== '' ? request.title.trim() : fileName(videoPath),
+        description: request.description !== undefined && request.description.trim() !== ''
+          ? request.description.trim()
+          : clusterModel.defaultDescription,
+        scheduledAt,
+        platformSettings: sanitizePlatformSettings(request.platformSettings ?? {}),
+        nowISO: now()
+      });
+      accepted += 1;
+    }
+    if (accepted > 0) worker.kick();
+    return { summary: overview(), accepted, duplicates };
   }
 
   return {
@@ -237,6 +321,7 @@ export function createSocialService(input: SocialServiceInput): SocialService {
         tkProfileUrl: patch.tkProfileUrl?.trim() ?? '',
         autoReplyEnabled: patch.autoReplyEnabled ?? false,
         autoReplyPrompt: patch.autoReplyPrompt ?? '',
+        autoPublishAfterTranslate: patch.autoPublishAfterTranslate ?? false,
         nowISO: now()
       });
       return overview();
@@ -269,6 +354,9 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       if (patch.tkProfileUrl !== undefined) update.tk_profile_url = patch.tkProfileUrl.trim();
       if (patch.autoReplyEnabled !== undefined) update.auto_reply_enabled = patch.autoReplyEnabled ? 1 : 0;
       if (patch.autoReplyPrompt !== undefined) update.auto_reply_prompt = patch.autoReplyPrompt;
+      if (patch.autoPublishAfterTranslate !== undefined) {
+        update.auto_publish_after_translate = patch.autoPublishAfterTranslate ? 1 : 0;
+      }
       const updated = updateClusterRow(db, clusterId, update);
       if (updated === undefined) throw new SocialError('social_cluster_not_found', 'Không tìm thấy cụm kênh');
       return overview();
@@ -325,63 +413,7 @@ export function createSocialService(input: SocialServiceInput): SocialService {
     },
 
     enqueue(requests: readonly SocialEnqueueRequest[]): { summary: SocialOverview; accepted: number; duplicates: string[] } {
-      const duplicates: string[] = [];
-      let accepted = 0;
-      // Bản đồ "muộn nhất đang hẹn" theo cụm — để Auto-Slot không xếp trùng.
-      const lastScheduledByCluster = new Map<string, string | null>();
-      for (const row of listJobRows(db)) {
-        const current = lastScheduledByCluster.get(row.cluster_id) ?? null;
-        const time = new Date(row.scheduled_at).getTime();
-        if (!Number.isNaN(time) && (current === null || time > new Date(current).getTime())) {
-          lastScheduledByCluster.set(row.cluster_id, row.scheduled_at);
-        }
-      }
-      for (const request of requests) {
-        const cluster = getClusterRow(db, request.clusterId);
-        if (cluster === undefined) {
-          duplicates.push(request.path.trim());
-          continue;
-        }
-        const videoPath = request.path.trim();
-        if (videoPath === '') continue;
-        if (findActiveDuplicateJob(db, request.clusterId, videoPath) !== undefined) {
-          duplicates.push(videoPath);
-          continue;
-        }
-        const clusterModel = mapCluster(cluster);
-        let scheduledAt: string;
-        const requested = request.scheduledAt?.trim() ?? '';
-        if (requested !== '' && normalizeISO(requested) !== null) {
-          scheduledAt = requested;
-          // Job hẹn quá khứ/ís ít hơn 10 phút → coi như đăng ngay tại thời điểm đã chỉ.
-        } else {
-          const lastScheduled = lastScheduledByCluster.get(request.clusterId) ?? null;
-          scheduledAt = nextAvailableSlot({
-            nowISO: now(),
-            scheduleTimes: clusterModel.defaultScheduleTimes,
-            lastScheduledISO: lastScheduled
-          });
-          // Tận dụng Auto-Slot: cập nhật bản đồ để mục sau không đội đầu.
-          lastScheduledByCluster.set(request.clusterId, scheduledAt);
-        }
-        insertJobRow(db, {
-          id: `socialjob_${randomUUID().slice(0, 12)}`,
-          clusterId: request.clusterId,
-          clusterName: clusterModel.name,
-          videoPath,
-          thumbnailPath: request.thumbnailPath ?? null,
-          title: request.title !== undefined && request.title.trim() !== '' ? request.title.trim() : fileName(videoPath),
-          description: request.description !== undefined && request.description.trim() !== ''
-            ? request.description.trim()
-            : clusterModel.defaultDescription,
-          scheduledAt,
-          platformSettings: sanitizePlatformSettings(request.platformSettings ?? {}),
-          nowISO: now()
-        });
-        accepted += 1;
-      }
-      if (accepted > 0) worker.kick();
-      return { summary: overview(), accepted, duplicates };
+      return enqueueVideos(requests);
     },
 
     pause(): SocialOverview {
@@ -471,6 +503,29 @@ export function createSocialService(input: SocialServiceInput): SocialService {
 
     async scanComments(clusterId?: string): Promise<SocialCommentScanResult> {
       return comments.scan(clusterId);
+    },
+
+    enqueueAfterTranslate(request: SocialAfterTranslateRequest) {
+      const path = request.path.trim();
+      if (path === '') return { accepted: 0, duplicates: [], clusters: [] };
+      // Chỉ cụm đang bật công tắc mới nhận video tự nạp; cụm tắt → không nạp gì
+      // (nút thủ công trên web vẫn là đường đăng bình thường).
+      const clusters = listClusterRows(db)
+        .filter(row => row.auto_publish_after_translate === 1)
+        .map(row => mapCluster(row).id);
+      if (clusters.length === 0) return { accepted: 0, duplicates: [], clusters: [] };
+      const episodeSuffix = typeof request.episodeIndex === 'number' && Number.isFinite(request.episodeIndex)
+        ? ` — Tập ${Math.trunc(request.episodeIndex)}`
+        : '';
+      const title = `${request.title.trim()}${episodeSuffix}`;
+      const result = enqueueVideos(clusters.map(clusterId => ({
+        clusterId,
+        path,
+        title,
+        // scheduledAt bỏ trống → Auto-Slot xếp khung giờ trống tiếp theo.
+        // platformSettings không truyền → mặc định từng nền tảng.
+      })));
+      return { accepted: result.accepted, duplicates: result.duplicates, clusters };
     },
 
     async close(): Promise<void> {

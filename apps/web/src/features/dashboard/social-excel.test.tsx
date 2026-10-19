@@ -14,6 +14,7 @@ function cluster(name: string, seriesName: string): SocialClusterSummary {
     fbMode: 'graph_api', fbPageId: '', fbPageTokenConfigured: false,
     defaultScheduleTimes: ['19:30'], defaultDescription: '',
     ytChannelUrl: '', tkProfileUrl: '', autoReplyEnabled: false, autoReplyPrompt: '',
+    autoPublishAfterTranslate: false,
     loginStatus: { youtube: 'unknown', tiktok: 'unknown', facebook: 'unknown' },
     browserOpen: false, createdAt: '', updatedAt: ''
   };

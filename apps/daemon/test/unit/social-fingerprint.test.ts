@@ -168,8 +168,8 @@ describe('selectors.json (bổ sung mẫu cộng đồng, không mất selector 
       expect(raw.youtube_studio![key]!.trim()).not.toBe('');
     }
     // Selector cũ không bị xoá.
-    expect(raw.youtube_studio.next_btn ?? '').toBe('ytcp-button#next-button');
-    expect(raw.tiktok_studio.post_btn ?? '').toContain('post_video_button');
-    expect(raw.facebook_browser.publish_btn ?? '').not.toBe('');
+    expect(raw.youtube_studio?.next_btn ?? '').toBe('ytcp-button#next-button');
+    expect(raw.tiktok_studio?.post_btn ?? '').toContain('post_video_button');
+    expect(raw.facebook_browser?.publish_btn ?? '').not.toBe('');
   });
 });

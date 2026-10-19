@@ -5,7 +5,12 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { platform } from 'node:os';
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import type { TranslationPipelineService } from '../creator/translation-pipeline/pipeline.js';
+import type { RuntimeErrorCode } from '@opencreator/protocol';
+import type {
+  PipelineEnqueueRequest,
+  TranslationPipelineService
+} from '../creator/translation-pipeline/pipeline.js';
+import { ProjectManagerError, type ProjectManager } from '../projects/types.js';
 import {
   batchProgress,
   mergeEpisodesToFullMovie
@@ -19,9 +24,15 @@ const execFileAsync = promisify(execFile);
  * tự động dịch (`/creator/translation-pipeline`):
  *
  * - GET  /creator/translation-batch          → trạng thái + tiến độ x/y tập + ghép
- * - POST /creator/translation-batch/enqueue  → nạp cả bộ (tự trích số tập, xếp tăng dần)
+ *                                              + projectId/thư mục project đang dùng
+ * - POST /creator/translation-batch/enqueue  → nạp cả bộ (tự trích số tập, xếp tăng dần);
+ *                                              có `seriesName` → resolve/tạo project
+ *                                              theo tên phim rồi gắn `projectId`
+ *                                              vào từng item trước khi nạp
  * - POST /creator/translation-batch/merge    → ghép toàn bộ tập đã dịch thành
- *                                              `<Tên phim>-full.mp4` trong thư mục dự án
+ *                                              `<Tên phim>-full.mp4` trong Exports
+ *                                              của project đích (projectId ưu tiên,
+ *                                              kế đến seriesName, rồi mặc định)
  * - POST /creator/translation-batch/reveal   → mở thư mục / chọn file trong Explorer
  *                                              (file xuất, video ghép...)
  *
@@ -44,8 +55,22 @@ export type TranslationBatchRouteInput = {
   /** Đường dẫn ffmpeg/ffprobe trong thành phần runtime (dev: .runtime/build/...). */
   ffmpegPath?: string;
   ffprobePath?: string;
-  /** Thư mục dự án sẽ chứa `<Tên phim>-full.mp4` (Exports của project). */
-  resolveProjectFolder?(): { folder: string; projectName: string };
+  /**
+   * Quản lý project — dùng resolve/tạo project THEO TÊN PHIM cho batch:
+   * `ensureProjectByName(seriesName)` (enqueue) và `getProject(projectId)`
+   * (merge). Thiếu → các request mang seriesName/projectId bị từ chối 503.
+   */
+  projects?: Pick<ProjectManager, 'ensureProjectByName' | 'getProject'>;
+  /**
+   * Thư mục dự án sẽ chứa `<Tên phim>-full.mp4` (Exports của project). Khi
+   * route resolve được project đích (projectId/seriesName) nó truyền project
+   * vào đây để nhận đúng Exports của project ĐÓ (`<outputRoot>/<tên>-<id>`);
+   * không truyền project → Exports mặc định như cũ.
+   */
+  resolveProjectFolder?(project?: { id: string; name: string; cwd: string }): {
+    folder: string;
+    projectName: string;
+  };
   /** Thư mục gốc khác được phép mở (vd: work root của creator jobs). */
   extraAllowedRoots?: ReadonlyArray<string>;
   /** Đè logic ghép khi kiểm thử. */
@@ -78,11 +103,78 @@ export async function registerTranslationBatchRoutes(
   const pipeline = input.pipeline;
   const fullMovie: FullMovieMergeState = { ...idleFullMovie() };
   let mergeRunning = false;
+  // Project đang gắn với batch (theo tên phim) — resolve lần đầu (enqueue hoặc
+  // merge) rồi GET trả lại để web biết projectId/thư mục xuất đang dùng.
+  let batchProject: { id: string; name: string; folder: string } | undefined;
 
   const unavailable = (reply: FastifyReply) => reply.code(503).send(apiError(
     'creator_pipeline_unavailable',
     'Hàng đợi tự động dịch chưa được cắm vào runtime này'
   ));
+
+  /** Thư mục Exports của project đích; không cấu hình resolver → dùng cwd project. */
+  const exportsFolderOf = (project: { id: string; name: string; cwd: string }): string =>
+    input.resolveProjectFolder?.(project)?.folder ?? project.cwd;
+
+  /** Project đích cho batch: projectId ưu tiên → seriesName → mặc định. */
+  const resolveTargetProject = (
+    body: Record<string, unknown>
+  ): { ok: true; project?: { id: string; name: string; cwd: string } }
+    | { ok: false; code: number; errorCode: RuntimeErrorCode; message: string } => {
+    const projectId = typeof body.projectId === 'string' && body.projectId.trim() !== ''
+      ? body.projectId.trim()
+      : undefined;
+    const seriesName = typeof body.seriesName === 'string' && body.seriesName.trim() !== ''
+      ? body.seriesName.trim()
+      : undefined;
+    if (projectId === undefined && seriesName === undefined) return { ok: true };
+    if (input.projects === undefined) {
+      // Dùng mã lỗi có sẵn trong RuntimeErrorCode (không mở rộng union của
+      // protocol); thông điệp nêu rõ thiếu quản lý project.
+      return {
+        ok: false,
+        code: 503,
+        errorCode: 'creator_pipeline_unavailable',
+        message: 'Quản lý project chưa được cắm vào runtime này'
+      };
+    }
+    if (projectId !== undefined) {
+      const project = input.projects.getProject(projectId);
+      if (project === undefined) {
+        return {
+          ok: false,
+          code: 404,
+          errorCode: 'PROJECT_NOT_FOUND',
+          message: 'Project not found'
+        };
+      }
+      return { ok: true, project: { id: project.id, name: project.name, cwd: project.cwd } };
+    }
+    try {
+      const ensured = input.projects.ensureProjectByName(seriesName!);
+      return {
+        ok: true,
+        project: { id: ensured.id, name: ensured.name, cwd: ensured.folder }
+      };
+    } catch (error) {
+      if (!(error instanceof ProjectManagerError)) throw error;
+      const errorCode: RuntimeErrorCode = error.code === 'PROJECT_NAME_INVALID'
+        ? 'PROJECT_NAME_INVALID'
+        : error.code === 'PROJECT_NOT_FOUND'
+          ? 'PROJECT_NOT_FOUND'
+          : error.code === 'PROJECT_DIRECTORY_UNAVAILABLE'
+            ? 'PROJECT_DIRECTORY_UNAVAILABLE'
+            : 'PROJECT_DIRECTORY_CONFLICT';
+      const code = error.code === 'PROJECT_NAME_INVALID'
+        ? 400
+        : error.code === 'PROJECT_NOT_FOUND'
+          ? 404
+          : error.code === 'PROJECT_DIRECTORY_UNAVAILABLE'
+            ? 422
+            : 409;
+      return { ok: false, code, errorCode, message: error.message };
+    }
+  };
 
   server.get('/creator/translation-batch', async (_request, reply) => {
     if (pipeline === undefined) return unavailable(reply);
@@ -90,7 +182,11 @@ export async function registerTranslationBatchRoutes(
     return {
       ...summary,
       progress: batchProgress(summary.items),
-      fullMovie: { ...fullMovie }
+      fullMovie: { ...fullMovie },
+      // Project đang dùng cho batch (null khi chưa resolve theo tên phim).
+      projectId: batchProject?.id ?? null,
+      folder: batchProject?.folder ?? null,
+      projectName: batchProject?.name ?? null
     };
   });
 
@@ -104,7 +200,7 @@ export async function registerTranslationBatchRoutes(
     if (!Array.isArray(items) || items.length === 0) {
       return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.items must be a non-empty array'));
     }
-    const parsed: Array<{ path: string; title?: string; episodeIndex?: number }> = [];
+    const parsed: Array<PipelineEnqueueRequest & { projectId?: string }> = [];
     for (const item of items) {
       if (typeof item !== 'object' || item === null) {
         return reply.code(400).send(apiError('VALIDATION_FAILED', 'each item must be an object'));
@@ -118,20 +214,38 @@ export async function registerTranslationBatchRoutes(
         ...(typeof candidate.title === 'string' && candidate.title !== '' ? { title: candidate.title } : {}),
         ...(typeof candidate.episodeIndex === 'number' && Number.isFinite(candidate.episodeIndex)
           ? { episodeIndex: Math.trunc(candidate.episodeIndex) }
+          : {}),
+        // projectId mang theo từng item (web đã resolve) — pipeline giữ nguyên
+        // item fields khi lưu state; không có → route tự gắn theo seriesName dưới.
+        ...(typeof candidate.projectId === 'string' && candidate.projectId.trim() !== ''
+          ? { projectId: candidate.projectId }
           : {})
       });
     }
-    // seriesName chỉ mang ý nghĩa hiển thị/gắn nhãn ở tầng web; hàng đợi nhận
-    // từng file (số tập tự trích từ title/tên file nếu web không gửi sẵn).
-    const summary = pipeline.enqueue(parsed.map(item => ({
-      path: item.path,
-      ...(item.title === undefined ? {} : { title: item.title }),
-      ...(item.episodeIndex === undefined ? {} : { episodeIndex: item.episodeIndex })
-    })));
+    // seriesName chỉ mang ý nghĩa gắn project của cả bộ: route resolve/tạo
+    // project theo tên phim rồi gắn projectId vào TỪNG item trước khi nạp
+    // hàng đợi; số tập vẫn tự trích từ title/tên file nếu web không gửi sẵn.
+    const rawSeriesName = (body as { seriesName?: unknown }).seriesName;
+    const seriesName = typeof rawSeriesName === 'string' ? rawSeriesName.trim() : '';
+    if (seriesName !== '') {
+      const target = resolveTargetProject({ seriesName });
+      if (!target.ok) {
+        return reply.code(target.code).send(apiError(target.errorCode, target.message));
+      }
+      const project = target.project!;
+      batchProject = { id: project.id, name: project.name, folder: exportsFolderOf(project) };
+      // Project theo tên phim thắng projectId rời rạc của từng item — cả bộ
+      // thuộc về một project.
+      for (const item of parsed) item.projectId = project.id;
+    }
+    const summary = pipeline.enqueue(parsed);
     return {
       ...summary,
       progress: batchProgress(summary.items),
-      fullMovie: { ...fullMovie }
+      fullMovie: { ...fullMovie },
+      projectId: batchProject?.id ?? null,
+      folder: batchProject?.folder ?? null,
+      projectName: batchProject?.name ?? null
     };
   });
 
@@ -152,9 +266,17 @@ export async function registerTranslationBatchRoutes(
     const body = typeof request.body === 'object' && request.body !== null
       ? request.body as Record<string, unknown>
       : {};
-    const seriesName = typeof body.seriesName === 'string' && body.seriesName.trim() !== ''
-      ? body.seriesName
-      : input.resolveProjectFolder?.().projectName;
+    // Project đích: projectId (ưu tiên) → seriesName → Exports mặc định.
+    const target = resolveTargetProject(body);
+    if (!target.ok) {
+      return reply.code(target.code).send(apiError(target.errorCode, target.message));
+    }
+    const targetProject = target.project;
+    const seriesName = (
+      typeof body.seriesName === 'string' && body.seriesName.trim() !== ''
+        ? body.seriesName
+        : targetProject?.name ?? input.resolveProjectFolder?.().projectName
+    );
     if (seriesName === undefined || seriesName.trim() === '') {
       return reply.code(400).send(apiError('VALIDATION_FAILED', 'seriesName is required'));
     }
@@ -173,8 +295,18 @@ export async function registerTranslationBatchRoutes(
         'Chưa có tập nào đã dịch xong để ghép full movie'
       ));
     }
-    const projectFolder = input.resolveProjectFolder?.();
-    const targetDirectory = projectFolder?.folder ?? summary.uploadFolder;
+    // Full movie ghi vào Exports của project đích (hoặc mặc định khi không
+    // resolve được project); không còn thư mục nào → rơi về upload folder.
+    const targetDirectory = targetProject !== undefined
+      ? exportsFolderOf(targetProject)
+      : input.resolveProjectFolder?.()?.folder ?? summary.uploadFolder;
+    if (targetProject !== undefined) {
+      batchProject = {
+        id: targetProject.id,
+        name: targetProject.name,
+        folder: targetDirectory
+      };
+    }
     const mergeInput = {
       ffmpegPath: input.ffmpegPath,
       ffprobePath: input.ffprobePath,
@@ -215,7 +347,9 @@ export async function registerTranslationBatchRoutes(
       status: fullMovie.status,
       outputPath: fullMovie.outputPath,
       episodeCount: completed.length,
-      seriesName: fullMovie.seriesName
+      seriesName: fullMovie.seriesName,
+      projectId: batchProject?.id ?? null,
+      folder: batchProject?.folder ?? null
     };
   });
 
@@ -232,6 +366,8 @@ export async function registerTranslationBatchRoutes(
     const allowedRoots = [
       ...input.extraAllowedRoots ?? [],
       input.resolveProjectFolder?.().folder,
+      // Exports của project đang gắn với batch (resolve theo tên phim).
+      batchProject?.folder,
       pipeline?.getSummary().uploadFolder
     ].filter((root): root is string => typeof root === 'string');
     if (

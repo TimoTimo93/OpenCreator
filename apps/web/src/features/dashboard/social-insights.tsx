@@ -5,6 +5,7 @@ import type {
   SocialClusterSummary,
   SocialCommentScanResult,
   SocialCommentSummary,
+  SocialHistoryPoint,
   SocialStatsOverview
 } from '../../services/social-service.js';
 import type { SocialService } from '../../services/social-service.js';
@@ -36,6 +37,58 @@ function formatScheduleShort(iso: string): string {
 function messageOf(error: unknown): string {
   if (error instanceof Error && error.message.trim() !== '') return error.message;
   return String(error ?? 'unknown error');
+}
+
+/**
+ * Sparkline SVG thuần (không thư viện chart): polyline theo các điểm đo
+ * + chấm tại điểm cuối. Màu xanh khi điểm cuối ≥ điểm đầu, đỏ khi ngược lại.
+ * Trả null khi <2 điểm — không đủ dữ liệu để vẽ xu hướng.
+ */
+export function Sparkline(props: { points: SocialHistoryPoint[]; width: number; height: number }) {
+  if (props.points.length < 2) return null;
+  const { width, height } = props;
+  const pad = 3;
+  const values = props.points.map(point => point.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min;
+  const stepX = (width - pad * 2) / (props.points.length - 1);
+  const coords = props.points.map((point, index) => ({
+    x: pad + index * stepX,
+    y: span === 0 ? height / 2 : pad + (1 - (point.value - min) / span) * (height - pad * 2)
+  }));
+  const first = coords[0] ?? { x: 0, y: 0 };
+  const last = coords[coords.length - 1] ?? first;
+  const up = (values[values.length - 1] ?? 0) >= (values[0] ?? 0);
+  return (
+    <svg
+      className={`social-spark ${up ? 'social-spark-up' : 'social-spark-down'}`}
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-hidden="true"
+    >
+      <polyline
+        className="social-spark-line"
+        points={coords.map(coord => `${coord.x.toFixed(1)},${coord.y.toFixed(1)}`).join(' ')}
+      />
+      <circle className="social-spark-dot" cx={last.x.toFixed(1)} cy={last.y.toFixed(1)} r="2.4" />
+    </svg>
+  );
+}
+
+/** Lấy chuỗi điểm đo của một (cụm, nền tảng, metric) từ history của overview. */
+function trendPointsFor(
+  history: SocialStatsOverview['history'],
+  clusterId: string,
+  platform: string,
+  metric: string
+): SocialHistoryPoint[] {
+  const match = history?.find(
+    entry => entry.clusterId === clusterId && entry.platform === platform && entry.metric === metric
+  );
+  return match?.points ?? [];
 }
 
 type InsightsData = {
@@ -104,6 +157,14 @@ export function SocialStatsPanel(props: {
   const { t } = props;
   const data = useSocialInsightsData(props.service, props.refreshKey);
   const stats = data.stats;
+  // Xu hướng followers: lấy điểm đo theo (cụm, nền tảng) từ history của daemon.
+  const followerTrends = (stats?.channels ?? []).map(channel => ({
+    channel,
+    points: trendPointsFor(stats?.history, channel.clusterId, channel.platform, 'followers')
+  }));
+  const hasTrendColumn = followerTrends.some(entry => entry.points.length >= 2);
+  // Block tổng quan: tối đa 3 sparkline lớn cho followers — chỉ khi dữ liệu đủ dày (≥3 điểm).
+  const trendCards = followerTrends.filter(entry => entry.points.length >= 3).slice(0, 3);
   return (
     <div className="social-insights" aria-label={t('dashboard.social.insightsTitle')}>
       <div className="social-panel-head">
@@ -140,33 +201,63 @@ export function SocialStatsPanel(props: {
           {stats.channels.length === 0 ? (
             <p className="social-empty">{t('dashboard.social.statsEmpty')}</p>
           ) : (
-            <table className="social-table">
-              <thead>
-                <tr>
-                  <th>{t('dashboard.social.statsColCluster')}</th>
-                  <th>{t('dashboard.social.statsColPlatform')}</th>
-                  <th>{t('dashboard.social.statsColFollowers')}</th>
-                  <th>{t('dashboard.social.statsColCaptured')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.channels.map((channel, index) => (
-                  <tr key={`${channel.clusterId}-${channel.platform}-${index}`}>
-                    <td>{channel.clusterName}</td>
-                    <td>{channel.platform}</td>
-                    <td>
-                      {formatCount(channel.metrics.followers?.value)}
-                      {deltaLabel(channel.metrics.followers) !== '' ? (
-                        <span className={deltaLabel(channel.metrics.followers).startsWith('+') ? 'social-delta-up' : 'social-delta-down'}>
-                          {' '}{deltaLabel(channel.metrics.followers)}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td>{channel.metrics.followers !== undefined ? formatScheduleShort(channel.metrics.followers.capturedAt) : '—'}</td>
+            <>
+              {trendCards.length > 0 ? (
+                <div className="social-trend-strip">
+                  {trendCards.map(entry => (
+                    <div
+                      key={`trend-${entry.channel.clusterId}-${entry.channel.platform}`}
+                      className="social-trend-card"
+                    >
+                      <span className="social-trend-card-name">
+                        {entry.channel.clusterName} · {entry.channel.platform}
+                      </span>
+                      <Sparkline points={entry.points} width={160} height={48} />
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <table className="social-table">
+                <thead>
+                  <tr>
+                    <th>{t('dashboard.social.statsColCluster')}</th>
+                    <th>{t('dashboard.social.statsColPlatform')}</th>
+                    <th>{t('dashboard.social.statsColFollowers')}</th>
+                    {hasTrendColumn ? <th>{t('dashboard.social.trendColumn')}</th> : null}
+                    <th>{t('dashboard.social.statsColCaptured')}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {stats.channels.map((channel, index) => {
+                    const points = followerTrends[index]?.points ?? [];
+                    return (
+                      <tr key={`${channel.clusterId}-${channel.platform}-${index}`}>
+                        <td>{channel.clusterName}</td>
+                        <td>{channel.platform}</td>
+                        <td>
+                          {formatCount(channel.metrics.followers?.value)}
+                          {deltaLabel(channel.metrics.followers) !== '' ? (
+                            <span className={deltaLabel(channel.metrics.followers).startsWith('+') ? 'social-delta-up' : 'social-delta-down'}>
+                              {' '}{deltaLabel(channel.metrics.followers)}
+                            </span>
+                          ) : null}
+                        </td>
+                        {hasTrendColumn ? (
+                          <td>
+                            {points.length >= 2 ? (
+                              <Sparkline points={points} width={80} height={24} />
+                            ) : (
+                              <span className="social-trend-empty">—</span>
+                            )}
+                          </td>
+                        ) : null}
+                        <td>{channel.metrics.followers !== undefined ? formatScheduleShort(channel.metrics.followers.capturedAt) : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </>
           )}
           {stats.videos.length > 0 ? (
             <>

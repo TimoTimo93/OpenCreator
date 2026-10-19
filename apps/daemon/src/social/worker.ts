@@ -80,6 +80,24 @@ export type CreateSocialWorkerInput = {
   keepBrowserOpenAfterJob?: boolean;
   maxAttempts?: number;
   log?: (message: string) => void;
+  /**
+   * GĐ4: báo sau khi kết quả nền tảng được ghi (published/scheduled/failed —
+   * không báo skipped). server.ts truyền callback này để đẩy thông báo trong app
+   * qua notifications.enqueueGenericEvent; không cắm → bỏ qua.
+   */
+  notify?: (event: SocialWorkerNotifyEvent) => void;
+};
+
+export type SocialWorkerNotifyEvent = {
+  jobId: string;
+  platform: SocialPlatform;
+  status: 'published' | 'scheduled' | 'failed';
+  /** Số lượt thử vừa hoàn tất (lần 1 = 1). */
+  attempt: number;
+  clusterName: string;
+  jobTitle: string;
+  videoId: string | null;
+  error: string | null;
 };
 
 export type SocialWorker = {
@@ -293,6 +311,19 @@ export function createSocialWorker(input: CreateSocialWorkerInput = {}): SocialW
       updateClusterRow(depsNow.db, cluster.id, loginPatch);
     }
     commitPlatformResult(depsNow.db, job.id, prefix, result, refreshed.platforms[platform]!.attempts);
+    // GĐ4: báo kết quả đăng cho tầng thông báo (published/scheduled/failed).
+    if (result.status === 'published' || result.status === 'scheduled' || result.status === 'failed') {
+      input.notify?.({
+        jobId: job.id,
+        platform,
+        status: result.status,
+        attempt: refreshed.platforms[platform]!.attempts + 1,
+        clusterName: cluster.name,
+        jobTitle: job.title,
+        videoId: result.videoId ?? null,
+        error: result.error ?? null
+      });
+    }
     if (result.status === 'failed' && result.error !== undefined) {
       log(`Đăng ${platform} cho cụm "${cluster.name}" (${job.title}) thất bại: ${result.error}`);
     } else if (result.status === 'published' || result.status === 'scheduled') {

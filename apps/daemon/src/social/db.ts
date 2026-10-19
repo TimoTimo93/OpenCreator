@@ -22,7 +22,8 @@ const CLUSTER_COLUMNS = [
   'id', 'name', 'series_name', 'proxy_server', 'proxy_status', 'proxy_detail',
   'yt_login', 'tk_login', 'fb_login', 'fb_mode', 'fb_page_id', 'fb_page_token_encrypted',
   'default_schedule_times', 'default_description', 'created_at', 'updated_at',
-  'yt_channel_url', 'tk_profile_url', 'auto_reply_enabled', 'auto_reply_prompt'
+  'yt_channel_url', 'tk_profile_url', 'auto_reply_enabled', 'auto_reply_prompt',
+  'auto_publish_after_translate'
 ] as const;
 
 const JOB_COLUMNS = [
@@ -165,6 +166,8 @@ function migrateColumns(db: SocialDB): void {
   addColumn('social_clusters', 'tk_profile_url', "tk_profile_url TEXT NOT NULL DEFAULT ''");
   addColumn('social_clusters', 'auto_reply_enabled', 'auto_reply_enabled INTEGER NOT NULL DEFAULT 0');
   addColumn('social_clusters', 'auto_reply_prompt', "auto_reply_prompt TEXT NOT NULL DEFAULT ''");
+  // GĐ4: công tắc tự nạp đăng sau khi dịch xong (điều khiển từ daemon).
+  addColumn('social_clusters', 'auto_publish_after_translate', 'auto_publish_after_translate INTEGER NOT NULL DEFAULT 0');
   addColumn('social_jobs', 'platform_settings', "platform_settings TEXT NOT NULL DEFAULT '{}'");
   void missing;
 }
@@ -215,6 +218,7 @@ export type SocialClusterRow = {
   tk_profile_url: string | null;
   auto_reply_enabled: number | null;
   auto_reply_prompt: string | null;
+  auto_publish_after_translate: number | null;
 };
 
 export type SocialJobRow = {
@@ -283,6 +287,7 @@ export function mapCluster(row: SocialClusterRow): SocialCluster {
     tkProfileUrl: row.tk_profile_url ?? '',
     autoReplyEnabled: row.auto_reply_enabled === 1,
     autoReplyPrompt: row.auto_reply_prompt ?? '',
+    autoPublishAfterTranslate: row.auto_publish_after_translate === 1,
     createdAt: normalizeDatabaseTimestamp(row.created_at),
     updatedAt: normalizeDatabaseTimestamp(row.updated_at)
   };
@@ -365,6 +370,7 @@ export function createClusterRow(
     tkProfileUrl?: string;
     autoReplyEnabled?: boolean;
     autoReplyPrompt?: string;
+    autoPublishAfterTranslate?: boolean;
     nowISO: string;
   }
 ): SocialClusterRow {
@@ -387,6 +393,7 @@ export function createClusterRow(
     tk_profile_url: data.tkProfileUrl ?? '',
     auto_reply_enabled: data.autoReplyEnabled === true ? 1 : 0,
     auto_reply_prompt: data.autoReplyPrompt ?? '',
+    auto_publish_after_translate: data.autoPublishAfterTranslate === true ? 1 : 0,
     created_at: data.nowISO,
     updated_at: data.nowISO
   };
@@ -395,12 +402,14 @@ export function createClusterRow(
       id, name, series_name, proxy_server, proxy_status, proxy_detail,
       yt_login, tk_login, fb_login, fb_mode, fb_page_id, fb_page_token_encrypted,
       default_schedule_times, default_description, created_at, updated_at,
-      yt_channel_url, tk_profile_url, auto_reply_enabled, auto_reply_prompt
+      yt_channel_url, tk_profile_url, auto_reply_enabled, auto_reply_prompt,
+      auto_publish_after_translate
     ) VALUES (
       @id, @name, @series_name, @proxy_server, @proxy_status, @proxy_detail,
       @yt_login, @tk_login, @fb_login, @fb_mode, @fb_page_id, @fb_page_token_encrypted,
       @default_schedule_times, @default_description, @created_at, @updated_at,
-      @yt_channel_url, @tk_profile_url, @auto_reply_enabled, @auto_reply_prompt
+      @yt_channel_url, @tk_profile_url, @auto_reply_enabled, @auto_reply_prompt,
+      @auto_publish_after_translate
     )
   `).run(row);
   return row;
@@ -436,6 +445,7 @@ export function updateClusterRow(
     tk_profile_url: string;
     auto_reply_enabled: number;
     auto_reply_prompt: string;
+    auto_publish_after_translate: number;
   }>
 ): SocialClusterRow | undefined {
   const keys = Object.keys(patch);
@@ -611,6 +621,63 @@ export function latestStatsWithPrevious(
   `).all(...(clusterId !== undefined ? [clusterId] : [])) as Array<{
     cluster_id: string; platform: string; metric: string; value: number; captured_at: string; previous: number | null;
   }>;
+}
+
+export type StatsHistoryRow = {
+  cluster_id: string;
+  platform: string;
+  metric: string;
+  value: number;
+  captured_at: string;
+};
+
+export type StatsHistoryQuery = {
+  clusterId?: string;
+  platform?: string;
+  metric?: string;
+  /** Số điểm mỗi chuỗi đo (mặc định 30, chặn tối đa STATS_HISTORY_MAX_LIMIT). */
+  limit?: number;
+};
+
+/** Chặn trần cho listStatsHistory — giữ payload overview gọn. */
+export const STATS_HISTORY_MAX_LIMIT = 120;
+
+/**
+ * Lịch sử N điểm gần nhất theo captured_at của TỪNG chuỗi đo
+ * (cluster_id + platform + metric), trả tăng dần theo thời gian để vẽ chart.
+ * Dùng idx_social_stats_channel có sẵn; KHÔNG đổi hành vi ghi.
+ */
+export function listStatsHistory(db: SocialDB, query: StatsHistoryQuery = {}): StatsHistoryRow[] {
+  const rawLimit = query.limit ?? 30;
+  const limit = Math.min(Math.max(Math.floor(rawLimit), 1), STATS_HISTORY_MAX_LIMIT);
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+  if (query.clusterId !== undefined) {
+    conditions.push('st.cluster_id = ?');
+    params.push(query.clusterId);
+  }
+  if (query.platform !== undefined) {
+    conditions.push('st.platform = ?');
+    params.push(query.platform);
+  }
+  if (query.metric !== undefined) {
+    conditions.push('st.metric = ?');
+    params.push(query.metric);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  return db.prepare(`
+    SELECT s.cluster_id, s.platform, s.metric, s.value, s.captured_at
+    FROM (
+      SELECT st.*, ROW_NUMBER() OVER (
+        PARTITION BY st.cluster_id, st.platform, st.metric
+        ORDER BY st.captured_at DESC, st.id DESC
+      ) AS rn
+      FROM social_stats AS st
+      ${where}
+    ) AS s
+    WHERE s.rn <= ?
+    ORDER BY s.cluster_id, s.platform, s.metric, s.captured_at, s.id
+  `).all(...params, limit) as StatsHistoryRow[];
 }
 
 export function deleteStatsBefore(db: SocialDB, beforeISO: string): void {

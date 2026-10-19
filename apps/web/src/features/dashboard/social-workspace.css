@@ -696,6 +696,21 @@
   flex-wrap: wrap;
 }
 
+/* GĐ4 — công tắc "Tự nạp đăng sau khi dịch xong" trong card cụm (tab Kênh). */
+.social-cluster-autopublish {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text, inherit);
+  cursor: pointer;
+  user-select: none;
+}
+
+.social-cluster-autopublish input[type='checkbox'] {
+  accent-color: var(--primary, #6366f1);
+}
+
 /* ----------------------------- Forms (dùng chung) ----------------------- */
 
 .social-enqueue {
@@ -1140,6 +1155,47 @@
 .social-delta-down { color: var(--social-err); font-size: 12px; margin-left: 6px; }
 
 .social-stats h3 { font-size: 14px; margin: 10px 0 4px; }
+
+/* Sparkline xu hướng (SVG thuần — không thư viện chart). */
+.social-spark { display: block; }
+
+.social-spark-line {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.social-spark-dot { stroke: none; }
+
+.social-spark-up .social-spark-line { stroke: var(--social-ok); }
+.social-spark-up .social-spark-dot { fill: var(--social-ok); }
+.social-spark-down .social-spark-line { stroke: var(--social-err); }
+.social-spark-down .social-spark-dot { fill: var(--social-err); }
+
+.social-trend-empty { color: var(--subtle); }
+
+/* Block tổng quan: 2-3 sparkline lớn cho followers từng cụm. */
+.social-trend-strip { display: flex; align-items: stretch; gap: 12px; flex-wrap: wrap; }
+
+.social-trend-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.social-trend-card-name {
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .social-comments { display: flex; flex-direction: column; gap: 10px; }
 .social-comments-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

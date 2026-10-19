@@ -68,7 +68,9 @@ const updateClusterSchema = z.object({
   autoReplyEnabled: z.boolean().optional()
     .describe('Bật tự động trả lời bình luận bằng AI (cap 25 reply/ngày/cụm)'),
   autoReplyPrompt: z.string().min(1).optional()
-    .describe('Chỉ dẫn riêng cho AI khi soạn câu trả lời bình luận')
+    .describe('Chỉ dẫn riêng cho AI khi soạn câu trả lời bình luận'),
+  autoPublishAfterTranslate: z.boolean().optional()
+    .describe('GĐ4: bật tự nạp đăng sau khi dịch xong — khi pipeline dịch xong 1 tập, video được tự xếp vào hàng đợi của cụm theo khung giờ vàng')
 }).strict();
 
 const clusterIdSchema = z.object({
@@ -184,7 +186,8 @@ export function createSocialToolDefinitions(input: {
             ...(parsed.ytChannelUrl === undefined ? {} : { ytChannelUrl: parsed.ytChannelUrl }),
             ...(parsed.tkProfileUrl === undefined ? {} : { tkProfileUrl: parsed.tkProfileUrl }),
             ...(parsed.autoReplyEnabled === undefined ? {} : { autoReplyEnabled: parsed.autoReplyEnabled }),
-            ...(parsed.autoReplyPrompt === undefined ? {} : { autoReplyPrompt: parsed.autoReplyPrompt })
+            ...(parsed.autoReplyPrompt === undefined ? {} : { autoReplyPrompt: parsed.autoReplyPrompt }),
+            ...(parsed.autoPublishAfterTranslate === undefined ? {} : { autoPublishAfterTranslate: parsed.autoPublishAfterTranslate })
           } as Record<string, unknown>
         });
       }

@@ -1678,6 +1678,7 @@ export async function buildServer(input: BuildServerInput) {
     log: message => console.warn(`[drama-title] ${message}`)
   });
   await registerCreatorDramaRoutes(server, creatorHongguoComponentManager, dramaTitleTranslator);
+  let socialAutomation: SocialService | undefined;
   let translationPipeline: TranslationPipelineService | undefined;
   try {
     translationPipeline = createTranslationPipelineService({
@@ -1692,11 +1693,41 @@ export async function buildServer(input: BuildServerInput) {
         ensureDefaultProject: () => {
           const project = projectManager.ensureDefaultProject();
           return { projectId: project.id };
+        },
+        // GĐ4: project đích do A3 chỉ định khi nạp (item.projectId).
+        getProject: projectId => {
+          const project = projectManager.getProject(projectId);
+          return project === undefined ? undefined : { projectId: project.id };
         }
       },
       ffmpegPath: creatorFfmpegPath,
       ffprobePath: creatorFfprobePath,
       ensureRuntimeReady: async () => { await ensureKrillinRuntimeReady(); },
+      // GĐ4 — hook tự nạp đăng sau dịch, cài ở daemon: thông báo trong app + xếp
+      // video vào hàng đợi của các cụm đang bật autoPublishAfterTranslate.
+      // socialAutomation khởi tạo SAU pipeline → lấy lười qua getter dưới.
+      onEpisodeCompleted: async info => {
+        const fullTitle = info.episodeIndex === undefined
+          ? info.title
+          : `${info.title} — Tập ${info.episodeIndex}`;
+        notificationService.enqueueGenericEvent({
+          kind: 'translation_episode_done',
+          title: `Đã dịch xong: ${fullTitle}`,
+          body: 'Video đã dịch xong, sẵn sàng trong hàng đợi đăng đa kênh.',
+          dedupeKey: `translation_episode_done:${info.videoPath}`
+        });
+        const automation = socialAutomation;
+        if (automation === undefined) return;
+        const result = automation.enqueueAfterTranslate({
+          path: info.videoPath,
+          title: info.title,
+          episodeIndex: info.episodeIndex ?? null,
+          projectId: info.projectId ?? null
+        });
+        if (result.accepted > 0) {
+          console.log(`[translation-pipeline] tự nạp đăng: xếp ${result.accepted} job cho ${result.clusters.length} cụm bật tự nạp (${fullTitle})`);
+        }
+      },
       onUpdate: summary => {
         // Web hỗ trợ lâu dài sẽ theo dõi sự kiện SSE riêng; log gọn cho diag.
         console.log(`[translation-pipeline] queued=${summary.counts.queued} running=${summary.counts.running} completed=${summary.counts.completed} failed=${summary.counts.failed} merge=${summary.merge.status}`);
@@ -1715,24 +1746,41 @@ export async function buildServer(input: BuildServerInput) {
     ffprobePath: creatorFfprobePath,
     // "Mở thư mục" cũng được phép mở nơi chứa artifact gốc (video đã dịch...).
     extraAllowedRoots: [creatorJobsRoot],
-    resolveProjectFolder() {
-      // Thư mục Exports của project mặc định — cùng quy tắc đặt tên với
-      // artifact-publisher: `<outputRoot>/<Tên project>-<project id>`.
-      const project = projectManager.ensureDefaultProject();
+    // GĐ4: luồng "theo tên phim" — route tự resolve project đích qua manager.
+    projects: projectManager,
+    resolveProjectFolder(project?: { id: string; name: string; cwd: string }) {
+      // Thư mục Exports của project đích (mặc định = project mặc định) — cùng
+      // quy tắc đặt tên với artifact-publisher: `<outputRoot>/<Tên>-<id>`.
+      const resolved = project ?? projectManager.ensureDefaultProject();
       const outputRoot = openCreatorSettingsStore.readStorage().settings.outputRoot;
       return {
-        folder: join(outputRoot, `${project.name}-${project.id}`),
-        projectName: project.name
+        folder: join(outputRoot, `${resolved.name}-${resolved.id}`),
+        projectName: resolved.name
       };
     }
   });
-  let socialAutomation: SocialService | undefined;
   try {
     const socialWorker = createSocialWorker({
       executors: defaultSocialExecutors,
       browserLauncher: (clusterId, proxyServer, profileDir) =>
         launchClusterBrowser({ clusterId, proxyServer, profileDir }),
-      keepBrowserOpenAfterJob: false
+      keepBrowserOpenAfterJob: false,
+      // GĐ4: thông báo trong app khi nền tảng đăng xong/thất bại (worker không
+      // đụng desktop — desktop đã tự poll /notifications và toast).
+      notify: event => {
+        notificationService.enqueueGenericEvent({
+          kind: event.status === 'failed' ? 'social_job_failed' : 'social_job_done',
+          title: event.status === 'failed'
+            ? `Đăng thất bại: ${event.jobTitle}`
+            : `Đã đăng: ${event.jobTitle}`,
+          body: event.status === 'failed'
+            ? `${event.clusterName} · ${event.platform} (lượt ${event.attempt}): ${event.error ?? 'lỗi không rõ'}`
+            : `${event.clusterName} · ${event.platform}${event.videoId !== null ? ` — id ${event.videoId}` : ''}`,
+          dedupeKey: event.status === 'failed'
+            ? `social_job_failed:${event.jobId}:${event.platform}:${event.attempt}`
+            : `social_job_done:${event.jobId}:${event.platform}`
+        });
+      }
     });
     socialAutomation = createSocialService({
       dataDir,

@@ -16,8 +16,7 @@ afterEach(async () => {
   teardown = undefined;
 });
 
-describe('registerSocialRoutes — service chưa cắm', () => {
-  it('GET /social/overview → 503 social_unavailable', async () => {
+describe('registerSocialRoutes — service chưa cắm', () => {  it('GET /social/overview → 503 social_unavailable', async () => {
     server = Fastify();
     await registerSocialRoutes(server, undefined);
     const response = await server.inject('/social/overview');
@@ -26,7 +25,7 @@ describe('registerSocialRoutes — service chưa cắm', () => {
   });
 });
 
-async function setupServer(options: { downloadsRoot?: string; browserLauncher?: Parameters<typeof createSocialWorker>[0]['browserLauncher'] } = {}) {
+async function setupServer(options: { downloadsRoot?: string; browserLauncher?: NonNullable<Parameters<typeof createSocialWorker>[0]>['browserLauncher'] } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'social-routes-'));
   const worker = createSocialWorker({
     tickIntervalMs: 0,
@@ -279,5 +278,25 @@ describe('registerSocialRoutes — GET /social/downloads (media picker)', () => 
     const response = await server!.inject('/social/downloads');
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ items: [] });
+  });
+});
+
+describe('registerSocialRoutes — công tắc autoPublishAfterTranslate qua REST', () => {
+  it('PATCH /social/clusters/:id nhận autoPublishAfterTranslate và GET overview trả lại', async () => {
+    await setupServer();
+    const created = await server!.inject({ method: 'POST', url: '/social/clusters', payload: { name: 'Cụm Tự Nạp' } });
+    const clusterId = created.json().clusters[0].id;
+    expect(created.json().clusters[0].autoPublishAfterTranslate).toBe(false);
+
+    const patched = await server!.inject({
+      method: 'PATCH',
+      url: `/social/clusters/${clusterId}`,
+      payload: { autoPublishAfterTranslate: true }
+    });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.json().clusters[0].autoPublishAfterTranslate).toBe(true);
+
+    const overview = (await server!.inject('/social/overview')).json();
+    expect(overview.clusters[0].autoPublishAfterTranslate).toBe(true);
   });
 });

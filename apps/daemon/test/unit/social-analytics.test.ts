@@ -24,7 +24,9 @@ import {
 import {
   createClusterRow,
   insertJobRow,
+  insertStatsSnapshot,
   listCommentRows,
+  listStatsHistory,
   openSocialDatabase,
   updateJobRow,
   type SocialDB
@@ -39,7 +41,7 @@ afterEach(async () => {
   cleanupDirs = [];
 });
 
-function tempRoot(prefix: string): string {
+function tempRoot(prefix: string): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix)).then(dir => {
     cleanupDirs.push(dir);
     return dir;
@@ -209,6 +211,119 @@ describe('social db — migrate cộng thêm (GĐ3)', () => {
     `).get(clusterId) as { value: number; previous: number | null };
     expect(stats.value).toBe(150);
     expect(stats.previous).toBe(100);
+    db.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listStatsHistory — lịch sử điểm đo cho sparkline (B1: biểu đồ xu hướng)
+// ---------------------------------------------------------------------------
+
+function insertHistoryPoint(
+  db: SocialDB,
+  clusterId: string,
+  platform: string,
+  metric: string,
+  value: number,
+  capturedAt: string
+): void {
+  insertStatsSnapshot(db, { clusterId, platform, metric, value, capturedAt });
+}
+
+describe('listStatsHistory — lọc + thứ tự + limit', () => {
+  it('lọc theo cụm/nền tảng/metric, trả điểm tăng dần theo captured_at', async () => {
+    const dir = await tempRoot('social-history-filter-');
+    const db = openSocialDatabase(join(dir, 'social.sqlite'));
+    seedCluster(db, { id: 'cluster_a', name: 'Cụm A' });
+    seedCluster(db, { id: 'cluster_b', name: 'Cụm B' });
+    insertHistoryPoint(db, 'cluster_a', 'facebook', 'followers', 100, '2026-10-16T08:00:00.000Z');
+    insertHistoryPoint(db, 'cluster_a', 'facebook', 'followers', 150, '2026-10-17T08:00:00.000Z');
+    insertHistoryPoint(db, 'cluster_a', 'facebook', 'followers', 120, '2026-10-18T08:00:00.000Z');
+    insertHistoryPoint(db, 'cluster_b', 'facebook', 'followers', 900, '2026-10-18T09:00:00.000Z');
+    insertHistoryPoint(db, 'cluster_a', 'youtube', 'followers', 42, '2026-10-18T10:00:00.000Z');
+    insertHistoryPoint(db, 'cluster_a', 'facebook', 'views', 7, '2026-10-18T11:00:00.000Z');
+
+    // Lọc cụm + nền tảng + metric: chỉ 3 điểm followers Facebook của cluster_a.
+    const history = listStatsHistory(db, {
+      clusterId: 'cluster_a', platform: 'facebook', metric: 'followers'
+    });
+    expect(history.map(row => `${row.value}@${row.captured_at}`)).toEqual([
+      '100@2026-10-16T08:00:00.000Z',
+      '150@2026-10-17T08:00:00.000Z',
+      '120@2026-10-18T08:00:00.000Z'
+    ]);
+
+    // Lọc cụm + metric (bỏ nền tảng): cả facebook + youtube của cluster_a,
+    // nhóm theo chuỗi, vẫn tăng dần trong từng nhóm.
+    const mixed = listStatsHistory(db, { clusterId: 'cluster_a', metric: 'followers' });
+    expect(mixed.map(row => row.platform)).toEqual(['facebook', 'facebook', 'facebook', 'youtube']);
+    expect(mixed.map(row => row.value)).toEqual([100, 150, 120, 42]);
+    db.close();
+  });
+
+  it('limit: mặc định 30, chặn trần 120, sàn 1', async () => {
+    const dir = await tempRoot('social-history-limit-');
+    const db = openSocialDatabase(join(dir, 'social.sqlite'));
+    seedCluster(db, { id: 'cluster_a', name: 'Cụm A' });
+    for (let index = 0; index < 130; index += 1) {
+      insertHistoryPoint(
+        db, 'cluster_a', 'facebook', 'followers', index,
+        new Date(Date.UTC(2026, 8, 1, 0, 0, index)).toISOString()
+      );
+    }
+    // Mặc định: 30 điểm gần nhất, tăng dần (cũ nhất trước).
+    const byDefault = listStatsHistory(db);
+    expect(byDefault).toHaveLength(30);
+    expect(byDefault[0]?.value).toBe(100);
+    expect(byDefault[byDefault.length - 1]?.value).toBe(129);
+    // Trần 120: vượt 999 → chỉ lấy 120 điểm gần nhất.
+    const clamped = listStatsHistory(db, { limit: 999 });
+    expect(clamped).toHaveLength(120);
+    expect(clamped[0]?.value).toBe(10);
+    expect(clamped[clamped.length - 1]?.value).toBe(129);
+    // Sàn 1: limit 0 → 1 điểm mới nhất.
+    const floor = listStatsHistory(db, { limit: 0 });
+    expect(floor).toHaveLength(1);
+    expect(floor[0]?.value).toBe(129);
+    db.close();
+  });
+});
+
+describe('analytics.getStats — gắn history followers/views cho sparkline', () => {
+  it('chỉ gắn 2 metric chính của các chuỗi có điểm, bỏ qua likes', async () => {
+    const dir = await tempRoot('social-history-overview-');
+    const db = openSocialDatabase(join(dir, 'social.sqlite'));
+    seedCluster(db, { id: 'cluster_a', name: 'Cụm A' });
+    insertHistoryPoint(db, 'cluster_a', 'facebook', 'followers', 100, '2026-10-16T08:00:00.000Z');
+    insertHistoryPoint(db, 'cluster_a', 'facebook', 'followers', 150, '2026-10-17T08:00:00.000Z');
+    insertHistoryPoint(db, 'cluster_a', 'tiktok', 'views', 5000, '2026-10-17T09:00:00.000Z');
+    insertHistoryPoint(db, 'cluster_a', 'tiktok', 'views', 6200, '2026-10-18T09:00:00.000Z');
+    insertHistoryPoint(db, 'cluster_a', 'tiktok', 'likes', 77, '2026-10-18T09:00:00.000Z');
+
+    const analytics = createSocialAnalytics({
+      db,
+      worker: {} as never,
+      decryptToken: () => '',
+      refreshIntervalMs: 0
+    });
+    const overview: SocialStatsOverview = analytics.getStats();
+    expect(overview.history).toEqual([
+      {
+        clusterId: 'cluster_a', platform: 'facebook', metric: 'followers',
+        points: [
+          { value: 100, capturedAt: '2026-10-16T08:00:00.000Z' },
+          { value: 150, capturedAt: '2026-10-17T08:00:00.000Z' }
+        ]
+      },
+      {
+        clusterId: 'cluster_a', platform: 'tiktok', metric: 'views',
+        points: [
+          { value: 5000, capturedAt: '2026-10-17T09:00:00.000Z' },
+          { value: 6200, capturedAt: '2026-10-18T09:00:00.000Z' }
+        ]
+      }
+    ]);
+    analytics.close();
     db.close();
   });
 });

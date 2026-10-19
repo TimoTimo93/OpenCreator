@@ -831,6 +831,7 @@ function clusterPatchFromBody(body: Record<string, unknown>): SocialClusterPatch
   if (typeof body.tkProfileUrl === 'string') patch.tkProfileUrl = body.tkProfileUrl;
   if (typeof body.autoReplyEnabled === 'boolean') patch.autoReplyEnabled = body.autoReplyEnabled;
   if (typeof body.autoReplyPrompt === 'string') patch.autoReplyPrompt = body.autoReplyPrompt;
+  if (typeof body.autoPublishAfterTranslate === 'boolean') patch.autoPublishAfterTranslate = body.autoPublishAfterTranslate;
   return patch;
 }
 

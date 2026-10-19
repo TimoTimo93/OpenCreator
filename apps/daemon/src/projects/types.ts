@@ -32,6 +32,12 @@ export type ProjectManager = {
   ensureDefaultProject(): ProjectResponse;
   createProject(input: CreateProjectRequest): ProjectResponse;
   createManagedProject(input: CreateManagedProjectRequest): ProjectResponse;
+  /**
+   * Tìm project active theo tên phim (không phân biệt hoa thường) → trả
+   * { id, folder, name }; chưa có → tạo project mới với thư mục trên đĩa đặt
+   * theo tên đã sanitize (`<managedRoot>/<Tên phim>`, trùng → hậu tố " (2)").
+   */
+  ensureProjectByName(name: string): { id: string; folder: string; name: string };
   createMigratedProject(input: CreateMigratedProjectInput): ProjectResponse;
   migrateLocalStorageV1(
     input: MigrateLocalStorageProjectsV1Request

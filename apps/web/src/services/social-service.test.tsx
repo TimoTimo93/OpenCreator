@@ -97,6 +97,7 @@ function overview(): SocialOverview {
       tkProfileUrl: '',
       autoReplyEnabled: false,
       autoReplyPrompt: '',
+      autoPublishAfterTranslate: false,
       loginStatus: { youtube: 'unknown', tiktok: 'unknown', facebook: 'unknown' },
       browserOpen: false,
       createdAt: '2026-10-19T00:00:00.000Z',
@@ -472,6 +473,33 @@ describe('SocialWorkspace — đăng nhập tài khoản trong tab Kênh', () =>
       expect(login).toBeDefined();
     });
     expect(await screen.findByText(/Đã mở trang đăng nhập/)).toBeInTheDocument();
+  });
+});
+
+describe('SocialWorkspace — công tắc tự nạp đăng sau dịch (tab Kênh)', () => {
+  afterEach(() => {
+    localStorage.clear();
+    window.location.hash = '';
+  });
+
+  it('toggle hiện trạng thái cụm; bật → PATCH updateCluster với autoPublishAfterTranslate', async () => {
+    const { calls, client } = fakeClient();
+    render(
+      <LanguageProvider initialPreference="vi-VN">
+        <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
+      </LanguageProvider>
+    );
+    await waitFor(() => expect(screen.getByText('Tập 2')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'Kênh' }));
+    const toggle = await screen.findByTestId('social-autopublish-cluster_a') as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      const patch = calls.find(call => call.method === 'PATCH' && call.path === '/social/clusters/cluster_a');
+      expect(patch).toBeDefined();
+      expect((patch!.body as { autoPublishAfterTranslate?: boolean }).autoPublishAfterTranslate).toBe(true);
+    });
+    expect(await screen.findByText('Đã lưu trạng thái tự nạp đăng')).toBeInTheDocument();
   });
 });
 

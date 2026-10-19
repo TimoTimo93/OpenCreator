@@ -27,6 +27,16 @@ type ScheduleApprovalNotificationRow = {
 export type NotificationService = {
   enqueueRunTerminal(runId: string): NotificationOutboxItem | undefined;
   enqueueApproval(approvalId: string): NotificationOutboxItem | undefined;
+  /**
+   * GĐ4 — sự kiện generic không gắn thread/run (dịch xong 1 tập, đăng đa kênh
+   * xong/thất bại). Dedupe theo dedupeKey: nạp trùng → giữ nguyên bản đầu tiên.
+   */
+  enqueueGenericEvent(input: {
+    kind: 'translation_episode_done' | 'social_job_done' | 'social_job_failed';
+    title: string;
+    body: string;
+    dedupeKey: string;
+  }): NotificationOutboxItem | undefined;
   listPending(input?: { after?: number; limit?: number }): NotificationOutboxListResponse;
   acknowledge(ids: string[]): NotificationAcknowledgeResponse;
 };
@@ -116,6 +126,23 @@ export function createNotificationService(input: {
         threadId: row.thread_id,
         runId: row.run_id,
         approvalId: row.approval_id,
+        createdAt: now()
+      });
+    },
+
+    enqueueGenericEvent(event) {
+      const dedupeKey = event.dedupeKey.trim();
+      if (dedupeKey === '') return undefined;
+      // Sự kiện generic không có thread/run — outbox vẫn yêu cầu NOT NULL nên
+      // ghi chuỗi rỗng; desktop chỉ cần kind/title/body để hiện toast OS.
+      return repository.enqueue({
+        id: idFactory(),
+        dedupeKey,
+        kind: event.kind,
+        title: safeText(event.title, TITLE_LIMIT, 'OpenCreator'),
+        body: safeText(event.body, BODY_LIMIT, ''),
+        threadId: '',
+        runId: '',
         createdAt: now()
       });
     },
