@@ -298,6 +298,49 @@ describe('App', () => {
     expect(document.querySelector('.creator-workspace-page')).not.toBeInTheDocument();
   });
 
+  it('opens the multi-channel manager from the sidebar without leaving the home screen behind', async () => {
+    const user = userEvent.setup();
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({
+      baseUrl: 'http://127.0.0.1:60764',
+      token: 'runtime-token'
+    });
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
+      if (url.includes('/threads?')) return jsonResponse({ threads: [] });
+      if (url.endsWith('/social/overview')) return jsonResponse({
+        queue: 'running',
+        counts: { pending: 0, running: 0, published: 0, scheduled: 0, failed: 0, skipped: 0 },
+        clusters: [],
+        jobs: []
+      });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    render(
+      <App
+        fileService={createFileService()}
+        hostBridge={hostBridge}
+        runtimeFetch={runtimeFetch}
+        subscribeRunEvents={async () => undefined}
+      />
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('.conversation-page')).toBeInTheDocument();
+    });
+
+    // Người dùng đang ở màn hình Home — bấm "Quản Lý Đa Kênh" trên sidebar
+    // phải vào thẳng workspace đa kênh, không được cứ đứng mãi ở Home.
+    await user.click(await screen.findByRole('button', { name: '多渠道管理' }));
+
+    await waitFor(() => {
+      expect(document.querySelector('.social-workspace')).toBeInTheDocument();
+    });
+    expect(document.querySelector('.conversation-page')).not.toBeInTheDocument();
+  });
+
   it.each(['browser', 'desktop'] as const)(
     'opens a new cover workspace in the %s host without creating a job until the first edit',
     async hostKind => {

@@ -4955,6 +4955,11 @@ export function AppController(props: AppControllerProps) {
           onOpenView={openPrimaryView}
           onOpenWorkspace={workspace => {
             closeMobileSidebar();
+            // navigateToRoute nội bộ không chạy applyRouteFromLocation
+            // (pendingRouteKeyRef khớp) — phải tự chuyển activeView sang
+            // dashboard, nếu không bấm từ trang Home chỉ đổi URL mà giao
+            // diện vẫn đứng ở Home.
+            dispatch({ type: 'set_active_view', activeView: 'dashboard' });
             navigateToRoute({ view: 'workbench', tool: workspace });
           }}
           onAddProject={
