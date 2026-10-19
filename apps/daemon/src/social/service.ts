@@ -32,8 +32,10 @@ import { nextAvailableSlot } from './scheduler.js';
 import { checkProxy } from './proxy-check.js';
 import { createSocialAnalytics } from './analytics.js';
 import { createSocialComments, type SocialLlmConfig } from './comments.js';
+import { listDownloadedVideos, type SocialDownloadItem } from './downloads.js';
 import type { SocialWorker } from './worker.js';
 import {
+  sanitizePlatformSettings,
   type SocialCluster,
   type SocialClusterView,
   type SocialComment,
@@ -54,6 +56,11 @@ export type SocialServiceInput = {
   checkProxyFn?: typeof checkProxy;
   /** GĐ3: cấu hình LLM để tự trả lời bình luận (không có → mẫu mặc định). */
   readLlmConfig?: () => Promise<SocialLlmConfig | null>;
+  /**
+   * Nguồn thư mục gốc chứa video đã tải về (media picker): trả về downloadRoot
+   * người dùng cấu hình hoặc mặc định. Không cấu hình → danh sách downloads rỗng.
+   */
+  readDownloadsRoot?: () => Promise<string | undefined>;
   /** GĐ3: khoảng quét thống kê/bình luận; 0/âm → chỉ chạy khi gọi thủ công. */
   analyticsRefreshIntervalMs?: number;
   commentsScanIntervalMs?: number;
@@ -88,6 +95,10 @@ export type SocialService = {
   pause(): SocialOverview;
   resume(): SocialOverview;
   removeJob(jobId: string): SocialOverview;
+  /** Đổi giờ công khai của job chưa đăng xong; xong luôn đánh thức worker xếp lại slot. */
+  rescheduleJob(jobId: string, scheduledAt: string): SocialOverview;
+  /** Video đã tải về trong thư mục gốc downloads (media picker; chỉ đọc). */
+  listDownloads(limit?: number): Promise<{ items: SocialDownloadItem[] }>;
   retryFailedPlatforms(jobId: string): SocialOverview;
   /** GĐ3: thống kê view/sub đã lưu + quét ngay khi cần. */
   getStats(): SocialStatsOverview;
@@ -325,6 +336,7 @@ export function createSocialService(input: SocialServiceInput): SocialService {
             ? request.description.trim()
             : clusterModel.defaultDescription,
           scheduledAt,
+          platformSettings: sanitizePlatformSettings(request.platformSettings ?? {}),
           nowISO: now()
         });
         accepted += 1;
@@ -351,6 +363,38 @@ export function createSocialService(input: SocialServiceInput): SocialService {
         deleteJobRow(db, jobId);
       }
       return overview();
+    },
+
+    rescheduleJob(jobId: string, scheduledAt: string): SocialOverview {
+      const row = getJobRow(db, jobId);
+      if (row === undefined) throw new SocialError('social_job_not_found', 'Không tìm thấy job trong hàng đợi');
+      const normalized = normalizeISO(scheduledAt.trim());
+      if (normalized === null) {
+        throw new SocialError('social_job_schedule_invalid', 'Giờ hẹn phải là chuỗi ISO hợp lệ (UTC)');
+      }
+      // Job đã đăng/xuất bản (bất kỳ nền tảng nào) thì không được đổi lịch nữa —
+      // tránh lệch trạng thái giữa hàng đợi và nền tảng đã nhận video.
+      for (const prefix of ['yt', 'tk', 'fb'] as const) {
+        const status = row[`${prefix}_status`];
+        if (status === 'published' || status === 'scheduled') {
+          throw new SocialError(
+            'social_job_not_reschedulable',
+            'Job đã được đăng hoặc đã hẹn giờ trên nền tảng — không thể đổi lịch'
+          );
+        }
+      }
+      updateJobRow(db, jobId, { scheduled_at: normalized, updated_at: now() });
+      // Scheduler đọc lại scheduled_at mỗi lượt pump — kick để job dời lên sớm chạy ngay.
+      worker.kick();
+      return overview();
+    },
+
+    async listDownloads(limit?: number): Promise<{ items: SocialDownloadItem[] }> {
+      const readRoot = input.readDownloadsRoot;
+      if (readRoot === undefined) return { items: [] };
+      const root = await readRoot();
+      if (root === undefined || root.trim() === '') return { items: [] };
+      return { items: await listDownloadedVideos({ root, limit }) };
     },
 
     retryFailedPlatforms(jobId: string): SocialOverview {

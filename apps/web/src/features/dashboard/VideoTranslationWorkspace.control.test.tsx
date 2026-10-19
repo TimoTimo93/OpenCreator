@@ -1581,6 +1581,66 @@ describe('VideoTranslationWorkspace task controls', () => {
     expect(screen.getByLabelText('字幕字重')).toHaveValue('medium');
     expect(screen.getByLabelText('字幕大小')).toHaveValue('medium');
   });
+
+  it('configures handling for burned-in source subtitles and persists it in the draft patch', async () => {
+    let currentJob = job({ status: 'draft', revision: 0, stages: [], state: {
+      currentStep: 2, furthestStep: 2, composeVideo: true
+    } });
+    const applyAction = vi.fn(async (_jobId: string, request: {
+      action: string;
+      input: { patch?: Record<string, CreatorJson> };
+    }) => {
+      currentJob = {
+        ...currentJob,
+        revision: currentJob.revision + 1,
+        state: { ...currentJob.state, ...(request.input.patch ?? {}) }
+      };
+      return {
+        job: currentJob,
+        receipt: {
+          actor: 'user' as const,
+          action: request.action,
+          summary: request.action,
+          affectedArtifacts: [],
+          newRevision: currentJob.revision,
+          createdAt: currentJob.updatedAt
+        }
+      };
+    });
+
+    render(
+      <LanguageProvider initialPreference="zh-CN">
+        <CreatorSessionProvider initialJob={currentJob} service={{ applyAction, runAgentTurn: vi.fn() } as never}>
+          <VideoTranslationWorkspace onBack={vi.fn()} />
+        </CreatorSessionProvider>
+      </LanguageProvider>
+    );
+
+    const combo = screen.getByRole('combobox', { name: '内嵌字幕处理' });
+    expect(combo).toHaveValue('none');
+    expect(screen.getByText('保留原画面，新字幕可能和旧字幕重叠')).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: '自动检测字幕位置' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('slider', { name: '字幕带高度（自底向上）' })).not.toBeInTheDocument();
+
+    // 选择“色带遮盖原字幕”→ 显示自动检测开关，先隐藏手动滑杆
+    fireEvent.change(combo, { target: { value: 'cover' } });
+    expect(screen.getByText('用深色遮幅盖住旧字幕区域后再烧录新字幕')).toBeInTheDocument();
+    expect(await screen.findByRole('switch', { name: '自动检测字幕位置' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByRole('slider', { name: '字幕带高度（自底向上）' })).not.toBeInTheDocument();
+    await waitFor(() => expect(currentJob.state).toMatchObject({ hardsubHandling: 'cover', hardsubBandPercent: null }));
+
+    // 关闭自动检测 → 显示滑杆（默认 22%，自底向上），调整后写入草稿设置
+    fireEvent.click(screen.getByRole('switch', { name: '自动检测字幕位置' }));
+    const slider = screen.getByRole('slider', { name: '字幕带高度（自底向上）' });
+    expect(slider).toHaveValue('22');
+    fireEvent.change(slider, { target: { value: '30' } });
+    await waitFor(() => expect(currentJob.state).toMatchObject({ hardsubHandling: 'cover', hardsubBandPercent: 30 }));
+
+    // 回到“不处理”→ 隐藏位置控件（位置设置保留但 daemon 忽略）
+    fireEvent.change(screen.getByRole('combobox', { name: '内嵌字幕处理' }), { target: { value: 'none' } });
+    expect(screen.queryByRole('switch', { name: '自动检测字幕位置' })).not.toBeInTheDocument();
+    await waitFor(() => expect(currentJob.state).toMatchObject({ hardsubHandling: 'none', hardsubBandPercent: 30 }));
+  });
 });
 
 function job(input: {

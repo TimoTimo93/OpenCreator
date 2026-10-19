@@ -5,7 +5,15 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { type SocialCluster, type SocialFacebookMode, type SocialJob, type SocialPlatform, type SocialPlatformState } from './types.js';
+import {
+  sanitizePlatformSettings,
+  type SocialCluster,
+  type SocialFacebookMode,
+  type SocialJob,
+  type SocialPlatform,
+  type SocialPlatformSettings,
+  type SocialPlatformState
+} from './types.js';
 import { normalizeDatabaseTimestamp } from '../storage/database.js';
 
 export type SocialDB = Database.Database;
@@ -19,7 +27,8 @@ const CLUSTER_COLUMNS = [
 
 const JOB_COLUMNS = [
   'id', 'cluster_id', 'cluster_name', 'video_path', 'thumbnail_path', 'title', 'description',
-  'scheduled_at', 'yt_status', 'yt_attempts', 'yt_video_id', 'yt_error', 'yt_screenshot', 'yt_last_attempt_at',
+  'scheduled_at', 'platform_settings',
+  'yt_status', 'yt_attempts', 'yt_video_id', 'yt_error', 'yt_screenshot', 'yt_last_attempt_at',
   'tk_status', 'tk_attempts', 'tk_video_id', 'tk_error', 'tk_screenshot', 'tk_last_attempt_at',
   'fb_status', 'fb_attempts', 'fb_video_id', 'fb_error', 'fb_screenshot', 'fb_last_attempt_at',
   'created_at', 'updated_at'
@@ -156,6 +165,7 @@ function migrateColumns(db: SocialDB): void {
   addColumn('social_clusters', 'tk_profile_url', "tk_profile_url TEXT NOT NULL DEFAULT ''");
   addColumn('social_clusters', 'auto_reply_enabled', 'auto_reply_enabled INTEGER NOT NULL DEFAULT 0');
   addColumn('social_clusters', 'auto_reply_prompt', "auto_reply_prompt TEXT NOT NULL DEFAULT ''");
+  addColumn('social_jobs', 'platform_settings', "platform_settings TEXT NOT NULL DEFAULT '{}'");
   void missing;
 }
 
@@ -216,6 +226,7 @@ export type SocialJobRow = {
   title: string;
   description: string;
   scheduled_at: string;
+  platform_settings: string | null;
   yt_status: string;
   yt_attempts: number;
   yt_video_id: string | null;
@@ -279,6 +290,16 @@ export function mapCluster(row: SocialClusterRow): SocialCluster {
 
 type SocialClusterLoginValue = SocialCluster['loginStatus']['youtube'];
 
+/** Đọc settings từng nền tảng từ cột JSON; hỏng/rác → {} (không bao giờ ném). */
+function parsePlatformSettings(raw: string | null): SocialPlatformSettings {
+  if (raw === null || raw.trim() === '') return {};
+  try {
+    return sanitizePlatformSettings(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
 export function mapJob(row: SocialJobRow): SocialJob {
   return {
     id: row.id,
@@ -289,6 +310,7 @@ export function mapJob(row: SocialJobRow): SocialJob {
     title: row.title,
     description: row.description,
     scheduledAt: normalizeDatabaseTimestamp(row.scheduled_at),
+    platformSettings: parsePlatformSettings(row.platform_settings),
     platforms: {
       youtube: mapPlatform(row, SocialJobRowHints.youtube),
       tiktok: mapPlatform(row, SocialJobRowHints.tiktok),
@@ -451,6 +473,7 @@ export function insertJobRow(
     title: string;
     description: string;
     scheduledAt: string;
+    platformSettings?: SocialPlatformSettings;
     nowISO: string;
   }
 ): SocialJobRow {
@@ -463,6 +486,7 @@ export function insertJobRow(
     title: data.title,
     description: data.description,
     scheduled_at: data.scheduledAt,
+    platform_settings: JSON.stringify(data.platformSettings ?? {}),
     yt_status: 'pending', yt_attempts: 0, yt_video_id: null, yt_error: null, yt_screenshot: null, yt_last_attempt_at: null,
     tk_status: 'pending', tk_attempts: 0, tk_video_id: null, tk_error: null, tk_screenshot: null, tk_last_attempt_at: null,
     fb_status: 'pending', fb_attempts: 0, fb_video_id: null, fb_error: null, fb_screenshot: null, fb_last_attempt_at: null,
@@ -471,13 +495,13 @@ export function insertJobRow(
   };
   db.prepare(`
     INSERT INTO social_jobs (
-      id, cluster_id, cluster_name, video_path, thumbnail_path, title, description, scheduled_at,
+      id, cluster_id, cluster_name, video_path, thumbnail_path, title, description, scheduled_at, platform_settings,
       yt_status, yt_attempts, yt_video_id, yt_error, yt_screenshot, yt_last_attempt_at,
       tk_status, tk_attempts, tk_video_id, tk_error, tk_screenshot, tk_last_attempt_at,
       fb_status, fb_attempts, fb_video_id, fb_error, fb_screenshot, fb_last_attempt_at,
       created_at, updated_at
     ) VALUES (
-      @id, @cluster_id, @cluster_name, @video_path, @thumbnail_path, @title, @description, @scheduled_at,
+      @id, @cluster_id, @cluster_name, @video_path, @thumbnail_path, @title, @description, @scheduled_at, @platform_settings,
       @yt_status, @yt_attempts, @yt_video_id, @yt_error, @yt_screenshot, @yt_last_attempt_at,
       @tk_status, @tk_attempts, @tk_video_id, @tk_error, @tk_screenshot, @tk_last_attempt_at,
       @fb_status, @fb_attempts, @fb_video_id, @fb_error, @fb_screenshot, @fb_last_attempt_at,
@@ -510,6 +534,7 @@ export function findActiveDuplicateJob(db: SocialDB, clusterId: string, videoPat
 export type JobPatch = Partial<{
   scheduled_at: string;
   cluster_name: string;
+  platform_settings: string;
   yt_status: string; yt_attempts: number; yt_video_id: string | null; yt_error: string | null; yt_screenshot: string | null; yt_last_attempt_at: string | null;
   tk_status: string; tk_attempts: number; tk_video_id: string | null; tk_error: string | null; tk_screenshot: string | null; tk_last_attempt_at: string | null;
   fb_status: string; fb_attempts: number; fb_video_id: string | null; fb_error: string | null; fb_screenshot: string | null; fb_last_attempt_at: string | null;

@@ -74,6 +74,8 @@ export type SocialJob = {
   description: string;
   /** Thời điểm công khai (ISO UTC). */
   scheduledAt: string;
+  /** Cấu hình riêng từng nền tảng cho lần đăng này (Postiz-style). */
+  platformSettings: SocialPlatformSettings;
   platforms: Record<SocialPlatform, SocialPlatformState>;
   createdAt: string;
   updatedAt: string;
@@ -183,7 +185,115 @@ export type SocialEnqueueRequest = {
   thumbnailPath?: string | null;
   /** Bỏ trống → tự xếp khung giờ trống tiếp theo của cụm. */
   scheduledAt?: string | null;
+  /** Cấu hình riêng từng nền tảng (privacy/tags/toggles...). */
+  platformSettings?: SocialPlatformSettings;
 };
+
+// -------------------------------------------------------------------------
+// Settings riêng từng nền tảng (mô hình Postiz: 1 job — nhiều cấu hình).
+// -------------------------------------------------------------------------
+
+export type SocialYouTubeSettings = {
+  /** Quyền xem video trên YouTube Studio. */
+  privacy?: 'public' | 'unlisted' | 'private';
+  /** Thẻ (tags) — tổng độ dài sau khi nối ≤ SOCIAL_YT_TAGS_MAX_LENGTH. */
+  tags?: string[];
+  /** Bật "Dành cho trẻ em" (mặc định luồng cũ là "Không dành cho trẻ em"). */
+  madeForKids?: boolean;
+};
+
+export type SocialTikTokSettings = {
+  /** Ai có thể xem: mọi người / bạn bè / riêng tư. */
+  privacy?: 'public' | 'friends' | 'private';
+  allowDuet?: boolean;
+  allowStitch?: boolean;
+  allowComments?: boolean;
+  /** "Đăng trực tiếp" (direct post) nếu form hỗ trợ. */
+  directPost?: boolean;
+};
+
+export type SocialFacebookSettings = {
+  /** Loại bài đăng (chỉ áp dụng chế độ browser; graph_api hiện chỉ đăng video thường). */
+  postType?: 'post' | 'reel' | 'story';
+};
+
+export type SocialPlatformSettings = {
+  youtube?: SocialYouTubeSettings;
+  tiktok?: SocialTikTokSettings;
+  facebook?: SocialFacebookSettings;
+};
+
+/** Tổng độ dài tối đa của toàn bộ tags YouTube (giới hạn của Studio ~500 ký tự). */
+export const SOCIAL_YT_TAGS_MAX_LENGTH = 500;
+
+const YT_PRIVACY = new Set(['public', 'unlisted', 'private']);
+const TK_PRIVACY = new Set(['public', 'friends', 'private']);
+const FB_POST_TYPE = new Set(['post', 'reel', 'story']);
+
+/**
+ * Làm sạch settings từng nền tảng từ đầu vào không tin cậy: chỉ giữ khóa/enum
+ * đúng kiểu, cắt tags vượt giới hạn tổng độ dài. Không bao giờ ném lỗi —
+ * đầu vào rác trở thành `{}`.
+ */
+export function sanitizePlatformSettings(value: unknown): SocialPlatformSettings {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  const raw = value as Record<string, unknown>;
+  const result: SocialPlatformSettings = {};
+
+  const youtube = sanitizeYoutubeSettings(raw['youtube']);
+  if (youtube !== undefined) result.youtube = youtube;
+  const tiktok = sanitizeTikTokSettings(raw['tiktok']);
+  if (tiktok !== undefined) result.tiktok = tiktok;
+  const facebook = sanitizeFacebookSettings(raw['facebook']);
+  if (facebook !== undefined) result.facebook = facebook;
+  return result;
+}
+
+function sanitizeYoutubeSettings(value: unknown): SocialYouTubeSettings | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const result: SocialYouTubeSettings = {};
+  if (typeof raw['privacy'] === 'string' && YT_PRIVACY.has(raw['privacy'])) {
+    result.privacy = raw['privacy'] as SocialYouTubeSettings['privacy'];
+  }
+  if (Array.isArray(raw['tags'])) {
+    const tags: string[] = [];
+    let total = 0;
+    for (const item of raw['tags']) {
+      if (typeof item !== 'string') continue;
+      const tag = item.trim();
+      if (tag === '') continue;
+      if (total + tag.length > SOCIAL_YT_TAGS_MAX_LENGTH) break;
+      tags.push(tag);
+      total += tag.length;
+    }
+    if (tags.length > 0) result.tags = tags;
+  }
+  if (typeof raw['madeForKids'] === 'boolean') result.madeForKids = raw['madeForKids'];
+  return Object.keys(result).length === 0 ? undefined : result;
+}
+
+function sanitizeTikTokSettings(value: unknown): SocialTikTokSettings | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const result: SocialTikTokSettings = {};
+  if (typeof raw['privacy'] === 'string' && TK_PRIVACY.has(raw['privacy'])) {
+    result.privacy = raw['privacy'] as SocialTikTokSettings['privacy'];
+  }
+  for (const key of ['allowDuet', 'allowStitch', 'allowComments', 'directPost'] as const) {
+    if (typeof raw[key] === 'boolean') result[key] = raw[key];
+  }
+  return Object.keys(result).length === 0 ? undefined : result;
+}
+
+function sanitizeFacebookSettings(value: unknown): SocialFacebookSettings | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw['postType'] === 'string' && FB_POST_TYPE.has(raw['postType'])) {
+    return { postType: raw['postType'] as SocialFacebookSettings['postType'] };
+  }
+  return undefined;
+}
 
 export const MAX_SOCIAL_ATTEMPTS = 3;
 

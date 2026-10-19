@@ -30,6 +30,11 @@ function createVideoTranslationTemplateDefinition(version: 1 | 2): CreatorTempla
       preferPlatformCaptions: z.boolean().default(true),
       bilingual: z.boolean().default(false),
       subtitlePosition: z.enum(['top', 'bottom']).default('top'),
+      // Phụ đề tiếng Hoa in sẵn trong pixel (hardsub) của video nguồn: xử lý
+      // trước khi burn phụ đề mới (none = giữ nguyên, tương thích job cũ).
+      hardsubHandling: z.enum(['none', 'blur', 'cover', 'crop']).default('none'),
+      // Đỉnh dải xử lý hardsub (% chiều cao tính từ mép đáy); null = tự dò.
+      hardsubBandPercent: z.number().min(8).max(60).nullable().default(null),
       ...(version === 2
         ? { subtitleStyle: creatorSubtitleStyleSchema }
         : {}),

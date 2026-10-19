@@ -20,6 +20,7 @@ type FbSelectors = {
   business_home_url: string;
   create_post_btn: string;
   photo_video_option: string;
+  reel_option: string;
   file_input: string;
   composer_text_box: string;
   next_btn: string;
@@ -226,6 +227,17 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
     }
     await createBtn.click();
     await page.waitForTimeout(1_500);
+
+    // postType 'reel' (chế độ browser): ưu tiên composer Reel nếu menu có —
+    // không thấy thì quay lại luồng bài viết thường (best-effort). 'story'
+    // chưa hỗ trợ tự động hóa được.
+    if (context.job.platformSettings.facebook?.postType === 'reel') {
+      const reelOption = page.locator(sel.reel_option).first();
+      if (await reelOption.isVisible().catch(() => false)) {
+        await reelOption.click();
+        await page.waitForTimeout(1_500);
+      }
+    }
 
     const photoVideo = page.locator(sel.photo_video_option).first();
     if (!(await photoVideo.isVisible().catch(() => false))) {

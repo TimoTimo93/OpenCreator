@@ -163,6 +163,8 @@ export type RuntimeErrorCode =
   | 'social_cluster_not_found'
   | 'social_job_not_found'
   | 'social_enqueue_duplicate'
+  | 'social_job_not_reschedulable'
+  | 'social_job_schedule_invalid'
   | 'social_screenshot_missing'
   | 'yt_dlp_update_recommended'
   | 'dependency_not_packaged'

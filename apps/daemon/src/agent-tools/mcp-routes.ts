@@ -59,6 +59,7 @@ export async function registerSocialMcpRoute(
       'social_close_browser',
       'social_enqueue_videos',
       'social_remove_job',
+      'social_reschedule_job',
       'social_retry_failed',
       'social_pause_queue',
       'social_resume_queue',

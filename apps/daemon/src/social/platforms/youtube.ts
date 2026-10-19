@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'patchright';
 import type { SocialExecutionContext, SocialExecutionResult } from '../worker.js';
+import type { SocialYouTubeSettings } from '../types.js';
 
 type YtSelectors = {
   upload_url: string;
@@ -17,6 +18,9 @@ type YtSelectors = {
   title_box: string;
   desc_box: string;
   not_for_kids_radio: string;
+  for_kids_radio: string;
+  tags_input: string;
+  visibility_trigger: string;
   next_btn: string;
   schedule_radio: string;
   date_trigger: string;
@@ -93,12 +97,25 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
     await fillEditable(descBox, page, context.job.description.slice(0, 4_900));
   }
 
-  // "Không nội dung nhạy cảm trẻ em"
-  const notKids = page.locator(sel.not_for_kids_radio).first();
-  if (await notKids.isVisible().catch(() => false)) {
-    await notKids.scrollIntoViewIfNeeded();
-    await notKids.click();
-    await page.waitForTimeout(1_000);
+  // Thẻ (tags) nằm ở trang "Chi tiết" — điền ngay sau mô tả (best-effort).
+  await fillYoutubeTags(page, sel, context.job.platformSettings.youtube);
+
+  // "Không nội dung nhạy cảm trẻ em" — hoặc "Dành cho trẻ em" nếu job chỉ định.
+  const madeForKids = context.job.platformSettings.youtube?.madeForKids === true;
+  if (madeForKids) {
+    const forKids = page.locator(sel.for_kids_radio).first();
+    if (await forKids.isVisible().catch(() => false)) {
+      await forKids.scrollIntoViewIfNeeded();
+      await forKids.click();
+      await page.waitForTimeout(1_000);
+    }
+  } else {
+    const notKids = page.locator(sel.not_for_kids_radio).first();
+    if (await notKids.isVisible().catch(() => false)) {
+      await notKids.scrollIntoViewIfNeeded();
+      await notKids.click();
+      await page.waitForTimeout(1_000);
+    }
   }
 
   // Next qua 3 bước (Chi tiết → Thành phần → Kiểm tra).
@@ -111,6 +128,9 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
       break;
     }
   }
+
+  // Quyền xem (Công khai/Không công khai/Riêng tư) ở bước cuối (best-effort).
+  await selectYoutubeVisibility(page, sel, context.job.platformSettings.youtube);
 
   // Hẹn giờ phát sóng.
   const scheduledAtLocal = toLocalParts(context.job.scheduledAt);
@@ -151,6 +171,58 @@ async function fillEditable(locator: import('patchright').Locator, page: Page, t
   await page.keyboard.press('Control+A');
   await page.keyboard.press('Backspace');
   await typeSlowly(page, text);
+}
+
+/**
+ * Điền tags YouTube (Studio giới hạn ~500 ký tự tổng — đã cắt khi validate).
+ * Best-effort: ô thẻ thường ẩn sau "Hiển thị thêm"; không thấy → bỏ qua.
+ */
+async function fillYoutubeTags(page: Page, sel: YtSelectors, settings?: SocialYouTubeSettings): Promise<void> {
+  const tags = settings?.tags ?? [];
+  if (tags.length === 0) return;
+  try {
+    const tagsInput = page.locator(sel.tags_input).first();
+    if (!(await tagsInput.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true).catch(() => false))) return;
+    await tagsInput.scrollIntoViewIfNeeded().catch(() => undefined);
+    await tagsInput.click();
+    for (const tag of tags.slice(0, 30)) {
+      await page.keyboard.type(tag, { delay: 20 });
+      await page.keyboard.press(',');
+      await page.waitForTimeout(150);
+    }
+  } catch {
+    // Không chặn luồng upload nếu form đổi.
+  }
+}
+
+const VISIBILITY_LABELS: Record<NonNullable<SocialYouTubeSettings['privacy']>, RegExp> = {
+  public: /công khai|public/i,
+  unlisted: /không công khai|unlisted/i,
+  private: /riêng tư|private/i
+};
+
+/** Chọn quyền xem trong dropdown trang cuối của Studio (best-effort). */
+async function selectYoutubeVisibility(
+  page: Page,
+  sel: YtSelectors,
+  settings?: SocialYouTubeSettings
+): Promise<void> {
+  const privacy = settings?.privacy;
+  if (privacy === undefined) return;
+  try {
+    const trigger = page.locator(sel.visibility_trigger).first();
+    if (!(await trigger.isVisible().catch(() => false))) return;
+    await trigger.click();
+    await page.waitForTimeout(1_000);
+    const option = page
+      .locator("[role='option'], tp-yt-paper-item, ytcp-visibility-radio-button")
+      .filter({ hasText: VISIBILITY_LABELS[privacy] })
+      .first();
+    await option.click({ timeout: 5_000 });
+    await page.waitForTimeout(800);
+  } catch {
+    await page.keyboard.press('Escape').catch(() => undefined);
+  }
 }
 
 async function typeSlowly(page: Page, text: string): Promise<void> {

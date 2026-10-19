@@ -51,8 +51,43 @@ export type SocialJobSummary = {
     tiktok: SocialPlatformStatuses;
     facebook: SocialPlatformStatuses;
   };
+  /** Cài đặt riêng từng nền tảng của job (tùy chọn, trả về từ overview). */
+  platformSettings?: SocialJobPlatformSettings;
   createdAt: string;
   updatedAt: string;
+};
+
+// ---------------------------------------------------------------------------
+// Cài đặt riêng từng nền tảng khi soạn bài đăng đa kênh
+// ---------------------------------------------------------------------------
+
+export type SocialYoutubeSettings = {
+  /** 'public' | 'unlisted' | 'private' */
+  privacy: string;
+  /** Mảng tags (daemon ghép và giới hạn tổng độ dài). */
+  tags?: string[];
+  madeForKids?: boolean;
+};
+
+export type SocialTiktokSettings = {
+  /** 'public' | 'friends' | 'private' */
+  privacy?: string;
+  allowDuet?: boolean;
+  allowStitch?: boolean;
+  allowComments?: boolean;
+  /** Đăng trực tiếp, bỏ màn hình soạn của TikTok. */
+  directPost?: boolean;
+};
+
+export type SocialFacebookSettings = {
+  /** 'post' | 'reel' | 'story' */
+  postType?: string;
+};
+
+export type SocialJobPlatformSettings = {
+  youtube?: SocialYoutubeSettings;
+  tiktok?: SocialTiktokSettings;
+  facebook?: SocialFacebookSettings;
 };
 
 export type SocialCounts = {
@@ -96,17 +131,36 @@ export type SocialClusterInput = {
 };
 
 export type SocialEnqueueItem = {
-  clusterId: string;
+  /** Nạp cho 1 cụm, hoặc dùng clusterIds để nạp cùng lúc nhiều cụm. */
+  clusterId?: string;
+  clusterIds?: string[];
   path: string;
   title?: string;
   description?: string;
   thumbnailPath?: string | null;
   scheduledAt?: string;
+  platformSettings?: SocialJobPlatformSettings;
 };
 
 export type SocialProxyCheckResult = {
   status: 'online' | 'dead' | 'no_proxy';
   detail: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// Media picker — video đã tải trong thư mục downloads của daemon
+// ---------------------------------------------------------------------------
+
+export type SocialDownloadItem = {
+  path: string;
+  title: string;
+  seriesName: string;
+  downloadedAt: string;
+  sizeBytes: number;
+};
+
+export type SocialDownloadsResult = {
+  items: SocialDownloadItem[];
 };
 
 // ---------------------------------------------------------------------------
@@ -204,6 +258,14 @@ export function createSocialService(client: RuntimeClient) {
     },
     enqueue(items: SocialEnqueueItem[]): Promise<SocialEnqueueResult> {
       return client.post('/social/jobs', { items });
+    },
+    /** Đổi giờ đăng một job chưa công khai (PATCH body { scheduledAt }). */
+    rescheduleJob(id: string, scheduledAt: string): Promise<SocialOverview> {
+      return client.patch(`/social/jobs/${encodeURIComponent(id)}`, { scheduledAt });
+    },
+    /** Danh sách video đã tải (media picker cho composer đa kênh). */
+    listDownloads(limit = 500): Promise<SocialDownloadsResult> {
+      return client.get(`/social/downloads?limit=${limit}`);
     },
     removeJob(id: string): Promise<SocialOverview> {
       return client.delete(`/social/jobs/${encodeURIComponent(id)}`);

@@ -21,6 +21,7 @@ export const SOCIAL_TOOL_NAMES = [
   'social_close_browser',
   'social_enqueue_videos',
   'social_remove_job',
+  'social_reschedule_job',
   'social_retry_failed',
   'social_pause_queue',
   'social_resume_queue',
@@ -73,6 +74,29 @@ const clusterIdSchema = z.object({
   clusterId: z.string().min(1).describe('id cụm từ social_overview')
 }).strict();
 
+const platformSettingsSchema = z.object({
+  youtube: z.object({
+    privacy: z.enum(['public', 'unlisted', 'private']).optional()
+      .describe('Quyền xem YouTube: public (công khai), unlisted (không công khai), private (riêng tư)'),
+    tags: z.array(z.string().min(1)).max(30).optional()
+      .describe('Thẻ (tags) YouTube — tổng độ dài tối đa ~500 ký tự, vượt sẽ bị cắt'),
+    madeForKids: z.boolean().optional()
+      .describe('Đánh dấu video "Dành cho trẻ em" (mặc định: không dành cho trẻ em)')
+  }).strict().optional(),
+  tiktok: z.object({
+    privacy: z.enum(['public', 'friends', 'private']).optional()
+      .describe('Ai có thể xem trên TikTok: public (mọi người), friends (bạn bè), private (riêng tư)'),
+    allowDuet: z.boolean().optional(),
+    allowStitch: z.boolean().optional(),
+    allowComments: z.boolean().optional(),
+    directPost: z.boolean().optional()
+  }).strict().optional(),
+  facebook: z.object({
+    postType: z.enum(['post', 'reel', 'story']).optional()
+      .describe('Loại bài Facebook (chế độ browser; story/reel tùy hỗ trợ)')
+  }).strict().optional()
+}).strict();
+
 const enqueueSchema = z.object({
   clusterId: z.string().min(1).describe('id cụm sẽ đăng'),
   videos: z.array(z.object({
@@ -81,13 +105,21 @@ const enqueueSchema = z.object({
     description: z.string().min(1).optional(),
     thumbnailPath: z.string().min(1).optional(),
     scheduledAt: z.string().min(10).optional()
-      .describe('ISO hẹn ngày giờ công khai; bỏ trống để tự xếp khung giờ trống tiếp theo của cụm')
+      .describe('ISO hẹn ngày giờ công khai; bỏ trống để tự xếp khung giờ trống tiếp theo của cụm'),
+    platformSettings: platformSettingsSchema.optional()
+      .describe('Cấu hình riêng từng nền tảng cho video này (privacy/tags/toggles)')
   })).min(1).max(60)
     .describe('Danh sách cần xếp hàng đợi — file video như vậy phải tồn tại trên đĩa')
 }).strict();
 
 const jobIdSchema = z.object({
   jobId: z.string().min(1).describe('id job trong hàng đợi (từ social_overview)')
+}).strict();
+
+const rescheduleSchema = z.object({
+  jobId: z.string().min(1).describe('id job trong hàng đợi (từ social_overview)'),
+  scheduledAt: z.string().min(10)
+    .describe('ISO mới cho ngày giờ công khai — chỉ áp dụng với job chưa đăng/chưa hẹn trên nền tảng')
 }).strict();
 
 export function createSocialToolDefinitions(input: {
@@ -216,7 +248,8 @@ export function createSocialToolDefinitions(input: {
               ...(video.title === undefined ? {} : { title: video.title }),
               ...(video.description === undefined ? {} : { description: video.description }),
               ...(video.thumbnailPath === undefined ? {} : { thumbnailPath: video.thumbnailPath }),
-              ...(video.scheduledAt === undefined ? {} : { scheduledAt: video.scheduledAt })
+              ...(video.scheduledAt === undefined ? {} : { scheduledAt: video.scheduledAt }),
+              ...(video.platformSettings === undefined ? {} : { platformSettings: video.platformSettings })
             }))
           } as Record<string, unknown>
         });
@@ -230,6 +263,21 @@ export function createSocialToolDefinitions(input: {
         return input.request({
           method: 'DELETE',
           path: `/internal/agent-tools/social/jobs/${encodeURIComponent(parsed.jobId)}`
+        });
+      }
+    },
+    social_reschedule_job: {
+      description: [
+        'Đổi giờ công khai của một video đã xếp hẹn (PATCH /social/jobs/:id).',
+        'Chỉ áp dụng cho job chưa đăng/chưa hẹn giờ trên nền tảng nào; xong hệ thống tự xếp lại lịch chạy.'
+      ].join(' '),
+      inputSchema: rescheduleSchema,
+      execute: async (value: unknown) => {
+        const parsed = rescheduleSchema.parse(value);
+        return input.request({
+          method: 'PATCH',
+          path: `/internal/agent-tools/social/jobs/${encodeURIComponent(parsed.jobId)}`,
+          body: { scheduledAt: parsed.scheduledAt }
         });
       }
     },

@@ -10,11 +10,10 @@ import type {
 import type { SocialService } from '../../services/social-service.js';
 
 /**
- * GĐ3 — Panel thống kê (view/sub) + bình luận AI tự động của module đa kênh.
- * Lấy dữ liệu polling nhẹ cùng chu kỳ overview của SocialWorkspace.
+ * GĐ3 — Dữ liệu + panel thống kê (view/sub) và bình luận AI tự động của
+ * module đa kênh. Workspace mới tách thành 2 tab riêng (Thống kê / Bình luận);
+ * cả hai dùng chung một hook dữ liệu nhẹ, refresh cùng nhịp polling overview.
  */
-
-type PanelTab = 'stats' | 'comments';
 
 function formatCount(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
@@ -28,15 +27,30 @@ function deltaLabel(point: { value: number; previous: number | null } | undefine
   return `${delta > 0 ? '+' : ''}${delta.toLocaleString()}`;
 }
 
-export function SocialInsightsPanel(props: {
-  service: SocialService;
-  clusters: SocialClusterSummary[];
-  t: Translate;
-  refreshKey: number;
-}) {
-  const { t } = props;
-  const service = props.service;
-  const [tab, setTab] = useState<PanelTab>('stats');
+function formatScheduleShort(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function messageOf(error: unknown): string {
+  if (error instanceof Error && error.message.trim() !== '') return error.message;
+  return String(error ?? 'unknown error');
+}
+
+type InsightsData = {
+  stats: SocialStatsOverview | null;
+  comments: SocialCommentSummary[];
+  busy: boolean;
+  scanning: boolean;
+  scanSummary: SocialCommentScanResult | null;
+  errorText: string;
+  reload(spinner: boolean): Promise<void>;
+  scan(): Promise<void>;
+  setErrorText(text: string): void;
+};
+
+function useSocialInsightsData(service: SocialService, refreshKey: number): InsightsData {
   const [stats, setStats] = useState<SocialStatsOverview | null>(null);
   const [comments, setComments] = useState<SocialCommentSummary[]>([]);
   const [busy, setBusy] = useState(false);
@@ -44,7 +58,7 @@ export function SocialInsightsPanel(props: {
   const [scanSummary, setScanSummary] = useState<SocialCommentScanResult | null>(null);
   const [errorText, setErrorText] = useState('');
 
-  const loadStats = useCallback(async (spinner: boolean) => {
+  const reload = useCallback(async (spinner: boolean) => {
     if (spinner) setBusy(true);
     try {
       const [statsData, commentsData] = await Promise.all([
@@ -55,58 +69,67 @@ export function SocialInsightsPanel(props: {
       setComments(commentsData);
       setErrorText('');
     } catch (cause) {
-      setErrorText(cause instanceof Error ? cause.message : String(cause));
+      setErrorText(messageOf(cause));
     } finally {
       if (spinner) setBusy(false);
     }
   }, [service]);
 
   useEffect(() => {
-    void loadStats(props.refreshKey !== 0);
+    void reload(refreshKey !== 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.refreshKey]);
+  }, [refreshKey]);
 
+  const scan = useCallback(async () => {
+    setScanning(true);
+    try {
+      const result = await service.scanComments();
+      setScanSummary(result);
+      await reload(false);
+    } catch (cause) {
+      setErrorText(messageOf(cause));
+    } finally {
+      setScanning(false);
+    }
+  }, [service, reload]);
+
+  return { stats, comments, busy, scanning, scanSummary, errorText, reload, scan, setErrorText };
+}
+
+export function SocialStatsPanel(props: {
+  service: SocialService;
+  t: Translate;
+  refreshKey: number;
+}) {
+  const { t } = props;
+  const data = useSocialInsightsData(props.service, props.refreshKey);
+  const stats = data.stats;
   return (
-    <section className="social-insights" aria-label={t('dashboard.social.insightsTitle')}>
-      <div className="social-queue-head">
-        <h2>{t('dashboard.social.insightsTitle')}</h2>
-        <div className="social-insights-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'stats'}
-            className={`social-btn social-btn-sm ${tab === 'stats' ? 'social-btn-primary' : ''}`}
-            onClick={() => setTab('stats')}
-          >
-            <BarChart3 size={12} aria-hidden="true" /> {t('dashboard.social.insightsStats')}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'comments'}
-            className={`social-btn social-btn-sm ${tab === 'comments' ? 'social-btn-primary' : ''}`}
-            onClick={() => setTab('comments')}
-          >
-            <MessageSquareReply size={12} aria-hidden="true" /> {t('dashboard.social.insightsComments')}
+    <div className="social-insights" aria-label={t('dashboard.social.insightsTitle')}>
+      <div className="social-panel-head">
+        <h2><BarChart3 size={15} aria-hidden="true" /> {t('dashboard.social.insightsStats')}</h2>
+        <div className="social-panel-head-actions">
+          <button type="button" className="social-btn social-btn-sm" onClick={() => void data.reload(true)} disabled={data.busy}>
+            <RefreshCw size={12} className={data.busy ? 'social-spin' : ''} aria-hidden="true" /> {t('dashboard.drama.refresh')}
           </button>
         </div>
       </div>
 
-      {errorText !== '' ? (
+      {data.errorText !== '' ? (
         <div className="social-error" role="alert">
           <TriangleAlert size={14} aria-hidden="true" />
-          <span>{errorText}</span>
-          <button type="button" className="social-btn social-btn-sm" onClick={() => void loadStats(true)}>
+          <span>{data.errorText}</span>
+          <button type="button" className="social-btn social-btn-sm" onClick={() => void data.reload(true)}>
             {t('dashboard.drama.retry')}
           </button>
         </div>
       ) : null}
 
-      {busy && stats === null ? (
+      {data.busy && stats === null ? (
         <p className="social-loading"><LoaderCircle size={16} className="social-spin" /> {t('dashboard.drama.loading')}</p>
       ) : null}
 
-      {tab === 'stats' && stats !== null ? (
+      {stats !== null ? (
         <div className="social-stats">
           {stats.lastRefreshAt !== null ? (
             <p className="social-stats-meta">
@@ -179,94 +202,95 @@ export function SocialInsightsPanel(props: {
           ) : null}
         </div>
       ) : null}
-
-      {tab === 'comments' ? (
-        <div className="social-comments">
-          <div className="social-comments-actions">
-            <button
-              type="button"
-              className="social-btn social-btn-sm social-btn-primary"
-              disabled={scanning}
-              onClick={async () => {
-                setScanning(true);
-                try {
-                  const result = await service.scanComments();
-                  setScanSummary(result);
-                  await loadStats(false);
-                } catch (cause) {
-                  setErrorText(cause instanceof Error ? cause.message : String(cause));
-                } finally {
-                  setScanning(false);
-                }
-              }}
-            >
-              {scanning ? <LoaderCircle size={12} className="social-spin" aria-hidden="true" /> : <Send size={12} aria-hidden="true" />}
-              {t('dashboard.social.commentsScan')}
-            </button>
-            <span className="social-comments-hint">{t('dashboard.social.commentsHint')}</span>
-          </div>
-          {scanSummary !== null ? (
-            <p className="social-stats-meta">
-              {t('dashboard.social.commentsScanSummary', {
-                videos: scanSummary.videosScanned,
-                fresh: scanSummary.newComments,
-                sent: scanSummary.repliesSent,
-                attempted: scanSummary.repliesAttempted
-              })}
-              {scanSummary.errors.length > 0 ? ` — ${scanSummary.errors[0]}` : ''}
-            </p>
-          ) : null}
-          <div className="social-autoreply-clusters">
-            {props.clusters.map(cluster => (
-              <button
-                key={cluster.id}
-                type="button"
-                className={`social-btn social-btn-sm ${cluster.autoReplyEnabled ? 'social-btn-primary' : ''}`}
-                onClick={() => void props.service.updateCluster(cluster.id, { autoReplyEnabled: !cluster.autoReplyEnabled }).then(
-                  () => { void loadStats(false); },
-                  cause => { setErrorText(cause instanceof Error ? cause.message : String(cause)); }
-                )}
-              >
-                {cluster.autoReplyEnabled ? '✅' : '⏸'} {t('dashboard.social.autoReplyToggle')}: {cluster.seriesName !== '' ? cluster.seriesName : cluster.name}
-              </button>
-            ))}
-          </div>
-          {comments.length === 0 ? (
-            <p className="social-empty">{t('dashboard.social.commentsEmpty')}</p>
-          ) : (
-            <ul className="social-comment-list">
-              {comments.map(comment => (
-                <li key={comment.id} className={`social-comment-row social-comment-${comment.replyStatus}`}>
-                  <div className="social-comment-main">
-                    <p className="social-comment-text" title={comment.text}>“{comment.text.length > 120 ? `${comment.text.slice(0, 120)}…` : comment.text}”</p>
-                    <p className="social-comment-meta">
-                      {comment.author} · {comment.platform} · {comment.clusterName}
-                      {comment.commentCreatedAt !== null ? ` · ${formatScheduleShort(comment.commentCreatedAt)}` : ''}
-                    </p>
-                    {comment.replyText !== null ? <p className="social-comment-reply">↩ “{comment.replyText.length > 120 ? `${comment.replyText.slice(0, 120)}…` : comment.replyText}”</p> : null}
-                    {comment.skippedReason !== null ? <p className="social-comment-skipped">{comment.skippedReason}</p> : null}
-                  </div>
-                  <span className="social-chip social-chip-pending">{t(`dashboard.social.reply_${comment.replyStatus}` as never)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : null}
-    </section>
+    </div>
   );
 }
 
-function formatScheduleShort(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-}
-
-export function InsightsRefreshTrigger(props: { onRefresh(): void }) {
+export function SocialCommentsPanel(props: {
+  service: SocialService;
+  clusters: SocialClusterSummary[];
+  t: Translate;
+  refreshKey: number;
+}) {
+  const { t } = props;
+  const data = useSocialInsightsData(props.service, props.refreshKey);
+  const comments = data.comments;
   return (
-    <button type="button" className="social-btn social-btn-sm" onClick={props.onRefresh}>
-      <RefreshCw size={12} aria-hidden="true" />
-    </button>
+    <div className="social-insights" aria-label={t('dashboard.social.insightsTitle')}>
+      <div className="social-panel-head">
+        <h2><MessageSquareReply size={15} aria-hidden="true" /> {t('dashboard.social.insightsComments')}</h2>
+      </div>
+
+      {data.errorText !== '' ? (
+        <div className="social-error" role="alert">
+          <TriangleAlert size={14} aria-hidden="true" />
+          <span>{data.errorText}</span>
+          <button type="button" className="social-btn social-btn-sm" onClick={() => void data.reload(true)}>
+            {t('dashboard.drama.retry')}
+          </button>
+        </div>
+      ) : null}
+
+      <div className="social-comments">
+        <div className="social-comments-actions">
+          <button
+            type="button"
+            className="social-btn social-btn-sm social-btn-primary"
+            disabled={data.scanning}
+            onClick={() => void data.scan()}
+          >
+            {data.scanning ? <LoaderCircle size={12} className="social-spin" aria-hidden="true" /> : <Send size={12} aria-hidden="true" />}
+            {t('dashboard.social.commentsScan')}
+          </button>
+          <span className="social-comments-hint">{t('dashboard.social.commentsHint')}</span>
+        </div>
+        {data.scanSummary !== null ? (
+          <p className="social-stats-meta">
+            {t('dashboard.social.commentsScanSummary', {
+              videos: data.scanSummary.videosScanned,
+              fresh: data.scanSummary.newComments,
+              sent: data.scanSummary.repliesSent,
+              attempted: data.scanSummary.repliesAttempted
+            })}
+            {data.scanSummary.errors.length > 0 ? ` — ${data.scanSummary.errors[0]}` : ''}
+          </p>
+        ) : null}
+        <div className="social-autoreply-clusters">
+          {props.clusters.map(cluster => (
+            <button
+              key={cluster.id}
+              type="button"
+              className={`social-btn social-btn-sm ${cluster.autoReplyEnabled ? 'social-btn-primary' : ''}`}
+              onClick={() => void props.service.updateCluster(cluster.id, { autoReplyEnabled: !cluster.autoReplyEnabled }).then(
+                () => { void data.reload(false); },
+                cause => { data.setErrorText(messageOf(cause)); }
+              )}
+            >
+              {cluster.autoReplyEnabled ? '✅' : '⏸'} {t('dashboard.social.autoReplyToggle')}: {cluster.seriesName !== '' ? cluster.seriesName : cluster.name}
+            </button>
+          ))}
+        </div>
+        {comments.length === 0 ? (
+          <p className="social-empty">{t('dashboard.social.commentsEmpty')}</p>
+        ) : (
+          <ul className="social-comment-list">
+            {comments.map(comment => (
+              <li key={comment.id} className={`social-comment-row social-comment-${comment.replyStatus}`}>
+                <div className="social-comment-main">
+                  <p className="social-comment-text" title={comment.text}>“{comment.text.length > 120 ? `${comment.text.slice(0, 120)}…` : comment.text}”</p>
+                  <p className="social-comment-meta">
+                    {comment.author} · {comment.platform} · {comment.clusterName}
+                    {comment.commentCreatedAt !== null ? ` · ${formatScheduleShort(comment.commentCreatedAt)}` : ''}
+                  </p>
+                  {comment.replyText !== null ? <p className="social-comment-reply">↩ “{comment.replyText.length > 120 ? `${comment.replyText.slice(0, 120)}…` : comment.replyText}”</p> : null}
+                  {comment.skippedReason !== null ? <p className="social-comment-skipped">{comment.skippedReason}</p> : null}
+                </div>
+                <span className="social-chip social-chip-pending">{t(`dashboard.social.reply_${comment.replyStatus}` as never)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }

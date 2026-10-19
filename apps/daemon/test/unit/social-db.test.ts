@@ -158,6 +158,83 @@ describe('social db — jobs', () => {
   });
 });
 
+describe('social db — platform settings từng job', () => {
+  it('insert kèm platformSettings → mapJob trả lại đúng object', async () => {
+    const db = await openTempDb();
+    makeCluster(db);
+    insertJobRow(db, {
+      id: 'job_settings', clusterId: 'cluster_a', clusterName: 'Cụm A',
+      videoPath: 'D:/v.mp4', thumbnailPath: null, title: 'Tập 1',
+      description: '', scheduledAt: '2026-03-15T10:00:00.000Z',
+      platformSettings: {
+        youtube: { privacy: 'unlisted', tags: ['phim', 'hay'], madeForKids: false },
+        tiktok: { privacy: 'friends', allowComments: true },
+        facebook: { postType: 'reel' }
+      },
+      nowISO: '2026-03-15T00:00:00.000Z'
+    });
+    const job = mapJob(getJobRow(db, 'job_settings')!);
+    expect(job.platformSettings).toEqual({
+      youtube: { privacy: 'unlisted', tags: ['phim', 'hay'], madeForKids: false },
+      tiktok: { privacy: 'friends', allowComments: true },
+      facebook: { postType: 'reel' }
+    });
+    // Job khác không set settings → mặc định {}.
+    insertJobRow(db, {
+      id: 'job_plain', clusterId: 'cluster_a', clusterName: 'Cụm A',
+      videoPath: 'D:/v2.mp4', thumbnailPath: null, title: 'Tập 2',
+      description: '', scheduledAt: '2026-03-16T10:00:00.000Z',
+      nowISO: '2026-03-15T00:00:00.000Z'
+    });
+    expect(mapJob(getJobRow(db, 'job_plain')!).platformSettings).toEqual({});
+  });
+
+  it('platform_settings trong DB hỏng/khô JSON → mapJob về {} (không ném)', async () => {
+    const db = await openTempDb();
+    makeCluster(db);
+    insertJobRow(db, {
+      id: 'job_bad', clusterId: 'cluster_a', clusterName: 'Cụm A',
+      videoPath: 'D:/v.mp4', thumbnailPath: null, title: 'Tập 1',
+      description: '', scheduledAt: '2026-03-15T10:00:00.000Z',
+      nowISO: '2026-03-15T00:00:00.000Z'
+    });
+    db.exec("UPDATE social_jobs SET platform_settings = '{không phải json' WHERE id = 'job_bad'");
+    expect(mapJob(getJobRow(db, 'job_bad')!).platformSettings).toEqual({});
+    db.exec("UPDATE social_jobs SET platform_settings = '{\"youtube\":{\"privacy\":\"RÁC\"},\"khac\":1}' WHERE id = 'job_bad'");
+    expect(mapJob(getJobRow(db, 'job_bad')!).platformSettings).toEqual({});
+  });
+
+  it('migration cộng thêm cột trên DB cũ (thiếu platform_settings) khi mở lại', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'social-db-mig-'));
+    const path = join(dir, 'social.sqlite');
+    // Lần mở 1: tạo schema đủ rồi GIẢ LẬP DB cũ bằng cách drop cột mới.
+    const first = openSocialDatabase(path);
+    try {
+      insertJobRow(first, {
+        id: 'job_old', clusterId: '', clusterName: '',
+        videoPath: 'D:/old.mp4', thumbnailPath: null, title: 'Cũ',
+        description: '', scheduledAt: '2026-03-15T10:00:00.000Z',
+        nowISO: '2026-03-15T00:00:00.000Z'
+      });
+      first.exec('ALTER TABLE social_jobs DROP COLUMN platform_settings');
+    } finally {
+      closeSocialDatabase(first);
+    }
+    // Lần mở 2: migrateColumns phải cộng lại cột, giữ nguyên dữ liệu cũ.
+    const reopened = openSocialDatabase(path);
+    try {
+      const columns = reopened.pragma('table_info(social_jobs)') as Array<{ name: string }>;
+      expect(columns.some(info => info.name === 'platform_settings')).toBe(true);
+      const job = mapJob(getJobRow(reopened, 'job_old')!);
+      expect(job.title).toBe('Cũ');
+      expect(job.platformSettings).toEqual({});
+    } finally {
+      closeSocialDatabase(reopened);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('social db — kv', () => {
   it('lưu/đọc/không có key', async () => {
     const db = await openTempDb();

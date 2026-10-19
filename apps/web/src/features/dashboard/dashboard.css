@@ -1108,6 +1108,19 @@
   margin-top: 16px;
 }
 
+.video-translation-hardsub-settings {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.video-translation-hardsub-hint {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .video-translation-subtitle-style-title {
   margin: 0;
   font-size: 14px;

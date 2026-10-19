@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { apiError } from './errors.js';
 import { SocialError, type SocialClusterPatch, type SocialService } from '../social/service.js';
-import type { SocialEnqueueRequest } from '../social/types.js';
+import { sanitizePlatformSettings, type SocialEnqueueRequest } from '../social/types.js';
 
 /**
  * REST cho Mạng Lưới Đăng Đa Kênh:
@@ -15,9 +15,11 @@ import type { SocialEnqueueRequest } from '../social/types.js';
  * - POST /social/clusters/:id/check-proxy       → đo proxy
  * - POST /social/clusters/:id/open-browser      → mở trình duyệt Persistent (đăng nhập tay)
  * - POST /social/clusters/:id/close-browser
- * - POST /social/jobs                           → nạp video (web + trợ lý AI)
+ * - POST /social/jobs                           → nạp video (1 video × N cụm qua clusterIds)
+ * - PATCH /social/jobs/:id                      → đổi giờ hẹn (chưa đăng xong)
  * - DELETE /social/jobs/:id
  * - POST /social/jobs/:id/retry-failed          → chạy lại nền tảng lỗi
+ * - GET  /social/downloads?limit=               → video đã tải về (media picker)
  * - POST /social/queue/pause | /social/queue/resume
  * - GET  /social/jobs/:id/error-screenshot?platform=yt|tk|fb → ảnh lỗi
  */
@@ -92,7 +94,7 @@ export async function registerSocialRoutes(
       if (items === undefined) {
         return reply.code(400).send(apiError(
           'VALIDATION_FAILED',
-          'body phải là object {clusterId, path, ...} hoặc {items: [...]} không rỗng'
+          'body phải là object {clusterId | clusterIds, path, ...} hoặc {items: [...]} không rỗng'
         ));
       }
       const result = social.enqueue(items);
@@ -104,6 +106,31 @@ export async function registerSocialRoutes(
         });
       }
       return result;
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.patch<{ Params: { id: string }; Body: unknown }>('/social/jobs/:id', async (request, reply) => {
+    try {
+      const body = typeof request.body === 'object' && request.body !== null
+        ? request.body as Record<string, unknown>
+        : {};
+      const scheduledAt = body['scheduledAt'];
+      if (typeof scheduledAt !== 'string' || scheduledAt.trim() === '') {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.scheduledAt (ISO) là bắt buộc'));
+      }
+      return social.rescheduleJob(request.params.id, scheduledAt);
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.get<{ Querystring: { limit?: string } }>('/social/downloads', async (request, reply) => {
+    const limitRaw = request.query.limit;
+    const limit = typeof limitRaw === 'string' && /^\d+$/.test(limitRaw) ? Number(limitRaw) : undefined;
+    try {
+      return await social.listDownloads(limit);
     } catch (error) {
       return socialFailure(error, reply);
     }
@@ -193,10 +220,15 @@ function socialFailure(error: unknown, reply: FastifyReply): unknown {
       'social_cluster_not_found',
       'social_job_not_found',
       'social_enqueue_duplicate',
+      'social_job_not_reschedulable',
+      'social_job_schedule_invalid',
       'social_screenshot_missing'
     ]);
+    const status = error.code === 'social_cluster_not_found' || error.code === 'social_job_not_found'
+      ? 404
+      : error.code === 'social_job_not_reschedulable' ? 409 : 400;
     return reply
-      .code(error.code === 'social_cluster_not_found' || error.code === 'social_job_not_found' ? 404 : 400)
+      .code(status)
       .send(apiError(knownCodes.has(error.code as RuntimeErrorCode) ? error.code as RuntimeErrorCode : 'social_unavailable', error.message));
   }
   throw error;
@@ -205,11 +237,13 @@ function socialFailure(error: unknown, reply: FastifyReply): unknown {
 function parseEnqueueBody(body: unknown): SocialEnqueueRequest[] | undefined {
   type EnqueueCandidate = {
     clusterId?: unknown;
+    clusterIds?: unknown;
     path?: unknown;
     title?: unknown;
     description?: unknown;
     scheduledAt?: unknown;
     thumbnailPath?: unknown;
+    platformSettings?: unknown;
   };
   const itemsRaw = typeof body === 'object' && body !== null && Array.isArray((body as { items?: unknown }).items)
     ? (body as { items: unknown[] }).items
@@ -222,16 +256,28 @@ function parseEnqueueBody(body: unknown): SocialEnqueueRequest[] | undefined {
   for (const raw of itemsRaw) {
     if (typeof raw !== 'object' || raw === null) return undefined;
     const candidate = raw as EnqueueCandidate;
-    if (typeof candidate.clusterId !== 'string' || candidate.clusterId.trim() === '') return undefined;
+    // 1 video → NHIỀU cụm: chấp nhận clusterId (1) hoặc clusterIds (danh sách).
+    const clusterIds = typeof candidate.clusterId === 'string' && candidate.clusterId.trim() !== ''
+      ? [candidate.clusterId]
+      : Array.isArray(candidate.clusterIds)
+        ? candidate.clusterIds.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+        : [];
+    if (clusterIds.length === 0) return undefined;
     if (typeof candidate.path !== 'string' || candidate.path.trim() === '') return undefined;
-    items.push({
-      clusterId: candidate.clusterId,
-      path: candidate.path,
-      ...(typeof candidate.title === 'string' && candidate.title.trim() !== '' ? { title: candidate.title.trim() } : {}),
-      ...(typeof candidate.description === 'string' && candidate.description.trim() !== '' ? { description: candidate.description.trim() } : {}),
-      ...(typeof candidate.scheduledAt === 'string' && candidate.scheduledAt.trim() !== '' ? { scheduledAt: candidate.scheduledAt.trim() } : {}),
-      ...(candidate.thumbnailPath === null ? { thumbnailPath: null } : {})
-    });
+    const platformSettings = candidate.platformSettings === undefined
+      ? {}
+      : sanitizePlatformSettings(candidate.platformSettings);
+    for (const clusterId of clusterIds) {
+      items.push({
+        clusterId,
+        path: candidate.path,
+        ...(typeof candidate.title === 'string' && candidate.title.trim() !== '' ? { title: candidate.title.trim() } : {}),
+        ...(typeof candidate.description === 'string' && candidate.description.trim() !== '' ? { description: candidate.description.trim() } : {}),
+        ...(typeof candidate.scheduledAt === 'string' && candidate.scheduledAt.trim() !== '' ? { scheduledAt: candidate.scheduledAt.trim() } : {}),
+        ...(candidate.thumbnailPath === null ? { thumbnailPath: null } : {}),
+        platformSettings
+      });
+    }
   }
   return items;
 }

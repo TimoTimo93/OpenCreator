@@ -390,6 +390,51 @@ func TestBilingualTranslationOnBottomKeepsSemanticStylesAndShadow(t *testing.T) 
 	}
 }
 
+func TestSrtToAssAppliesDirectionalShadowOverrideTags(t *testing.T) {
+	dir := t.TempDir()
+	in, out := filepath.Join(dir, "subtitle.srt"), filepath.Join(dir, "subtitle.ass")
+	if err := os.WriteFile(in, []byte("1\n00:00:00,000 --> 00:00:01,000\nCreator subtitle test\n\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	render := func(style *subtitlestyle.StyleSet) string {
+		t.Helper()
+		if err := srtToAss(in, out, true, &types.SubtitleTaskStepParam{SubtitleStyle: style}); err != nil {
+			t.Fatalf("srtToAss() error = %v", err)
+		}
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+
+	// Directional offsets travel Node -> Go through the controlled
+	// override_tags field (\xshad/\yshad/\blur); the burn must carry them
+	// into every Dialogue so libass shifts the shadow per axis.
+	offset := subtitlestyle.DefaultStyleSet()
+	offset.Horizontal.Major.OverrideTags = `\xshad6\yshad-6`
+	if ass := render(offset); !strings.Contains(ass, `{\an2}{\xshad6\yshad-6}`) {
+		t.Fatalf("directional shadow override tag missing from dialogue:\n%s", ass)
+	}
+
+	if ass := render(subtitlestyle.DefaultStyleSet()); strings.Contains(ass, `\xshad`) {
+		t.Fatalf("default style must not inject shadow override tags:\n%s", ass)
+	}
+
+	// Out-of-range offsets are rejected up front instead of rendering
+	// silently wrong pixels (safe fallback = explicit validation error).
+	outOfRange := subtitlestyle.DefaultStyleSet()
+	outOfRange.Horizontal.Major.OverrideTags = `\xshad30\yshad-30`
+	err := srtToAss(in, out, true, &types.SubtitleTaskStepParam{SubtitleStyle: outOfRange})
+	if err == nil {
+		t.Fatal("srtToAss() error = nil, want out-of-range shadow offset rejection")
+	}
+	if !strings.Contains(err.Error(), "xshad must be between -20 and 20") {
+		t.Fatalf("srtToAss() error = %q, want xshad range context", err.Error())
+	}
+}
+
 func TestSrtToAssRejectsInvalidSubtitleStyle(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "subtitle.srt")

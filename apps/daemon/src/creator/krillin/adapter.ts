@@ -16,6 +16,7 @@ import type {
 import { CreatorExecutorError } from '../executor.js';
 import { publicFactsFromFailure } from '../public-error-facts.js';
 import { creatorSubtitleStyleSchema } from '../presets/module-schemas.js';
+import { parseHardsubBandPercent, parseHardsubHandling } from '../translation-pipeline/hardsub-mask.js';
 import { validateMediaFile } from '../validators/media.js';
 import { formatSrtTimestamp, validateSrtFile } from '../validators/srt.js';
 import {
@@ -297,6 +298,8 @@ export function buildKrillinStageOptions(input: CreatorExecutorInput): Record<st
     audioOnly: input.job.templateId === 'video-translation' && state.composeVideo !== true,
     bilingual: input.stageRun.stageId === 'subtitles' || state.bilingual === true,
     bilingualTop: state.subtitlePosition !== 'bottom',
+    hardsubHandling: parseHardsubHandling(state.hardsubHandling),
+    hardsubBandPercent: parseHardsubBandPercent(state.hardsubBandPercent),
     ttsProvider: typeof state.ttsProvider === 'string' ? state.ttsProvider : undefined,
     ttsModel: typeof state.ttsModel === 'string' ? state.ttsModel : undefined,
     voiceCode: typeof state.voiceCode === 'string' ? state.voiceCode : undefined,

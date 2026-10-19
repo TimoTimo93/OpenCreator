@@ -60,7 +60,7 @@ async function setup(options: { scopes: string[] } = { scopes: ['social:read', '
       return response.json() as unknown;
     }
   };
-  return { server, token, service, definitions: createSocialToolDefinitions({ request: injectClient.request }) };
+  return { server, token, service, capabilities, definitions: createSocialToolDefinitions({ request: injectClient.request }) };
 }
 
 function request(server: FastifyInstance, token: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: unknown) {
@@ -117,6 +117,44 @@ describe('social agent tools — internal routes', () => {
     const missing = await request(fixture.server!, fixture.token, 'POST', '/internal/agent-tools/social/clusters/zzz/check-proxy');
     expect(missing.statusCode).toBe(404);
     expect(missing.json().error.code).toBe('social_cluster_not_found');
+  });
+
+  it('social_reschedule_job: đổi giờ qua PATCH nội bộ; scope chỉ đọc bị chặn', async () => {
+    const fixture = await setup();
+    await fixture.definitions.social_create_cluster.execute({ name: 'Cụm Đổi Giờ' });
+    const overview = (await request(fixture.server!, fixture.token, 'GET', '/internal/agent-tools/social/overview')).json();
+    const clusterId = overview.clusters[0].id;
+    await fixture.definitions.social_enqueue_videos.execute({
+      clusterId,
+      videos: [{ path: 'D:/agent/tap-9.mp4', title: 'Tập 9', platformSettings: { youtube: { privacy: 'unlisted', tags: ['phim'] } } }]
+    });
+    const withSettings = (await request(fixture.server!, fixture.token, 'GET', '/internal/agent-tools/social/overview')).json();
+    expect(withSettings.jobs[0].platformSettings).toEqual({ youtube: { privacy: 'unlisted', tags: ['phim'] } });
+
+    const newTime = new Date(Date.now() + 12 * 60 * 60_000).toISOString();
+    const rescheduled = await fixture.definitions.social_reschedule_job.execute({
+      jobId: withSettings.jobs[0].id,
+      scheduledAt: newTime
+    });
+    const job = (rescheduled as { jobs: Array<{ id: string; scheduledAt: string }> }).jobs
+      .find(candidate => candidate.id === withSettings.jobs[0].id)!;
+    expect(job.scheduledAt).toBe(newTime);
+
+    // Job lạ → 404; thiếu scheduledAt → 400.
+    const ghost = await request(fixture.server!, fixture.token, 'PATCH', '/internal/agent-tools/social/jobs/job_ghost', { scheduledAt: newTime });
+    expect(ghost.statusCode).toBe(404);
+    const badBody = await request(fixture.server!, fixture.token, 'PATCH', `/internal/agent-tools/social/jobs/${withSettings.jobs[0].id}`, {});
+    expect(badBody.statusCode).toBe(400);
+
+    // Scope chỉ đọc → PATCH bị chặn 403, GET downloads vẫn đọc được.
+    const readOnlyToken = fixture.capabilities.issue({
+      runId: 'run_readonly', threadId: 'thread_ro', createdBy: 'api', scopes: ['social:read']
+    }).token;
+    const blocked = await request(fixture.server!, readOnlyToken, 'PATCH', `/internal/agent-tools/social/jobs/${withSettings.jobs[0].id}`, { scheduledAt: newTime });
+    expect(blocked.statusCode).toBe(403);
+    const downloads = await request(fixture.server!, readOnlyToken, 'GET', '/internal/agent-tools/social/downloads');
+    expect(downloads.statusCode).toBe(200);
+    expect(downloads.json()).toEqual({ items: [] });
   });
 
   it('không có social service (chưa khởi động) → route không đăng ký → 404', async () => {
@@ -220,5 +258,6 @@ describe('social MCP route', () => {
     const names = listed.body;
     expect(names).toContain('social_overview');
     expect(names).toContain('social_enqueue_videos');
+    expect(names).toContain('social_reschedule_job');
   });
 });

@@ -30,6 +30,15 @@ import {
   resolveInside,
   type KrillinRuntimeManifest
 } from './manifest.js';
+import {
+  DEFAULT_HARDSUB_BAND,
+  buildHardsubPreprocessArgs,
+  detectHardsubBand,
+  parseHardsubBandPercent,
+  parseHardsubHandling,
+  type HardsubBand
+} from '../translation-pipeline/hardsub-mask.js';
+import { probeStreamSpec } from '../translation-pipeline/merge.js';
 import type { YtDlpRuntime } from '../yt-dlp/runtime.js';
 
 export type MaterializedKrillinArtifact = {
@@ -170,9 +179,13 @@ export async function runKrillinCli(input: RunKrillinCliInput): Promise<KrillinR
 
   const executable = resolveInside(input.resourceRoot, cli.path);
   const supportsRenderLineMode = cliSupportsRenderLineMode(executable);
+  // Xử lý phụ đề in sẵn (hardsub) trước khi burn phụ đề mới: tạo
+  // `source_hardsub_processed.mp4` bên cạnh workdir rồi dùng nó làm nguồn burn
+  // (không đè file gốc). Chỉ áp dụng cho stage render (nơi burn phụ đề).
+  const artifactsForCli = await preprocessHardsubForRenderStage(input);
   const args = buildKrillinCliCommandArguments(
     input.stage,
-    input.artifacts,
+    artifactsForCli,
     input.options,
     stylePath,
     input.source,
@@ -204,7 +217,7 @@ export async function runKrillinCli(input: RunKrillinCliInput): Promise<KrillinR
         manifest: input.manifest,
         stageId: input.stage.stageRun.stageId,
         workdir: input.stage.workdir,
-        artifacts: input.artifacts,
+        artifacts: artifactsForCli,
         signal: input.stage.signal,
         error,
         reportProgress: progress => input.stage.reportProgress(progress)
@@ -236,6 +249,126 @@ export async function runKrillinCli(input: RunKrillinCliInput): Promise<KrillinR
   } finally {
     await removeLauncherRootBestEffort(launcherRoot);
   }
+}
+
+/** Tên file pre-process hardsub trong workdir stage (không đè file nguồn gốc). */
+const HARDSUB_PROCESSED_VIDEO = 'source_hardsub_processed.mp4';
+
+/**
+ * Bước pre-process "sub mới đè sub cũ": với stage render (nơi burn phụ đề mới)
+ * và `hardsubHandling ≠ none`, chạy ffmpeg xử lý vùng hardsub của video nguồn
+ * (blur/cover/crop theo dải % chiều cao tính từ mép đáy) tạo
+ * `source_hardsub_processed.mp4`, rồi hoán video đó vào artifacts để CLI burn
+ * phụ đề mới đè lên. File nguồn gốc không bị đụng tới.
+ *
+ * Mọi thất bại không chặn stage: không dò được dải → dùng dải mặc định;
+ * không đọc được kích thước video → bỏ qua xử lý và burn như cũ.
+ */
+async function preprocessHardsubForRenderStage(
+  input: RunKrillinCliInput
+): Promise<MaterializedKrillinArtifact[]> {
+  const stageId = krillinCliStageId(input.stage.stageRun.stageId);
+  if (stageId !== 'render-horizontal' && stageId !== 'render-vertical') return input.artifacts;
+  const mode = parseHardsubHandling(input.options.hardsubHandling);
+  if (mode === 'none') return input.artifacts;
+  const ffmpeg = input.manifest.resources.find(resource => (
+    resource.kind === 'executable'
+    && /(?:^|\/)ffmpeg(?:\.exe)?$/i.test(resource.path)
+  ));
+  if (ffmpeg === undefined) return input.artifacts;
+  // Nguồn burn trùng với lựa chọn của buildKrillinCliCommandArguments:
+  // ưu tiên video lồng tiếng khi có, nếu không dùng video nguồn.
+  const dubbed = booleanOption(input.options, 'dubbed', false);
+  const dubbedVideo = artifactPath(input.artifacts, 'dubbed_video');
+  const sourceVideo = artifactPath(input.artifacts, 'source_video');
+  const burnSource = dubbed && dubbedVideo !== undefined ? dubbedVideo : sourceVideo;
+  if (burnSource === undefined) return input.artifacts;
+  const ffmpegPath = resolveInside(input.resourceRoot, ffmpeg.path);
+  const reportHardsub = (progress: Record<string, CreatorJson>) => input.stage.reportProgress({
+    krillinMode: 'cli',
+    providerStatus: 'running',
+    phase: 'hardsub_preprocess',
+    ...progress
+  });
+
+  // Dải hardsub: người dùng chỉnh đỉnh dải (hardsubBandPercent) thì dùng luôn;
+  // để trống (null — mặc định) thì tự dò từ khung hình mẫu, lỗi thì dùng mặc định.
+  const manualTopPercent = parseHardsubBandPercent(input.options.hardsubBandPercent);
+  let band: HardsubBand;
+  let detected = false;
+  if (manualTopPercent === null) {
+    reportHardsub({ percent: 2, hardsubMode: mode, message: 'Đang dò vùng phụ đề in sẵn (hardsub) trong video nguồn' });
+    const detection = await detectHardsubBand({
+      ffmpegPath,
+      videoPath: burnSource,
+      signal: input.stage.signal
+    });
+    band = detection.band;
+    detected = detection.detected;
+  } else {
+    band = { bottomPercent: DEFAULT_HARDSUB_BAND.bottomPercent, topPercent: manualTopPercent };
+  }
+
+  // Chuẩn encode lấy từ phân tích kích thước bằng ffprobe (cùng nguồn với các
+  // bước ffmpeg khác: binary khai báo trong runtime manifest).
+  let width = 0;
+  let height = 0;
+  try {
+    const ffprobe = input.manifest.resources.find(resource => (
+      resource.kind === 'executable'
+      && /(?:^|\/)ffprobe(?:\.exe)?$/i.test(resource.path)
+    ));
+    if (ffprobe === undefined) throw new Error('ffprobe không có trong runtime manifest');
+    const spec = await probeStreamSpec(resolveInside(input.resourceRoot, ffprobe.path), burnSource);
+    if (spec.video === null || spec.video.width < 2 || spec.video.height < 2) {
+      throw new Error('Video nguồn không đọc được kích thước khung hình');
+    }
+    width = spec.video.width;
+    height = spec.video.height;
+  } catch (error) {
+    // Không đọc được kích thước → bỏ qua xử lý hardsub, burn như cũ (không chết stage).
+    reportHardsub({
+      percent: 2,
+      hardsubMode: mode,
+      hardsubSkipped: true,
+      message: `Bỏ qua xử lý hardsub: ${error instanceof Error ? error.message : String(error)}`
+    });
+    return input.artifacts;
+  }
+
+  const outputPath = join(input.stage.workdir, HARDSUB_PROCESSED_VIDEO);
+  const args = buildHardsubPreprocessArgs({
+    mode,
+    band,
+    width,
+    height,
+    sourcePath: burnSource,
+    outputPath
+  });
+  await rm(outputPath, { force: true });
+  await runProcess({
+    executable: ffmpegPath,
+    args,
+    cwd: input.stage.workdir,
+    signal: input.stage.signal
+  });
+  if (!await isNonEmptyFile(outputPath)) {
+    throw new KrillinCliError('render_video_failed', 'Hardsub pre-process did not produce a video');
+  }
+  reportHardsub({
+    percent: 4,
+    hardsubMode: mode,
+    hardsubBand: { ...band },
+    hardsubDetected: detected,
+    message: `Đã xử lý vùng phụ đề in sẵn (hardsub) ở dải ${band.topPercent}%–${band.bottomPercent}% chiều cao từ mép đáy`
+  });
+  // Hoán video đã xử lý vào mọi artifact video sẽ được burn/đọc ở bước render
+  // (source_video cho burn thường + recovery, dubbed_video khi burn trên bản lồng tiếng).
+  return input.artifacts.map(artifact => (
+    artifact.kind === 'source_video' || artifact.kind === 'dubbed_video'
+      ? { ...artifact, path: outputPath }
+      : artifact
+  ));
 }
 
 export function stageConfig(

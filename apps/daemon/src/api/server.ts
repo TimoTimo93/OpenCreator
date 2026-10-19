@@ -1744,6 +1744,17 @@ export async function buildServer(input: BuildServerInput) {
           apiKey: services.llm.apiKey,
           model: services.llm.model
         };
+      },
+      // Media picker: thư mục gốc chứa video đã tải về (downloadRoot cấu hình
+      // hoặc mặc định Documents/OpenCreator) — chỉ đọc, không đụng downloader.
+      readDownloadsRoot: async () => {
+        try {
+          const services = await creatorServicesConfigStore.read();
+          const configured = services.downloadRoot.trim();
+          return configured !== '' ? configured : join(homedir(), 'Documents', 'OpenCreator');
+        } catch {
+          return join(homedir(), 'Documents', 'OpenCreator');
+        }
       }
     });
   } catch (error) {

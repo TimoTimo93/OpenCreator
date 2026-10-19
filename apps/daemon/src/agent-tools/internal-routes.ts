@@ -15,7 +15,7 @@ import { scheduleOperationActors } from '../scheduler/types.js';
 import type { RuntimeThread, ThreadManager } from '../threads/types.js';
 import { apiError } from '../api/errors.js';
 import { SocialError, type SocialService, type SocialClusterPatch } from '../social/service.js';
-import type { SocialEnqueueRequest } from '../social/types.js';
+import { sanitizePlatformSettings, type SocialEnqueueRequest, type SocialPlatformSettings } from '../social/types.js';
 import {
   AgentCapabilityTokenError,
   type AgentCapabilityGrant,
@@ -392,13 +392,27 @@ export async function registerAgentToolRoutes(
       if (items === undefined) {
         return reply.code(400).send(apiError(
           'VALIDATION_FAILED',
-          'body.items phải là danh sách { clusterId, path, title?, description?, scheduledAt? } không rỗng'
+          'body.items phải là danh sách { clusterId, path, title?, description?, scheduledAt?, platformSettings? } không rỗng'
         ));
       }
       return flexSocial(request, reply, 'social:manage', () => social.enqueue(items));
     });
     server.delete<{ Params: { id: string } }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/jobs/:id`, async (request, reply) =>
       flexSocial(request, reply, 'social:manage', () => social.removeJob(request.params.id)));
+    server.patch<{ Params: { id: string }; Body: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/jobs/:id`, async (request, reply) => {
+      const body = parseBody(request.body, reply);
+      if (body === undefined) return;
+      const scheduledAt = typeof body['scheduledAt'] === 'string' ? body['scheduledAt'] : '';
+      if (scheduledAt.trim() === '') {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.scheduledAt (ISO) is required'));
+      }
+      return flexSocial(request, reply, 'social:manage', () => social.rescheduleJob(request.params.id, scheduledAt));
+    });
+    server.get<{ Querystring: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/downloads`, async (request, reply) => {
+      const query = request.query as Record<string, string | undefined>;
+      const limit = typeof query.limit === 'string' && /^\d+$/.test(query.limit) ? Number(query.limit) : undefined;
+      return flexSocial(request, reply, 'social:read', () => social.listDownloads(limit));
+    });
     server.post<{ Params: { id: string } }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/jobs/:id/retry-failed`, async (request, reply) =>
       flexSocial(request, reply, 'social:manage', () => social.retryFailedPlatforms(request.params.id)));
     server.post(`${AGENT_TOOL_ROUTE_PREFIX}/social/queue/pause`, async (request, reply) =>
@@ -818,6 +832,7 @@ type AgentEnqueueItem = {
   description?: string;
   thumbnailPath?: string | null;
   scheduledAt?: string | null;
+  platformSettings?: SocialPlatformSettings;
 };
 
 /** Dựng danh sách SocialEnqueueRequest từ body của công cụ trợ lý; bất hợp lệ → undefined. */
@@ -828,13 +843,15 @@ function parseAgentEnqueueBody(body: Record<string, unknown>): SocialEnqueueRequ
     if (!isPlainObject(raw)) return undefined;
     if (typeof raw.clusterId !== 'string' || raw.clusterId.trim() === '') return undefined;
     if (typeof raw.path !== 'string' || raw.path.trim() === '') return undefined;
+    if (raw.platformSettings !== undefined && !isPlainObject(raw.platformSettings)) return undefined;
     items.push({
       clusterId: raw.clusterId,
       path: raw.path,
       ...(typeof raw.title === 'string' && raw.title.trim() !== '' ? { title: raw.title.trim() } : {}),
       ...(typeof raw.description === 'string' && raw.description.trim() !== '' ? { description: raw.description.trim() } : {}),
       ...(typeof raw.scheduledAt === 'string' && raw.scheduledAt.trim() !== '' ? { scheduledAt: raw.scheduledAt.trim() } : {}),
-      ...(raw.thumbnailPath === null ? { thumbnailPath: null } : {})
+      ...(raw.thumbnailPath === null ? { thumbnailPath: null } : {}),
+      ...(raw.platformSettings !== undefined ? { platformSettings: sanitizePlatformSettings(raw.platformSettings) } : {})
     });
   }
   return items;

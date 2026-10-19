@@ -11,7 +11,7 @@ import {
   writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { delimiter, basename, dirname, join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { buildKrillinSubtitleStyle } from '../../src/creator/krillin/adapter.js';
 import { createSubtitlePreviewService } from '../../src/creator/krillin/subtitle-preview.js';
@@ -57,11 +57,14 @@ describe.runIf(hasPackagedRuntime)('Creator packaged subtitle rendering', () => 
     const png = await service.render({ width, height, subtitleStyle: style, bilingual: true, subtitlePosition: position, translationText: 'Creator subtitle test', originalText: '创作字幕测试' });
     const rgba = await sharp(png).ensureAlpha().raw().toBuffer();
     const assPath = result.assPath;
+    // libavfilter tách tham số filter theo ':' bất chấp quote, nên đường dẫn
+    // tuyệt đối Windows (D:\..., chứa ':') làm gãy filter ass. Chạy ffmpeg với
+    // cwd = workdir và dùng đường dẫn tương đối không ký tự đặc biệt.
     const frame = run(ffmpegPath, [
       '-v', 'error', '-f', 'lavfi', '-i', `color=c=0x202020:s=${width}x${height}:d=2,format=rgba`, '-ss', '0.5',
-      '-vf', `ass=filename='${assPath}':fontsdir='${join(runtimeRoot, 'fonts')}'`,
+      '-vf', `ass=filename=${basename(assPath)}:fontsdir=fonts`,
       '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'
-    ], null);
+    ], null, result.paths.workdir);
     let changedPixels = 0;
     let error = 0;
     for (let pixel = 0; pixel < width * height; pixel += 1) {
@@ -79,13 +82,21 @@ describe.runIf(hasPackagedRuntime)('Creator packaged subtitle rendering', () => 
   });
 
   it('applies directional shadow overrides to actual pixels', () => {
-    const style = { shadow: { enabled: true, opacity: 0.6, offsetX: -6, offsetY: 6, blur: 0 } };
+    // Bóng đổ hướng (offsetX/offsetY) chỉ được render khi tắt nền lót: nền đè
+    // (background) thay thế hoàn toàn bóng theo thiết kế (xem buildKrillinSubtitleStyle).
+    const style = {
+      background: { enabled: false },
+      shadow: { enabled: true, opacity: 0.6, offsetX: -6, offsetY: 6, blur: 0 }
+    };
     const first = renderStyle(style);
-    const second = renderStyle({ shadow: { ...style.shadow, offsetX: 6, offsetY: -6 } });
+    const second = renderStyle({ background: { enabled: false }, shadow: { ...style.shadow, offsetX: 6, offsetY: -6 } });
     expect(first.frame.sha256).not.toBe(second.frame.sha256);
   });
   it('renders visibly different fixed frames and fails when a packaged font is missing', () => {
+    // Tắt nền lót tường minh để các assertion bên dưới kiểm đúng đường viền/bóng
+    // (nền đè mặc định bật sẽ đè bóng và đổi BorderStyle sang 3).
     const first = renderStyle({
+      background: { enabled: false },
       fontPreset: 'sans',
       fontWeight: 'regular',
       fontSize: 'small',
@@ -103,6 +114,7 @@ describe.runIf(hasPackagedRuntime)('Creator packaged subtitle rendering', () => 
       }
     });
     const second = renderStyle({
+      background: { enabled: false },
       fontPreset: 'serif',
       fontWeight: 'bold',
       fontSize: 'large',
@@ -152,6 +164,10 @@ function renderStyle(style: Parameters<typeof buildKrillinSubtitleStyle>[0], opt
   const subtitle = join(workdir, 'bilingual.srt');
   const stylePath = join(workdir, 'subtitle-style.json');
   const targetPath = join(workdir, 'target.srt');
+  // Filter ass của ffmpeg đọc fontsdir tương đối từ cwd của tiến trình (xem
+  // it.each bên trên): copy fonts đóng gói vào workdir để ffmpeg dùng đường
+  // dẫn tương đối, tránh ký tự ':' trong đường dẫn tuyệt đối Windows.
+  cpSync(join(runtimeRoot, 'fonts'), join(workdir, 'fonts'), { recursive: true });
   const timeline = '00:00:00,200 --> 00:00:01,800';
   writeFileSync(targetPath, `1\n${timeline}\nCreator subtitle test\n\n`);
   writeFileSync(
@@ -272,17 +288,19 @@ function createMissingFontRuntime(fileName: string): string {
   return root;
 }
 
-function run(executable: string, args: string[], encoding: null): Buffer;
-function run(executable: string, args: string[], encoding?: BufferEncoding): string;
+function run(executable: string, args: string[], encoding: null, cwd?: string): Buffer;
+function run(executable: string, args: string[], encoding?: BufferEncoding, cwd?: string): string;
 function run(
   executable: string,
   args: string[],
-  encoding: BufferEncoding | null = 'utf8'
+  encoding: BufferEncoding | null = 'utf8',
+  cwd?: string
 ): string | Buffer {
   const result = spawnSync(executable, args, {
     encoding,
     timeout: 60_000,
-    maxBuffer: 8 * 1024 * 1024
+    maxBuffer: 8 * 1024 * 1024,
+    ...(cwd === undefined ? {} : { cwd })
   });
   if (result.status !== 0) {
     throw new Error(

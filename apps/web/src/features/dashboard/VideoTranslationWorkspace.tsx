@@ -76,6 +76,7 @@ type SubtitleWeight = 'regular' | 'medium' | 'bold';
 type SubtitleSize = 'small' | 'medium' | 'large';
 type VideoFormat = 'horizontal' | 'vertical' | 'all';
 type VideoOrientation = 'landscape' | 'portrait';
+type HardsubHandling = 'none' | 'blur' | 'cover' | 'crop';
 type WizardStep = 0 | 1 | 2;
 type WorkspacePhase = 'configure' | 'result';
 type ResultProposal = 'regenerate';
@@ -1403,6 +1404,20 @@ function Switch(props: {
   );
 }
 
+/** Mô tả ngắn gọn từng chế độ xử lý phụ đề in sẵn (hardsub) trong video nguồn. */
+function hardsubHintLabel(mode: HardsubHandling, l: LocalizeCopy): string {
+  if (mode === 'blur') {
+    return l('模糊压暗底部旧字幕区域后再烧录新字幕', 'Blur and darken the old subtitle area at the bottom before burning the new subtitles');
+  }
+  if (mode === 'cover') {
+    return l('用深色遮幅盖住旧字幕区域后再烧录新字幕', 'Mask the old subtitle area with a dark band before burning the new subtitles');
+  }
+  if (mode === 'crop') {
+    return l('裁掉底部字幕带并拉伸回全画幅，画面比例略有变化', 'Crop off the bottom subtitle band and stretch back to full frame; the aspect ratio changes slightly');
+  }
+  return l('保留原画面，新字幕可能和旧字幕重叠', 'Keep the original frames; the new subtitles may overlap the old ones');
+}
+
 function isValidVideoUrl(value: string) {
   try {
     const url = new URL(value.trim());
@@ -1673,6 +1688,11 @@ export default function VideoTranslationWorkspace(props: {
   const [bilingual, setBilingual] = useState(false);
   const [subtitlePosition, setSubtitlePosition] = useState<SubtitlePosition>('top');
   const [preferPlatformCaptions, setPreferPlatformCaptions] = useState(true);
+  const [hardsubHandling, setHardsubHandling] = useState<HardsubHandling>('none');
+  // Đỉnh dải che hardsub (% chiều cao tính từ mép đáy). `hardsubBandAuto` =
+  // pipeline tự dò từ khung hình mẫu; tắt tự động thì dùng slider thủ công.
+  const [hardsubBandAuto, setHardsubBandAuto] = useState(true);
+  const [hardsubBandPercent, setHardsubBandPercent] = useState(22);
   const [subtitleFont, setSubtitleFont] = useState<SubtitleFont>(defaultSubtitleStyle.subtitleFont);
   const [subtitleWeight, setSubtitleWeight] = useState<SubtitleWeight>(defaultSubtitleStyle.subtitleWeight);
   const [subtitleSize, setSubtitleSize] = useState<SubtitleSize>(defaultSubtitleStyle.subtitleSize);
@@ -1795,6 +1815,17 @@ export default function VideoTranslationWorkspace(props: {
     if (typeof persisted.bilingual === 'boolean') setBilingual(persisted.bilingual);
     if (persisted.subtitlePosition === 'top' || persisted.subtitlePosition === 'bottom') setSubtitlePosition(persisted.subtitlePosition);
     if (typeof persisted.preferPlatformCaptions === 'boolean') setPreferPlatformCaptions(persisted.preferPlatformCaptions);
+    if (
+      persisted.hardsubHandling === 'none' || persisted.hardsubHandling === 'blur'
+      || persisted.hardsubHandling === 'cover' || persisted.hardsubHandling === 'crop'
+    ) setHardsubHandling(persisted.hardsubHandling);
+    if (typeof persisted.hardsubBandPercent === 'number' && Number.isFinite(persisted.hardsubBandPercent)) {
+      setHardsubBandAuto(false);
+      setHardsubBandPercent(Math.min(60, Math.max(10, Math.round(persisted.hardsubBandPercent))));
+    } else {
+      // Job cũ không có field → tự dò vùng hardsub (mặc định).
+      setHardsubBandAuto(true);
+    }
     const persistedSubtitleStyle = readSubtitleStyleSettings(persisted, {}, undefined);
     setSubtitleFont(persistedSubtitleStyle.subtitleFont);
     setSubtitleWeight(persistedSubtitleStyle.subtitleWeight);
@@ -2062,6 +2093,8 @@ export default function VideoTranslationWorkspace(props: {
       bilingual,
       subtitlePosition,
       preferPlatformCaptions,
+      hardsubHandling,
+      hardsubBandPercent: hardsubBandAuto ? null : hardsubBandPercent,
       subtitleStyle,
       dubbing,
       keepBackgroundAudio,
@@ -2103,6 +2136,9 @@ export default function VideoTranslationWorkspace(props: {
     keepBackgroundAudio,
     bgmRetention,
     furthestStep,
+    hardsubBandAuto,
+    hardsubBandPercent,
+    hardsubHandling,
     preferPlatformCaptions,
     resultTab,
     resultVersion,
@@ -3897,6 +3933,52 @@ export default function VideoTranslationWorkspace(props: {
                           <input value={verticalSubtitle} onChange={event => setVerticalSubtitle(event.target.value)} placeholder={l('留空将自动生成', 'Leave blank to generate automatically')} />
                         </label>
                       </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {composeVideo ? (
+                  <div className="video-translation-hardsub-settings">
+                    <label className="video-translation-field">
+                      <span>{l('内嵌字幕处理', 'Burned-in subtitles')}</span>
+                      <div className="video-translation-select-wrap">
+                        <select
+                          aria-label={l('内嵌字幕处理', 'Burned-in subtitles')}
+                          value={hardsubHandling}
+                          onChange={event => setHardsubHandling(event.target.value as HardsubHandling)}
+                        >
+                          <option value="none">{l('不处理', 'No handling')}</option>
+                          <option value="blur">{l('模糊原字幕', 'Blur old subtitles')}</option>
+                          <option value="cover">{l('色带遮盖原字幕', 'Cover old subtitles')}</option>
+                          <option value="crop">{l('裁剪底部字幕带', 'Crop out the subtitle band')}</option>
+                        </select>
+                        <ChevronDown size={15} strokeWidth={1.8} aria-hidden="true" />
+                      </div>
+                    </label>
+                    <p className="video-translation-hardsub-hint">{hardsubHintLabel(hardsubHandling, l)}</p>
+                    {hardsubHandling !== 'none' ? (
+                      <>
+                        <Switch
+                          checked={hardsubBandAuto}
+                          label={l('自动检测字幕位置', 'Detect the subtitle band automatically')}
+                          description={l('分析样本帧定位旧字幕，失败时使用默认底部区域', 'Analyzes sample frames to locate the old subtitles; falls back to the default bottom band')}
+                          onChange={setHardsubBandAuto}
+                        />
+                        {hardsubBandAuto ? null : (
+                          <label className="video-translation-field">
+                            <span>{l('字幕带高度（自底向上）', 'Subtitle band height (from bottom)')} <small>{hardsubBandPercent}%</small></span>
+                            <input
+                              type="range"
+                              min={10}
+                              max={50}
+                              step={1}
+                              value={hardsubBandPercent}
+                              aria-label={l('字幕带高度（自底向上）', 'Subtitle band height (from bottom)')}
+                              onChange={event => setHardsubBandPercent(Number(event.target.value))}
+                            />
+                          </label>
+                        )}
+                      </>
                     ) : null}
                   </div>
                 ) : null}
