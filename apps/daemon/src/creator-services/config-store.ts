@@ -94,6 +94,12 @@ const downloadRootSchema = z.string().trim().max(4096).default('').refine(
   value => value === '' || isAbsolute(value) || value.startsWith('~'),
   'Download root must be an absolute directory path'
 );
+/**
+ * YouTube Data API v3 key (tùy chọn) — tài liệu API của Google: dãy ký tự
+ * alphanumeric + "_" + "-". Rỗng = quét thống kê bằng trình duyệt như trước.
+ */
+const youtubeApiKeySchema = z.string().trim().max(4096).default('')
+  .refine(value => value === '' || /^[\w-]+$/.test(value), 'YouTube API key looks invalid');
 const llmConfigSchema = openAiCompatibleSchema.extend({
   jsonMode: z.boolean(),
   source: z.enum(['codex', 'custom', 'agnes']).optional(),
@@ -178,6 +184,7 @@ const ttsConfigSchema = z.object({
 export const creatorServicesConfigSchema = z.object({
   proxy: boundedString(2048),
   downloadRoot: downloadRootSchema,
+  youtubeApiKey: youtubeApiKeySchema,
   llm: llmConfigSchema,
   transcription: z.object({
     provider: z.enum(['openai', 'faster-whisper', 'whisperkit', 'whisper.cpp', 'aliyun', 'volcengine', 'funasr']),
@@ -378,7 +385,8 @@ const creatorCredentialPaths = [
   'video.seedance.apiKey',
   'video.kling.accessKey',
   'video.kling.secretKey',
-  'video.veo.apiKey'
+  'video.veo.apiKey',
+  'youtubeApiKey'
 ] as const;
 
 function splitCreatorServiceCredentials(config: CreatorServicesConfig): {

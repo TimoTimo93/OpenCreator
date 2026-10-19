@@ -14,6 +14,7 @@ import {
   parseCompactNumber,
   type SocialAnalytics
 } from '../../src/social/analytics.js';
+import type { SocialStatsOverview } from '../../src/social/types.js';
 import {
   createSocialComments,
   isSpam,
@@ -90,6 +91,7 @@ type ClusterSeed = {
   fbToken?: string | null;
   ytChannelUrl?: string;
   tkProfileUrl?: string;
+  proxyServer?: string;
   autoReplyEnabled?: boolean;
   autoReplyPrompt?: string;
 };
@@ -99,7 +101,7 @@ function seedCluster(db: SocialDB, seed: ClusterSeed): void {
     id: seed.id,
     name: seed.name,
     seriesName: 'Series',
-    proxyServer: '',
+    proxyServer: seed.proxyServer ?? '',
     fbMode: 'graph_api',
     fbPageId: seed.fbPageId ?? '',
     fbPageTokenEncrypted: seed.fbToken === undefined ? null : (seed.fbToken === null ? null : seed.fbToken),
@@ -311,8 +313,190 @@ describe('social analytics — refresh với Graph API giả + trình duyệt gi
   });
 });
 
-describe('social comments — quét + AI trả lời (fetch giả)', () => {
-  it('', async () => {
+// ---------------------------------------------------------------------------
+// YouTube Data API (tùy chọn) + TikTok yt-dlp
+// ---------------------------------------------------------------------------
+
+function metricsFor(analytics: SocialAnalytics, platform: 'youtube' | 'tiktok'): SocialStatsOverview['channels'] {
+  return analytics.getStats().channels.filter(entry => entry.platform === platform);
+}
+
+function aggregateChannelMetrics(channels: SocialStatsOverview['channels']): Record<string, number | undefined> {
+  const out: Record<string, number | undefined> = {};
+  for (const channel of channels) {
+    for (const [name, point] of Object.entries(channel.metrics)) {
+      out[name] = point?.value;
+    }
+  }
+  return out;
+}
+
+
+describe('social analytics — YouTube Data API batch + TikTok yt-dlp', () => {
+  it('có key → channels.list + videos.list, không mở trình duyệt', async () => {
+    const dir = await tempRoot('social-analytics-ytapi-');
+    const db = openSocialDatabase(join(dir, 'social.sqlite'));
+    const clusterId = 'cluster_yt_api';
+    seedCluster(db, { id: clusterId, name: 'Cụm YT API', ytChannelUrl: 'https://www.youtube.com/@kenhapi' });
+    insertJobRow(db, {
+      id: 'jobyt', clusterId, clusterName: 'Cụm YT API', videoPath: 'D:/v.mp4', thumbnailPath: null,
+      title: 'Tập 1', description: '', scheduledAt: '2026-10-19T08:00:00.000Z', nowISO: '2026-10-19T08:00:00.000Z'
+    });
+    updateJobRow(db, 'jobyt', { yt_status: 'published', yt_video_id: 'vid_yt_1', updated_at: '2026-10-19T08:30:00.000Z' });
+
+    const ytUrls: string[] = [];
+    const fetchMock = fakeFetch([
+      {
+        test: url => url.includes('googleapis.com/youtube/v3/videos'),
+        reply: url => {
+          ytUrls.push(url);
+          return { body: { items: [{ id: 'vid_yt_1', channelId: 'UCabc123', statistics: { viewCount: '3210' } }] } };
+        }
+      },
+      {
+        test: url => url.includes('googleapis.com/youtube/v3/channels'),
+        reply: url => {
+          ytUrls.push(url);
+          return { body: { items: [{ id: 'UCabc123', statistics: { subscriberCount: '999', viewCount: '120000', videoCount: '42' } }] } };
+        }
+      }
+    ]);
+
+    // Launcher ném lỗi — với key đúng thì analytics không được chạm trình duyệt.
+    const worker = createSocialWorker({
+      tickIntervalMs: 0,
+      browserLauncher: async () => { throw new Error('browser must not be used when API key is configured'); }
+    });
+    worker.bind({ db, screenshotDir: join(dir, 'ss'), profileRoot: join(dir, 'pf'), decryptToken: () => '' });
+
+    const analytics = createSocialAnalytics({
+      db, worker,
+      decryptToken: () => '',
+      refreshIntervalMs: 0,
+      fetchFn: fetchMock,
+      readYoutubeApiKey: () => 'testkey123',
+      now: () => '2026-10-19T12:00:00.000Z',
+      log: () => undefined
+    });
+    const result = await analytics.refresh();
+    // Không có lỗi quét youtube không trình duyệt.
+    expect(result.errors.filter(text => text.includes('youtube'))).toEqual([]);
+
+    const channel = aggregateChannelMetrics(metricsFor(analytics, 'youtube'));
+    expect(channel.followers).toBe(999);
+    expect(channel.views).toBe(120_000);
+    expect(channel.videos).toBe(42);
+    const video = analytics.getStats().videos.find(entry => entry.platform === 'youtube');
+    expect(video?.views).toBe(3210);
+    // Batch: 1 fetch videos + 1 fetch channels (channelId biết qua videos.list).
+    expect(ytUrls.filter(url => url.includes('/videos?')).length).toBe(1);
+    expect(ytUrls.filter(url => url.includes('/channels?')).length).toBe(1);
+    expect(ytUrls.join('|')).toContain('key=testkey123');
+    // Không rơi vào forHandle vì videos.list đã cho channelId.
+    expect(ytUrls.join('|')).not.toContain('forHandle');
+    analytics.close();
+    db.close();
+  });
+
+  it('không key → fallback quét trình duyệt (giữ nguyên collector cũ)', async () => {
+    const dir = await tempRoot('social-analytics-ytnokey-');
+    const db = openSocialDatabase(join(dir, 'social.sqlite'));
+    seedCluster(db, { id: 'cluster_yt_fb', name: 'Cụm YT fb', ytChannelUrl: 'https://www.youtube.com/@kenh' });
+    const worker = createSocialWorker({ tickIntervalMs: 0, browserLauncher: fakeBrowserLauncher({
+      getText: url => url.includes('youtube.com/@') ? 'html "subscriberCountText":{"simpleText":"5K subscribers"}' : ''
+    }) });
+    worker.bind({ db, screenshotDir: join(dir, 'ss'), profileRoot: join(dir, 'pf'), decryptToken: () => '' });
+    const analytics = createSocialAnalytics({
+      db, worker, decryptToken: () => '', refreshIntervalMs: 0,
+      fetchFn: fakeFetch([]), readYoutubeApiKey: () => '', now: () => '2026-10-19T12:00:00.000Z', log: () => undefined
+    });
+    await analytics.refresh();
+    expect(analytics.getStats().channels.find(entry => entry.platform === 'youtube')?.metrics.followers?.value).toBe(5000);
+    analytics.close();
+    db.close();
+  });
+
+  it('TikTok: ưu tiên yt-dlp — args đúng proxy + khớp tk_video_id cho per-video views', async () => {
+    const dir = await tempRoot('social-analytics-tkdlp-');
+    const db = openSocialDatabase(join(dir, 'social.sqlite'));
+    const clusterId = 'cluster_tk';
+    seedCluster(db, { id: clusterId, name: 'Cụm TikTok', tkProfileUrl: 'https://www.tiktok.com/@user', proxyServer: 'http://1.2.3.4:8080' });
+    insertJobRow(db, {
+      id: 'jobtk', clusterId, clusterName: 'Cụm TikTok', videoPath: 'D:/v.mp4', thumbnailPath: null,
+      title: 'Tập 1', description: '', scheduledAt: '2026-10-19T08:00:00.000Z', nowISO: '2026-10-19T08:00:00.000Z'
+    });
+    updateJobRow(db, 'jobtk', { tk_status: 'published', tk_video_id: '7411111111111111111', updated_at: '2026-10-19T08:30:00.000Z' });
+
+    const worker = createSocialWorker({
+      tickIntervalMs: 0,
+      browserLauncher: async () => { throw new Error('browser must not be used when yt-dlp succeeds'); }
+    });
+    worker.bind({ db, screenshotDir: join(dir, 'ss'), profileRoot: join(dir, 'pf'), decryptToken: () => '' });
+
+    const seenArgs: string[][] = [];
+    const analytics = createSocialAnalytics({
+      db, worker, decryptToken: () => '', refreshIntervalMs: 0,
+      fetchFn: fakeFetch([]),
+      runYtDlpFn: async args => {
+        seenArgs.push([...args]);
+        return {
+          channel_follower_count: 777,
+          like_count: 8_888,
+          entries: [
+            { id: '7411111111111111111', view_count: 1234 },
+            { id: '999_111', view_count: 5 }
+          ]
+        };
+      },
+      now: () => '2026-10-19T12:00:00.000Z',
+      log: () => undefined
+    });
+    const result = await analytics.refresh();
+    expect(result.errors).toEqual([]);
+
+    const args = seenArgs[0]!;
+    expect(args).toContain('--flat-playlist');
+    expect(args).toContain('--dump-single-json');
+    // Proxy của cụm được mang vào; URL dạng https.
+    const proxyIndex = args.indexOf('--proxy');
+    expect(args[proxyIndex + 1]).toBe('http://1.2.3.4:8080');
+
+    const tk = aggregateChannelMetrics(metricsFor(analytics, 'tiktok'));
+    expect(tk.followers).toBe(777);
+    expect(tk.likes).toBe(8888);
+    // Per-video khớp theo tk_video_id của job đã đăng.
+    const tkVideo = analytics.getStats().videos.find(entry => entry.platform === 'tiktok');
+    expect(tkVideo?.jobId).toBe('jobtk');
+    expect(tkVideo?.externalVideoId).toBe('7411111111111111111');
+    expect(tkVideo?.views).toBe(1234);
+    analytics.close();
+    db.close();
+  });
+
+  it('TikTok: yt-dlp lỗi → fallback quét trình duyệt', async () => {
+    const dir = await tempRoot('social-analytics-tkfb-');
+    const db = openSocialDatabase(join(dir, 'social.sqlite'));
+    seedCluster(db, { id: 'cluster_tk2', name: 'Cụm TikTok 2', tkProfileUrl: 'tiktok.com/@user2' });
+    const worker = createSocialWorker({ tickIntervalMs: 0, browserLauncher: fakeBrowserLauncher({
+      getText: url => url.includes('tiktok.com/@') ? 'html {"followerCount":12345,"likesCount":100} html' : ''
+    }) });
+    worker.bind({ db, screenshotDir: join(dir, 'ss'), profileRoot: join(dir, 'pf'), decryptToken: () => '' });
+    const analytics = createSocialAnalytics({
+      db, worker, decryptToken: () => '', refreshIntervalMs: 0,
+      fetchFn: fakeFetch([]),
+      runYtDlpFn: async () => { throw new Error('yt-dlp crashed'); },
+      now: () => '2026-10-19T12:00:00.000Z',
+      log: () => undefined
+    });
+    await analytics.refresh();
+    const tk = analytics.getStats().channels.find(entry => entry.platform === 'tiktok');
+    expect(tk?.metrics.followers?.value).toBe(12345);
+    analytics.close();
+    db.close();
+  });
+});
+
+describe('social comments — quét + AI trả lời (fetch giả)', () => {  it('', async () => {
     const dir = await tempRoot('social-comments-');
     const db = openSocialDatabase(join(dir, 'social.sqlite'));
     const clusterId = 'cluster_c1';

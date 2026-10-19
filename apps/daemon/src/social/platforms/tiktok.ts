@@ -15,10 +15,17 @@ type TkSelectors = {
   upload_complete_indicator: string;
   caption_editor: string;
   schedule_radio: string;
+  schedule_date_input: string;
+  schedule_time_input: string;
   privacy_select: string;
   privacy_option: string;
   switch_control: string;
   post_btn: string;
+  cookie_banner_btn: string;
+  split_window_not_now_btn: string;
+  copyright_popup_btn: string;
+  post_now_btn: string;
+  post_confirmation: string;
 };
 
 const SELECTORS_PATH = new URL('./selectors.json', import.meta.url);
@@ -36,6 +43,7 @@ export async function uploadTikTokStudio(context: SocialExecutionContext): Promi
   const page = await context.browser.newPage(sel.upload_url) as Page;
   try {
     await page.waitForTimeout(4_000);
+    await dismissPopups(page, sel);
     if (/\/login|accounts\.tiktok/.test(new URL(page.url()).pathname)) {
       return { status: 'failed', error: 'Chưa đăng nhập TikTok cho cụm này (mở trình duyệt để đăng nhập)', loginStatus: 'expired' };
     }
@@ -69,6 +77,10 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
   await editor.click();
   await page.waitForTimeout(800);
   await typeWithHashtags(page, context.job.title, context.job.description.slice(0, 2_000));
+  // Popup cửa sổ chia màn hình (split window) sau khi nhập caption (bỏ
+  // nếu có) — rút gọn từ luồng `tiktok-uploader` cộng đồng.
+  await page.waitForTimeout(1_000);
+  await clickIfVisible(page, sel.split_window_not_now_btn);
 
   // 3. Đợi upload 100% (tối đa 5 phút cho file nặng).
   await page.locator(sel.upload_complete_indicator).first()
@@ -79,15 +91,15 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
   // (best-effort — form TikTok đổi thường, không thấy điều khiển thì bỏ qua).
   await applyTikTokSettings(page, sel, context.job.platformSettings.tiktok);
 
-  // 4. Hẹn giờ nếu có.
+  // 4. Hẹn giờ nếu có (TikTok chỉ nhận lịch ≥20 phút tới ≤10 ngày, phút bội số 5).
   let scheduled = false;
   const scheduledAtMs = new Date(context.job.scheduledAt).getTime();
-  if (scheduledAtMs - Date.now() > 10 * 60_000) {
+  if (scheduledAtMs - Date.now() > 20 * 60_000) {
     const scheduleToggle = page.locator(sel.schedule_radio).first();
     if (await scheduleToggle.isVisible().catch(() => false)) {
       await scheduleToggle.click();
       await page.waitForTimeout(1_500);
-      await fillSchedule(page, new Date(scheduledAtMs));
+      await fillSchedule(page, new Date(scheduledAtMs), sel);
       scheduled = true;
     }
   }
@@ -96,8 +108,36 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
   const postBtn = page.locator(sel.post_btn).first();
   await postBtn.scrollIntoViewIfNeeded().catch(() => undefined);
   await postBtn.click();
-  await page.waitForTimeout(6_000);
+  await page.waitForTimeout(2_000);
+  // Popup bản quyền âm thanh/nhạc nền — chọn "vẫn đăng" nếu xuất hiện
+  // (best-effort; TikTok hiện popup xếp.slot khác nhau theo khu vực).
+  await clickIfVisible(page, sel.copyright_popup_btn);
+  await page.waitForTimeout(1_000);
+  // Xác nhận "Post now / Đăng ngay" (modal sau khi bấm Lên lịch hiện hành)
+  // — chưa thấy thì bỏ qua.
+  await clickIfVisible(page, sel.post_now_btn);
+  await page.waitForTimeout(4_000);
   return { status: scheduled ? 'scheduled' : 'published' };
+}
+
+/**
+ * Đóng các popup cản chu trình đăng: banner cookie, popup cửa sổ chia màn
+ * hình — deploy luồng cộng đồng (thêm từng cái, không chặn khi không thấy).
+ */
+async function clickIfVisible(page: Page, selector: string): Promise<void> {
+  try {
+    const target = page.locator(selector).first();
+    if (await target.isVisible().catch(() => false)) {
+      await target.click();
+      await page.waitForTimeout(600);
+    }
+  } catch {
+    // Không chặn luồng đăng.
+  }
+}
+
+async function dismissPopups(page: Page, sel: TkSelectors): Promise<void> {
+  await clickIfVisible(page, sel.cookie_banner_btn);
 }
 
 /** Điền caption từng từ; từ #hashtag gõ chậm kèm Enter để pop-up tag kịp mở. */
@@ -189,17 +229,21 @@ async function toggleByLabel(page: Page, sel: TkSelectors, label: RegExp, desire
   }
 }
 
-async function fillSchedule(page: Page, when: Date): Promise<void> {
-  const dateInput = page.locator('div[class*="date-picker"] input, input[placeholder*="YYYY-MM-DD"]').first();
+async function fillSchedule(page: Page, when: Date, sel: TkSelectors): Promise<void> {
+  // TikTok scheduler chỉ nhận phút bội số 5 (chuẩn `tiktok-uploader` fwd).
+  const rounded = new Date(when.getTime());
+  rounded.setSeconds(0, 0);
+  rounded.setMinutes(rounded.getMinutes() - (rounded.getMinutes() % 5));
+  const dateInput = page.locator(sel.schedule_date_input).first();
   if (await dateInput.isVisible().catch(() => false)) {
     await dateInput.click();
     await dateInput.fill('');
-    await dateInput.type(formatISODate(when), { delay: 40 });
-    const timeInput = page.locator('div[class*="time-picker"] input').first();
+    await dateInput.type(formatISODate(rounded), { delay: 40 });
+    const timeInput = page.locator(sel.schedule_time_input).first();
     if (await timeInput.isVisible().catch(() => false)) {
       await timeInput.click();
       await timeInput.fill('');
-      await timeInput.type(when.toTimeString().slice(0, 5), { delay: 40 });
+      await timeInput.type(rounded.toTimeString().slice(0, 5), { delay: 40 });
     }
     await page.keyboard.press('Escape');
   }

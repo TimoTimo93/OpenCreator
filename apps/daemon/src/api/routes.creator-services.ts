@@ -96,6 +96,30 @@ export async function registerCreatorServicesRoutes(
       return { downloadRoot: saved.downloadRoot };
     } catch (error) { return sendStoreError(reply, error); }
   });
+  server.get('/creator-services/youtube-api-key', async (_request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try { return { youtubeApiKey: (await store.read()).youtubeApiKey }; }
+    catch (error) { return sendStoreError(reply, error); }
+  });
+  server.patch<{ Body: unknown }>('/creator-services/youtube-api-key', async (request, reply) => {
+    const body = request.body as { youtubeApiKey?: unknown } | null;
+    const youtubeApiKey = typeof body?.youtubeApiKey === 'string' ? body.youtubeApiKey.trim() : undefined;
+    const valid = youtubeApiKey !== undefined && youtubeApiKey.length <= 4096
+      && (youtubeApiKey === '' || /^[\w-]+$/.test(youtubeApiKey))
+      && body !== null
+      && Object.keys(body).every(key => key === 'youtubeApiKey');
+    if (!valid) {
+      return reply.code(400).send(apiError(
+        'VALIDATION_FAILED',
+        'Enter a valid YouTube Data API v3 key, or clear it to use browser-based stats'
+      ));
+    }
+    try {
+      const current = await store.read();
+      const saved = await store.write({ ...current, youtubeApiKey: youtubeApiKey! });
+      return { youtubeApiKey: saved.youtubeApiKey };
+    } catch (error) { return sendStoreError(reply, error); }
+  });
   server.get('/creator-services/model/codex/status', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
     try {

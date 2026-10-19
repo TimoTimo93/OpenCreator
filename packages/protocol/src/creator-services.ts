@@ -164,6 +164,11 @@ export type CreatorServicesConfig = {
    * Documents/OpenCreator; giá trị không hợp lệ sẽ bị bỏ kèm cảnh báo log.
    */
   downloadRoot: string;
+  /**
+   * YouTube Data API v3 key (tùy chọn): có key → quét thống kê YouTube qua API
+   * (rẻ quota, không cần mở trình duyệt); rỗng → fallback quét bằng trình duyệt.
+   */
+  youtubeApiKey: string;
   llm: OpenAiCompatibleConfig & {
     jsonMode: boolean;
     source: 'codex' | 'custom' | 'agnes';
@@ -318,7 +323,8 @@ export type CreatorServicesCredentialField =
   | 'video.seedance.apiKey'
   | 'video.kling.accessKey'
   | 'video.kling.secretKey'
-  | 'video.veo.apiKey';
+  | 'video.veo.apiKey'
+  | 'youtubeApiKey';
 
 export const defaultVolcengineSpeechBaseUrl = 'https://openspeech.bytedance.com';
 export const defaultVolcengineAsrResourceId = 'volc.seedasr.auc';
@@ -329,6 +335,7 @@ export function createDefaultCreatorServicesConfig(): CreatorServicesConfig {
   return {
     proxy: '',
     downloadRoot: '',
+    youtubeApiKey: '',
     llm: {
       baseUrl: 'http://localhost:20128/v1',
       apiKey: '9router-local',

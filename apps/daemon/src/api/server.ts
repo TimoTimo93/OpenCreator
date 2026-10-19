@@ -1755,7 +1755,14 @@ export async function buildServer(input: BuildServerInput) {
         } catch {
           return join(homedir(), 'Documents', 'OpenCreator');
         }
-      }
+      },
+      // YouTube Data API key (tùy chọn) — quét stats bằng API rẻ quota.
+      readYoutubeApiKey: async () => {
+        try { return (await creatorServicesConfigStore.read()).youtubeApiKey.trim(); }
+        catch { return ''; }
+      },
+      // yt-dlp runtime đóng gói — TikTok stats không cần trình duyệt.
+      getYtDlpRuntime: () => getYtDlpRuntime?.()
     });
   } catch (error) {
     console.warn(`Social automation init failed: ${formatError(error)}`);

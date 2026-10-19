@@ -31,6 +31,8 @@ import { decryptSecret, encryptSecret } from './crypto.js';
 import { nextAvailableSlot } from './scheduler.js';
 import { checkProxy } from './proxy-check.js';
 import { createSocialAnalytics } from './analytics.js';
+import { spawnCreatorProcess } from '../creator/process-tree.js';
+import type { YtDlpRuntime } from '../creator/yt-dlp/runtime.js';
 import { createSocialComments, type SocialLlmConfig } from './comments.js';
 import { listDownloadedVideos, type SocialDownloadItem } from './downloads.js';
 import type { SocialWorker } from './worker.js';
@@ -66,6 +68,13 @@ export type SocialServiceInput = {
   analyticsRefreshIntervalMs?: number;
   commentsScanIntervalMs?: number;
   now?: () => string;
+  /** YouTube Data API v3 key (tùy chọn) — quét thống kê bằng API thay vì trình duyệt. */
+  readYoutubeApiKey?: () => Promise<string | null | undefined>;
+  /**
+   * Runtime yt-dlp đóng gói: cho TikTok quét thống kê không cần trình duyệt.
+   * Không có → TikTok vẫn quét bằng trình duyệt của cụm (fallback).
+   */
+  getYtDlpRuntime?: () => YtDlpRuntime | undefined;
 };
 
 export type SocialClusterPatch = {
@@ -136,11 +145,23 @@ export function createSocialService(input: SocialServiceInput): SocialService {
   worker.bind({ db, screenshotDir, profileRoot, decryptToken });
 
   // GĐ3: quét thống kê + bình luận định kỳ.
+  // yt-dlp runner: spawn runtime đóng gói, timeout 60s, decode UTF-8 (không
+  // mở trình duyệt). errors → analytics tự fallback quét trình duyệt cũ.
+  const runYtDlpFn = input.getYtDlpRuntime === undefined ? undefined : (args: readonly string[]) => {
+    const runtime = input.getYtDlpRuntime!();
+    if (runtime === undefined) throw new Error('yt-dlp runtime không khả dụng');
+    return spawnYtDlpJson(runtime, args);
+  };
   const analytics = createSocialAnalytics({
     db,
     worker,
     decryptToken,
     refreshIntervalMs: input.analyticsRefreshIntervalMs ?? 6 * 60 * 60_000,
+    readYoutubeApiKey: async () => {
+      const raw = input.readYoutubeApiKey === undefined ? undefined : await input.readYoutubeApiKey();
+      return (raw ?? '').trim();
+    },
+    ...(runYtDlpFn === undefined ? {} : { runYtDlpFn }),
     log: message => { console.log(`[social] ${message}`); }
   });
   const comments = createSocialComments({
@@ -461,8 +482,51 @@ export function createSocialService(input: SocialServiceInput): SocialService {
   };
 }
 
-function normalizeISO(value: string): string | null {
-  const time = new Date(value).getTime();
+/**
+ * Spawn yt-dlp của runtime đóng gói (không mở trình duyệt): timeout 60s,
+ * giới hạn stdout 8MB, decode UTF-8 và parse JSON. Lỗi → caller fallback.
+ */
+async function spawnYtDlpJson(
+  runtime: YtDlpRuntime,
+  args: readonly string[]
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+  timeout.unref();
+  try {
+    return await new Promise<unknown>((resolve, reject) => {
+      const child = spawnCreatorProcess(runtime.executable, [
+        ...runtime.prefixArgs, ...args
+      ], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...runtime.env } }, controller.signal);
+      const chunks: Buffer[] = [];
+      let size = 0;
+      child.stdout?.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > 8 * 1024 * 1024) {
+          controller.abort();
+          reject(new Error('yt-dlp output quá lớn'));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      // Drain diagnostics — không trả extractor output trong lỗi.
+      child.stderr?.on('data', () => undefined);
+      child.once('error', reject);
+      child.once('close', code => {
+        if (code !== 0 || controller.signal.aborted) {
+          reject(new Error('yt-dlp không chạy được (timeout/lỗi)'));
+          return;
+        }
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+        catch { reject(new Error('yt-dlp output không đúng JSON')); }
+      });
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function normalizeISO(value: string): string | null {  const time = new Date(value).getTime();
   return Number.isNaN(time) ? null : new Date(time).toISOString();
 }
 

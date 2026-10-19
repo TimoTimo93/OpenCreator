@@ -27,6 +27,8 @@ type YtSelectors = {
   date_input: string;
   time_input: string;
   done_btn: string;
+  publish_confirm_btn: string;
+  published_confirmation: string;
 };
 
 const SELECTORS_PATH = new URL('./selectors.json', import.meta.url);
@@ -162,7 +164,20 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
   const doneBtn = page.locator(sel.done_btn).first();
   await doneBtn.waitFor({ state: 'visible', timeout: 300_000 });
   await doneBtn.click();
-  await page.waitForTimeout(5_000);
+  await page.waitForTimeout(3_000);
+  // Bước "Kiểm tra/Quyền" hoàn tất → hộp thoại xác nhận phát hành (laid out
+  // theo cấu trúc luồng youtube_uploader_selenium cộng đồng): best-effort —
+  // nếu duỗi ra "Publish/Đăng" trong dialog thì bấm, không thấy thì bỏ qua.
+  try {
+    const confirmBtn = page.locator(sel.publish_confirm_btn).first();
+    if (await confirmBtn.isVisible().catch(() => false)) {
+      await confirmBtn.click();
+      await page.waitForTimeout(2_000);
+    }
+  } catch {
+    // Không chặn luồng.
+  }
+  await page.waitForTimeout(3_000);
   return { status: scheduledAtLocal !== null ? 'scheduled' : 'published' };
 }
 

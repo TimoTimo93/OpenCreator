@@ -832,6 +832,7 @@ function createVideoConfig() {
   return {
     proxy: '',
     downloadRoot: '',
+    youtubeApiKey: '',
     llm: {
       baseUrl: '',
       apiKey: '',

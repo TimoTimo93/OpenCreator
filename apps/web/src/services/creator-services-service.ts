@@ -29,6 +29,12 @@ export function createCreatorServicesService(client: ClientLike) {
     saveDownloadRoot(downloadRoot: string): Promise<{ downloadRoot: string }> {
       return client.patch('/creator-services/download-root', { downloadRoot });
     },
+    getYouTubeApiKey(): Promise<{ youtubeApiKey: string }> {
+      return client.get('/creator-services/youtube-api-key');
+    },
+    saveYouTubeApiKey(youtubeApiKey: string): Promise<{ youtubeApiKey: string }> {
+      return client.patch('/creator-services/youtube-api-key', { youtubeApiKey });
+    },
     getCodexModelStatus(): Promise<CodexProviderConfig> {
       return client.get('/creator-services/model/codex/status');
     },

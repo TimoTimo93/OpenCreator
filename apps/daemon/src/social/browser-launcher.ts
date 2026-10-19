@@ -1,14 +1,19 @@
 /**
  * Lớp khởi trình duyệt chống phát hiện (Patchright):
  * - Persistent context theo cụm — cookie/login lưu tại profileDir.
- * - Ưu tiên Chrome cài sẵn (`channel: 'chrome'`), fallback Edge, cuối cùng là
- *   Chromium của Patchright. Headless=false (Studio cần phiên đăng nhập),
- *   viewport=null (dùng cửa sổ thật) và KHÔNG đụng UA/headers/custom args
- *   (theo khuyến nghị của Patchright để không lộ fingerprint).
+ * - VÂN TAY CỐ ĐỊNH THEO CỤM: `fingerprint-generator` (Apify, Apache-2.0)
+ *   sinh 1 lần duy nhất, lưu `fingerprint.json` trong profileDir; lần mở sau
+ *   ĐỌC LẠI file này và áp vào launch options (userAgent, viewport,
+ *   deviceScaleFactor, locale, timezoneId — thay `viewport: null` cố định
+ *   trước đây). Geo theo quốc gia proxy khi có nhãn cc, mặc định vi-VN.
  */
 import { chromium } from 'patchright';
 import type { BrowserContext, Page } from 'patchright';
 import type { SocialBrowserHandle } from './worker.js';
+import {
+  buildLaunchFingerprintPatch,
+  loadClusterFingerprint
+} from './fingerprint.js';
 
 export type LaunchClusterBrowserInput = {
   clusterId: string;
@@ -20,13 +25,16 @@ const CHANNEL_CANDIDATES: Array<'chrome' | 'msedge' | undefined> = ['chrome', 'm
 
 export async function launchClusterBrowser(input: LaunchClusterBrowserInput): Promise<SocialBrowserHandle> {
   const proxy = parseProxy(input.proxyServer);
+  // Vân tay cố định của cụm (cache trong file profileDir) — áp vào launch.
+  const fingerprint = await loadClusterFingerprint(input.profileDir, input.proxyServer);
+  const fingerprintPatch = buildLaunchFingerprintPatch(fingerprint);
   let lastError: Error | undefined;
   for (const channel of CHANNEL_CANDIDATES) {
     try {
       const context = await chromium.launchPersistentContext(input.profileDir, {
         ...(channel === undefined ? {} : { channel }),
         headless: false,
-        viewport: null,
+        ...fingerprintPatch,
         proxy,
         timeout: 60_000
       });

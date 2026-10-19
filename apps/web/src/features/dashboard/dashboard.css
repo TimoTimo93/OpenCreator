@@ -14687,7 +14687,7 @@
 
 .video-result-file-row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 34px;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 14px;

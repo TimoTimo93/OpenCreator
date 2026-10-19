@@ -346,35 +346,37 @@ export default function VideoTranslationResultWorkspace(props: {
                               <strong title={output.fileName}>{output.fileName ?? `${artifactLabel}-${props.targetLanguage}-V${props.version}.mp4`}</strong>
                               <small>{videoVariantFormatLabel(output.variant, l)}</small>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => props.onExport('video', output.artifactId)}
-                              aria-label={l(`下载${artifactLabel}`, `Download ${artifactLabel}`)}
-                              title={l(`下载${artifactLabel}`, `Download ${artifactLabel}`)}
-                            >
-                              <Download size={16} strokeWidth={1.8} aria-hidden="true" />
-                            </button>
-                            {props.execution === undefined
-                              && typeof output.path === 'string'
-                              && output.path.trim() !== '' ? (
+                            <div className="video-download-file-actions">
                               <button
                                 type="button"
-                                className="video-translation-secondary-action"
-                                data-social-queue-button="true"
-                                onClick={() => queueOutputForSocial(output)}
-                                aria-label={t('dashboard.social.queueToSocial')}
-                                title={t('dashboard.social.queueToSocial')}
+                                onClick={() => props.onExport('video', output.artifactId)}
+                                aria-label={l(`下载${artifactLabel}`, `Download ${artifactLabel}`)}
+                                title={l(`下载${artifactLabel}`, `Download ${artifactLabel}`)}
                               >
-                                <Send size={15} strokeWidth={1.8} aria-hidden="true" />
-                                {t('dashboard.social.queueToSocial')}
+                                <Download size={16} strokeWidth={1.8} aria-hidden="true" />
                               </button>
-                            ) : null}
-                            <OpenFolderButton
-                              label={l('打开文件夹', 'Open folder')}
-                              pending={props.openFolderPending === output.artifactId}
-                              disabled={!output.path}
-                              onClick={() => props.onOpenFolder?.({ type: 'video', artifactId: output.artifactId, path: output.path })}
-                            />
+                              {props.execution === undefined
+                                && typeof output.path === 'string'
+                                && output.path.trim() !== '' ? (
+                                <button
+                                  type="button"
+                                  className="video-translation-secondary-action"
+                                  data-social-queue-button="true"
+                                  onClick={() => queueOutputForSocial(output)}
+                                  aria-label={t('dashboard.social.queueToSocial')}
+                                  title={t('dashboard.social.queueToSocial')}
+                                >
+                                  <Send size={15} strokeWidth={1.8} aria-hidden="true" />
+                                  {t('dashboard.social.queueToSocial')}
+                                </button>
+                              ) : null}
+                              <OpenFolderButton
+                                label={l('打开文件夹', 'Open folder')}
+                                pending={props.openFolderPending === output.artifactId}
+                                disabled={!output.path}
+                                onClick={() => props.onOpenFolder?.({ type: 'video', artifactId: output.artifactId, path: output.path })}
+                              />
+                              </div>
                           </div>
                         </section>
                       );

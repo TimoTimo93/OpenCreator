@@ -388,6 +388,9 @@ function GeneralSettings(props: {
   const [downloadRoot, setDownloadRoot] = useState<string>();
   const [downloadRootDraft, setDownloadRootDraft] = useState<string>();
   const [downloadRootBusy, setDownloadRootBusy] = useState(false);
+  const [youtubeApiKey, setYoutubeApiKey] = useState<string>();
+  const [youtubeApiKeyDraft, setYoutubeApiKeyDraft] = useState<string>();
+  const [youtubeApiKeyBusy, setYoutubeApiKeyBusy] = useState(false);
   const pageIssues = usePageIssueState('settings-general');
 
   useEffect(() => {
@@ -505,6 +508,51 @@ function GeneralSettings(props: {
     return () => { canceled = true; };
   }, [props.creatorServicesService]);
 
+  useEffect(() => {
+    let canceled = false;
+    const service = props.creatorServicesService;
+    if (service === null || service === undefined) return;
+    if (typeof service.getYouTubeApiKey !== 'function') return;
+    void service.getYouTubeApiKey()
+      .then(response => {
+        if (canceled) return;
+        setYoutubeApiKey(response.youtubeApiKey);
+        setYoutubeApiKeyDraft(response.youtubeApiKey);
+      })
+      .catch(() => {
+        if (!canceled) {
+          setYoutubeApiKey(undefined);
+          setYoutubeApiKeyDraft(undefined);
+        }
+      });
+    return () => { canceled = true; };
+  }, [props.creatorServicesService]);
+
+  async function saveYouTubeApiKey() {
+    const service = props.creatorServicesService;
+    if (service === null || service === undefined) return;
+    const value = (youtubeApiKeyDraft ?? '').trim();
+    if (value === (youtubeApiKey ?? '')) return;
+    setYoutubeApiKeyBusy(true);
+    try {
+      const response = await service.saveYouTubeApiKey(value);
+      setYoutubeApiKey(response.youtubeApiKey);
+      setYoutubeApiKeyDraft(response.youtubeApiKey);
+    } catch (cause) {
+      pageIssues.captureOperationFailure(
+        'settings.youtube-api-key.save',
+        cause,
+        l(
+          '无法保存 YouTube Data API 密钥，请填写有效的密钥后重试。',
+          'Unable to save the YouTube Data API key. Enter a valid key and retry.'
+        ),
+        { retryable: true }
+      );
+    } finally {
+      setYoutubeApiKeyBusy(false);
+    }
+  }
+
   async function saveDownloadRoot(selectedValue?: string) {
     const service = props.creatorServicesService;
     if (service === null || service === undefined) return;
@@ -617,6 +665,19 @@ function GeneralSettings(props: {
               />
             )}
           </>
+        )}
+        {youtubeApiKeyDraft === undefined ? null : (
+          <StorageDirectoryRow
+            id="settings-youtube-api-key"
+            label={l('YouTube Data API Key（可选）', 'YouTube Data API key (optional)')}
+            value={youtubeApiKeyDraft}
+            savedValue={youtubeApiKey ?? ''}
+            allowEmpty
+            placeholder={l('留空则用浏览器扫描统计', 'Empty = scan stats with the browser')}
+            disabled={youtubeApiKeyBusy}
+            onChange={setYoutubeApiKeyDraft}
+            onSave={() => void saveYouTubeApiKey()}
+          />
         )}
         <SettingsColorModeRow
           value={props.colorMode}
@@ -1006,8 +1067,7 @@ function AboutSettings(props: {
   );
 }
 
-function SettingsRow(props: { label: string; value: string }) {
-  return (
+function SettingsRow(props: { label: string; value: string }) {  return (
     <div className="settings-row">
       <span>{props.label}</span>
       <strong>{props.value}</strong>
