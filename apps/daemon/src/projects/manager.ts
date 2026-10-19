@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, realpathSync, rmdirSync, statSync } from 'node:f
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { nanoid } from 'nanoid';
+import { readOpenCreatorConfig, resolveOpenCreatorPaths } from '@opencreator/config';
 import { expandHome } from '../platform/paths.js';
 import {
   normalizeDatabaseTimestamp,
@@ -36,6 +37,8 @@ export type CreateProjectManagerInput = {
   homeDir?: string;
   managedProjectRoot?: string;
   resolveManagedProjectRoot?: () => string;
+  /** Đường dẫn config.toml; mặc định suy ra từ OPENCREATOR_HOME/homedir. */
+  configFile?: string;
   idFactory?: () => string;
 };
 
@@ -46,11 +49,37 @@ export function createProjectManager(input: CreateProjectManagerInput): ProjectM
   const defaultManagedProjectRoot = input.managedProjectRoot === undefined
     ? join(homeDir, 'Documents', 'OpenCreator')
     : resolve(expandHome(input.managedProjectRoot, homeDir));
+  /**
+   * Gốc lưu project mới: ưu tiên "downloadRoot" người dùng cấu hình (vị trí lưu
+   * video đã tải về), sau đó tới resolveManagedProjectRoot (defaultProjectRoot)
+   * và cuối cùng là mặc định Documents/OpenCreator. Đường dẫn không hợp lệ sẽ
+   * bị bỏ qua với cảnh báo log và hồi về giá trị mặc định.
+   */
   const managedProjectRoot = () => resolve(expandHome(
-    input.resolveManagedProjectRoot?.() ?? defaultManagedProjectRoot,
+    configuredDownloadRoot() ?? input.resolveManagedProjectRoot?.() ?? defaultManagedProjectRoot,
     homeDir
   ));
   const createId = input.idFactory ?? (() => `project_${nanoid(10)}`);
+
+  function configuredDownloadRoot(): string | undefined {
+    try {
+      const configFile = input.configFile ?? resolveOpenCreatorPaths({ env: process.env }).configFile;
+      const creatorServices = readOpenCreatorConfig(configFile).document.creatorServices ?? {};
+      const raw = creatorServices['downloadRoot'] ?? creatorServices['download_root'];
+      const value = typeof raw === 'string' ? raw.trim() : '';
+      if (value.length === 0) return undefined;
+      const resolved = resolve(expandHome(value, homeDir));
+      mkdirSync(resolved, { recursive: true });
+      return resolved;
+    } catch (error) {
+      console.warn(
+        `[projects] Ignoring the configured download root: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return undefined;
+    }
+  }
 
   const createManagedProjectDirectory = (): string => {
     for (let attempt = 0; attempt < 5; attempt += 1) {

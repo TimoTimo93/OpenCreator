@@ -5,7 +5,7 @@ import { ApiClientError } from '../runtime/client.js';
 import type { RuntimeDependencyService } from '../services/runtime-dependency-service.js';
 import { useRuntimeDependencies } from './use-runtime-dependencies.js';
 
-/** Mock đủ bộ method drama discovery cho service test (tất cả optional với UI). */
+/** Mock đủ bộ method drama discovery + dịch cả bộ cho service test (tất cả optional với UI). */
 function dramaMocks() {
   return {
     getDramaStatus: vi.fn(async () => ({
@@ -20,7 +20,32 @@ function dramaMocks() {
     getDramaSeriesEpisodes: vi.fn(async () => ({ success: true })),
     downloadDramaBatch: vi.fn(async () => ({ success: true })),
     getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
-    translateDramaTitles: vi.fn(async () => ({ translations: {} }))
+    translateDramaTitles: vi.fn(async () => ({ translations: {} })),
+    getTranslationBatch: vi.fn(async () => ({
+      items: [],
+      paused: false,
+      counts: { queued: 0, running: 0, completed: 0, failed: 0 },
+      progress: {
+        total: 0, queued: 0, running: 0, completed: 0, failed: 0, canceled: 0, allDone: true, percent: 0
+      },
+      merge: { status: 'idle', outputPath: null, uploadReady: null, episodeCount: null, error: null },
+      uploadFolder: ''
+    })),
+    enqueueTranslationBatch: vi.fn(async () => ({
+      items: [],
+      paused: false,
+      counts: { queued: 0, running: 0, completed: 0, failed: 0 },
+      progress: {
+        total: 0, queued: 0, running: 0, completed: 0, failed: 0, canceled: 0, allDone: true, percent: 0
+      },
+      merge: { status: 'idle', outputPath: null, uploadReady: null, episodeCount: null, error: null },
+      uploadFolder: ''
+    })),
+    mergeTranslationBatch: vi.fn(async () => ({
+      status: 'idle', outputPath: null, episodeCount: null, seriesName: null
+    })),
+    revealTranslationBatch: vi.fn(async () => ({ ok: true })),
+    renameProject: vi.fn(async (projectId: string, name: string) => ({ project: { id: projectId, name } }))
   };
 }
 

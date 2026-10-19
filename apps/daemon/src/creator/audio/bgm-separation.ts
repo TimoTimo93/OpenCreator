@@ -80,8 +80,18 @@ export function separationLayout(root: string) {
 }
 
 export function buildMixFilterGraph(retention: number): string {
-  // amix chuẩn hoá trung bình hai luồng; volume nhân trước để nhạc nền đạt mức giữ.
-  return `[0:a]volume=${retention.toFixed(3)}[bgm];[1:a][bgm]amix=inputs=2:duration=longest:dropout_transition=0[aout]`;
+  // amix mặc định chia đều hai luồng (mỗi luồng còn một nửa, tức giọng lồng bị
+  // tụt ~6dB); `normalize=0` giữ nguyên âm lượng từng luồng nên nhạc nền đạt
+  // đúng mức bù `volume=retention` và giọng lồng giữ mức gốc.
+  // Giọng TTS (thường mono) được ép về stereo trước khi trộn để bản dub không
+  // bị mono; loudnorm chuẩn hoá bản mix cuối về đích -16 LUFS (TP -1.5dB,
+  // LRA 11) để cân với video nguồn.
+  return (
+    '[1:a]aformat=channel_layouts=stereo[voice];'
+    + `[0:a]volume=${retention.toFixed(3)}[bgm];`
+    + '[voice][bgm]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[mix];'
+    + '[mix]loudnorm=I=-16:TP=-1.5:LRA=11[aout]'
+  );
 }
 
 function runProcess(input: {
@@ -308,7 +318,8 @@ export async function extractSourceAudio(input: {
   return input.outputPath;
 }
 
-/** Ghép: giọng lồng mới (âm lượng gốc) + nhạc nền (volume = retention). */
+/** Ghép: giọng lồng mới (âm lượng gốc, ép stereo) + nhạc nền (volume = retention),
+ * rồi chuẩn hoá loudness cả bản mix về -16 LUFS qua loudnorm. */
 export async function mixDubVoiceWithBackground(input: {
   ffmpegPath: string;
   backgroundPath: string;
@@ -339,9 +350,56 @@ export async function mixDubVoiceWithBackground(input: {
   }
 }
 
+/**
+ * Tham số ffmpeg ghi đè audio của video dub. Không dùng `-shortest` trần (từng
+ * cắt mất đuôi video khi audio dub ngắn hơn video): `apad` đệm im vô hạn cho
+ * audio ngắn hơn và `-t` cắt bản xuất đúng bằng thời lượng video đích. Khi
+ * không đo được thời lượng video, hạ về `apad` + `-shortest` — audio luôn được
+ * đệm nên `-shortest` dừng ở cuối video, không cắt mất đuôi.
+ */
+export function buildReplaceDubbedAudioArgs(videoDurationSeconds: number | undefined): string[] {
+  return [
+    '-map', '0:v:0', '-map', '1:a:0',
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k',
+    '-af', 'apad',
+    '-movflags', '+faststart',
+    ...(videoDurationSeconds === undefined
+      ? ['-shortest']
+      : ['-t', videoDurationSeconds.toFixed(3)])
+  ];
+}
+
+/** Đo thời lượng media (giây) bằng ffprobe; trả về undefined nếu không đo được. */
+export async function probeMediaDuration(
+  ffprobePath: string,
+  mediaPath: string,
+  signal?: AbortSignal
+): Promise<number | undefined> {
+  try {
+    const stdout = await new Promise<string>((resolvePromise, reject) => {
+      execFile(
+        ffprobePath,
+        ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', mediaPath],
+        { signal, windowsHide: true, maxBuffer: 1_048_576 },
+        (error, output, errorText) => {
+          if (error) reject(error instanceof Error ? error : new Error(String(errorText || error)));
+          else resolvePromise(output);
+        }
+      );
+    });
+    const parsed = JSON.parse(stdout) as { format?: { duration?: string } };
+    const duration = Number(parsed.format?.duration);
+    return Number.isFinite(duration) && duration > 0 ? duration : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Ghi đè audio của video lồng tiếng, giữ nguyên video stream (copy). */
 export async function replaceDubbedVideoAudio(input: {
   ffmpegPath: string;
+  /** ffprobe (cùng bộ runtime với ffmpeg) để đo thời lượng trước khi mux. */
+  ffprobePath?: string;
   dubbedVideoPath: string;
   mixedAudioPath: string;
   reportProgress?: (progress: Record<string, unknown>) => void;
@@ -350,15 +408,28 @@ export async function replaceDubbedVideoAudio(input: {
   const temporaryPath = `${input.dubbedVideoPath}.bgm-restore.mp4`;
   await rm(temporaryPath, { force: true });
   input.reportProgress?.({ phase: 'bgm_remuxing', percent: 85 });
+  const videoDuration = input.ffprobePath === undefined
+    ? undefined
+    : await probeMediaDuration(input.ffprobePath, input.dubbedVideoPath, input.signal);
+  if (input.ffprobePath !== undefined) {
+    const audioDuration = await probeMediaDuration(input.ffprobePath, input.mixedAudioPath, input.signal);
+    if (videoDuration !== undefined && audioDuration !== undefined) {
+      const difference = Math.abs(videoDuration - audioDuration);
+      if (difference > 1) {
+        const warning = `BGM restore: thời lượng audio dub (${audioDuration.toFixed(3)}s) lệch `
+          + `${difference.toFixed(3)}s so với video đích (${videoDuration.toFixed(3)}s)`;
+        console.warn(`[creator] ${warning}`);
+        input.reportProgress?.({ phase: 'bgm_duration_mismatch', percent: 84, message: warning });
+      }
+    }
+  }
   await runProcess({
     executable: input.ffmpegPath,
     args: [
       '-y', '-v', 'error',
       '-i', input.dubbedVideoPath,
       '-i', input.mixedAudioPath,
-      '-map', '0:v:0', '-map', '1:a:0',
-      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k',
-      '-movflags', '+faststart', '-shortest',
+      ...buildReplaceDubbedAudioArgs(videoDuration),
       temporaryPath
     ],
     cwd: dirname(input.dubbedVideoPath),

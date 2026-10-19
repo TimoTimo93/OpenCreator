@@ -260,6 +260,7 @@ import { registerCreatorRoutes } from './routes.creator.js';
 import { registerCreatorRuntimeRoutes } from './routes.creator-runtime.js';
 import { registerCreatorDramaRoutes } from './routes.creator-drama.js';
 import { registerTranslationPipelineRoutes } from './routes.creator-translation-pipeline.js';
+import { registerTranslationBatchRoutes } from './routes.translation-batch.js';
 import { registerSocialRoutes } from './routes.social.js';
 import { launchClusterBrowser } from '../social/browser-launcher.js';
 import { createSocialService, type SocialService } from '../social/service.js';
@@ -1708,6 +1709,23 @@ export async function buildServer(input: BuildServerInput) {
     console.warn(`Translation pipeline init failed: ${formatError(error)}`);
   }
   await registerTranslationPipelineRoutes(server, translationPipeline);
+  await registerTranslationBatchRoutes(server, {
+    pipeline: translationPipeline,
+    ffmpegPath: creatorFfmpegPath,
+    ffprobePath: creatorFfprobePath,
+    // "Mở thư mục" cũng được phép mở nơi chứa artifact gốc (video đã dịch...).
+    extraAllowedRoots: [creatorJobsRoot],
+    resolveProjectFolder() {
+      // Thư mục Exports của project mặc định — cùng quy tắc đặt tên với
+      // artifact-publisher: `<outputRoot>/<Tên project>-<project id>`.
+      const project = projectManager.ensureDefaultProject();
+      const outputRoot = openCreatorSettingsStore.readStorage().settings.outputRoot;
+      return {
+        folder: join(outputRoot, `${project.name}-${project.id}`),
+        projectName: project.name
+      };
+    }
+  });
   let socialAutomation: SocialService | undefined;
   try {
     const socialWorker = createSocialWorker({

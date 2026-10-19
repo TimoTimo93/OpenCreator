@@ -5,6 +5,7 @@ import { join, normalize } from 'node:path';
 import type { CreatorArtifact, CreatorJob, CreatorJson } from '@opencreator/protocol';
 import type { CreatorCommandDispatcher } from '../command-dispatcher.js';
 import { validateMediaFile, type MediaProbe } from '../validators/media.js';
+import { parseEpisodeIndex } from './episode-index.js';
 import { mergeVideoSegments, type SegmentSpec } from './merge.js';
 /**
  * Hàng đợi tự động dịch video (chạy tuần tự, 1 video/lượt):
@@ -230,14 +231,17 @@ export function createTranslationPipelineService(
           if (path === '' || seen.has(path)) continue;
           if (draft.items.length >= MAX_SOURCE_ITEMS) break;
           seen.add(path);
+          // Không truyền episodeIndex → tự trích số tập từ tiêu đề / tên file
+          // ("Tập 01", "EP01", "S01E02", "第03集", số cuối) để ghép đúng thứ tự.
+          const episodeIndex = typeof request.episodeIndex === 'number' && Number.isFinite(request.episodeIndex)
+            ? Math.trunc(request.episodeIndex)
+            : parseEpisodeIndex(request.title, baseName(request.path));
           draft.items.push({
             id: randomUUID(),
             sourcePath: path,
             title: request.title !== undefined && request.title !== '' ? request.title : baseName(request.path),
             seriesKey: request.seriesKey ?? null,
-            episodeIndex: typeof request.episodeIndex === 'number' && Number.isFinite(request.episodeIndex)
-              ? Math.trunc(request.episodeIndex)
-              : null,
+            episodeIndex,
             addedAt: now(),
             status: 'queued',
             jobId: null,

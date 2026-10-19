@@ -988,6 +988,60 @@ describe('creator download executor', () => {
     }));
   }, 20_000);
 
+  it('saves the finished download into the configured download root', async () => {
+    await fakeBinaries();
+    const downloadRoot = join(tempDir, 'saved-videos');
+    const binaries = await fakeBinaries({ downloadRoot });
+    const workdir = join(tempDir, 'saved-root-work');
+    await mkdir(workdir, { recursive: true });
+    const probe = parsedProbe();
+    const probeArtifact = await writeProbeArtifact(workdir, probe);
+    const executor = createDownloadExecutor(binaries);
+
+    const result = await executor.run(stageInput({
+      workdir,
+      stageId: 'download',
+      state: {
+        sourceUrl: probe.requestedUrl,
+        mediaType: 'video',
+        selectedOptionId: 'video-1080-1'
+      },
+      inputArtifacts: [probeArtifact]
+    }));
+
+    const savedTo = result.outputs[0]?.metadata.savedTo;
+    expect(typeof savedTo).toBe('string');
+    expect((savedTo as string).startsWith(downloadRoot)).toBe(true);
+    expect(await readFile(savedTo as string, 'utf8')).toBe('download-video');
+  });
+
+  it('keeps the download intact when the configured download root is unusable', async () => {
+    const blockedParent = join(tempDir, 'blocked-parent');
+    await writeFile(blockedParent, 'a file, not a directory');
+    const binaries = await fakeBinaries({
+      downloadRoot: join(blockedParent, 'downloads')
+    });
+    const workdir = join(tempDir, 'blocked-root-work');
+    await mkdir(workdir, { recursive: true });
+    const probe = parsedProbe();
+    const probeArtifact = await writeProbeArtifact(workdir, probe);
+    const executor = createDownloadExecutor(binaries);
+
+    const result = await executor.run(stageInput({
+      workdir,
+      stageId: 'download',
+      state: {
+        sourceUrl: probe.requestedUrl,
+        mediaType: 'video',
+        selectedOptionId: 'video-1080-1'
+      },
+      inputArtifacts: [probeArtifact]
+    }));
+
+    expect(result.outputs[0]?.metadata.savedTo).toBeUndefined();
+    expect(result.outputs[0]?.metadata.fileName).toBe('download.mp4');
+  });
+
   it('extracts the selected audio option as an MP3 source artifact', async () => {
     const binaries = await fakeBinaries();
     const workdir = join(tempDir, 'audio-work');
@@ -1556,6 +1610,7 @@ async function fakeBinaries(input?: {
   outputName?: string;
   reportedOutputName?: string;
   splitOutputUtf8?: boolean;
+  downloadRoot?: string;
 }): Promise<{
   configStore: {
     read(): Promise<ReturnType<typeof createDefaultCreatorServicesConfig>>;
@@ -1656,6 +1711,7 @@ process.stdout.write(JSON.stringify({
 `);
   const config = createDefaultCreatorServicesConfig();
   config.proxy = 'http://127.0.0.1:7897';
+  if (input?.downloadRoot !== undefined) config.downloadRoot = input.downloadRoot;
   return {
     configStore: { read: async () => config },
     ytDlpPath: process.execPath,

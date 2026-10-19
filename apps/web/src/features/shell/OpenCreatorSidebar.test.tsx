@@ -116,8 +116,11 @@ describe('OpenCreatorSidebar', () => {
     expect(screen.queryByRole('button', { name: 'Agent动态' })).not.toBeInTheDocument();
     const primaryActions = screen.getByRole('button', { name: '工作台' }).parentElement;
     expect(primaryActions?.children[0]).toBe(screen.getByRole('button', { name: '工作台' }));
-    expect(primaryActions?.children[1]).toBe(screen.getByRole('button', { name: '模版' }));
-    expect(primaryActions?.children[2]).toBe(screen.getByRole('button', { name: '我的项目' }));
+    expect(primaryActions?.children[1]).toBe(screen.getByRole('button', { name: '视频下载器' }));
+    expect(primaryActions?.children[2]).toBe(screen.getByRole('button', { name: '视频翻译' }));
+    expect(primaryActions?.children[3]).toBe(screen.getByRole('button', { name: '多渠道管理' }));
+    expect(primaryActions?.children[4]).toBe(screen.getByRole('button', { name: '模版' }));
+    expect(primaryActions?.children[5]).toBe(screen.getByRole('button', { name: '我的项目' }));
     expect(screen.queryByRole('separator')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '搜索' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '定时任务' })).toBeInTheDocument();
@@ -163,7 +166,7 @@ describe('OpenCreatorSidebar', () => {
       .querySelector('.lucide-folder-kanban')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '设置' })
       .querySelector('.lucide-sliders-horizontal')).toBeInTheDocument();
-    expect(view.container.querySelectorAll('.sidebar-nav-icon')).toHaveLength(5);
+    expect(view.container.querySelectorAll('.sidebar-nav-icon')).toHaveLength(8);
   });
 
   it('renders global navigation in the selected display language', () => {
@@ -618,6 +621,36 @@ describe('OpenCreatorSidebar', () => {
     await user.click(screen.getByRole('button', { name: '工作台' }));
 
     expect(onOpenView).toHaveBeenCalledWith('dashboard');
+  });
+
+  it('opens the video downloader, video translation, and multi-channel workspaces', async () => {
+    const user = userEvent.setup();
+    const onOpenWorkspace = vi.fn();
+
+    renderSidebar({ onOpenWorkspace });
+
+    await user.click(screen.getByRole('button', { name: '视频下载器' }));
+    expect(onOpenWorkspace).toHaveBeenLastCalledWith('video-download');
+
+    await user.click(screen.getByRole('button', { name: '视频翻译' }));
+    expect(onOpenWorkspace).toHaveBeenLastCalledWith('video-translation');
+
+    await user.click(screen.getByRole('button', { name: '多渠道管理' }));
+    expect(onOpenWorkspace).toHaveBeenLastCalledWith('social-channels');
+  });
+
+  it('localizes the three workspace shortcuts in Vietnamese and highlights the active workspace', () => {
+    const view = renderSidebar({
+      activeWorkspace: 'video-download',
+      activeView: 'dashboard'
+    }, 'vi-VN');
+
+    expect(screen.getByRole('button', { name: 'Trình tải video' })).toHaveAttribute('aria-current');
+    expect(screen.getByRole('button', { name: 'Dịch video' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('button', { name: 'Quản Lý Đa Kênh' })).toBeInTheDocument();
+    view.unmount();
+    renderSidebar({ activeWorkspace: 'social-channels', activeView: 'dashboard' }, 'vi-VN');
+    expect(screen.getByRole('button', { name: 'Quản Lý Đa Kênh' })).toHaveAttribute('aria-current');
   });
 
   it('hides the header search action', () => {

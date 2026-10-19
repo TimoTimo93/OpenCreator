@@ -16,6 +16,9 @@ func NewPlanner(cfg Config, estimator DurationEstimator, optimizer TextOptimizer
 	if cfg.MaxChunkSize <= 0 {
 		cfg = DefaultConfig()
 	}
+	if cfg.MergeGapTolerance <= 0 {
+		cfg.MergeGapTolerance = DefaultConfig().MergeGapTolerance
+	}
 	if estimator == nil {
 		estimator = NewStatisticalEstimator()
 	}
@@ -91,7 +94,9 @@ func (p *Planner) makeChunks(cues []Cue, plan []PlanItem) []Chunk {
 
 		prev := cues[i-1]
 		gap := cue.Start - prev.End
-		shouldMergeShortCue := gap <= p.cfg.GapTolerance &&
+		// Only merge cues separated by a near-zero gap: wider gaps are natural
+		// pauses in the source video and must survive as silence in the dub.
+		shouldMergeShortCue := gap < p.cfg.MergeGapTolerance &&
 			(prev.Duration() < p.cfg.MinSubtitleDuration || cue.Duration() < p.cfg.MinSubtitleDuration)
 		mustSplit := len(current.Items) >= p.cfg.MaxChunkSize || !shouldMergeShortCue
 		if mustSplit {

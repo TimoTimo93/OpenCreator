@@ -156,7 +156,68 @@ func TestAssembleAudioRejectsEmptyPlan(t *testing.T) {
 	}
 }
 
-func TestAssembleChunkAudioUsesOneRawFilePerChunk(t *testing.T) {
+func TestAssembleChunkAudioUsesPerItemSegmentsWithOriginalPauses(t *testing.T) {
+	dir := t.TempDir()
+	rawDir := filepath.Join(dir, "raw")
+	if err := os.MkdirAll(rawDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"chunk_1.wav", "1.wav", "2.wav"} {
+		if err := os.WriteFile(filepath.Join(rawDir, name), []byte("raw"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plan := []PlanItem{
+		{Index: 1, OriginalStart: 0, OriginalEnd: 1, NewStart: 1, NewEnd: 2, SpeedFactor: 1, ChunkID: 1},
+		{Index: 2, OriginalStart: 1.5, OriginalEnd: 2.5, NewStart: 2.5, NewEnd: 4, SpeedFactor: 1, ChunkID: 1},
+	}
+	chunks := []Chunk{
+		{ID: 1, Items: []int{0, 1}, Start: 1, End: 4, SpeedFactor: 1},
+	}
+	gapSilenceDuration := ""
+	fittedInputs := []string{}
+
+	err := AssembleChunkAudio(plan, chunks, dir, filepath.Join(dir, "out.wav"), func(args []string) error {
+		out := args[len(args)-1]
+		for i, arg := range args {
+			if arg == "-i" && i+1 < len(args) {
+				fittedInputs = append(fittedInputs, args[i+1])
+			}
+			if arg == "-t" && i+1 < len(args) && strings.Contains(out, "gap") {
+				gapSilenceDuration = args[i+1]
+			}
+		}
+		return os.WriteFile(out, []byte("media"), 0644)
+	})
+	if err != nil {
+		t.Fatalf("AssembleChunkAudio() error = %v", err)
+	}
+	var rawInputs []string
+	for _, in := range fittedInputs {
+		switch filepath.Base(in) {
+		case "1.wav", "2.wav":
+			if strings.Contains(in, "raw") {
+				rawInputs = append(rawInputs, in)
+			}
+		}
+	}
+	if len(rawInputs) != 2 {
+		t.Fatalf("raw per-cue inputs = %+v, want the two per-cue raw segment files", rawInputs)
+	}
+	if gapSilenceDuration != "0.500" {
+		t.Fatalf("pause between cues = %q, want the original 0.500s gap", gapSilenceDuration)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "fitted", "concat.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := string(data)
+	if !strings.Contains(joined, "1.wav") || !strings.Contains(joined, "silence_chunk_1_gap_0.wav") || !strings.Contains(joined, "2.wav") {
+		t.Fatalf("concat list = %q, want item segments interleaved with the pause", joined)
+	}
+}
+
+func TestAssembleChunkAudioUsesOneRawFilePerSingleCueChunk(t *testing.T) {
 	dir := t.TempDir()
 	rawDir := filepath.Join(dir, "raw")
 	if err := os.MkdirAll(rawDir, 0755); err != nil {
@@ -166,10 +227,9 @@ func TestAssembleChunkAudioUsesOneRawFilePerChunk(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := []PlanItem{
-		{Index: 1, NewStart: 1, NewEnd: 2, SpeedFactor: 1, ChunkID: 1},
-		{Index: 2, NewStart: 2, NewEnd: 4, SpeedFactor: 1, ChunkID: 1},
+		{Index: 1, NewStart: 1, NewEnd: 4, SpeedFactor: 1, ChunkID: 1},
 	}
-	chunks := []Chunk{{ID: 1, Items: []int{0, 1}, Start: 1, End: 4, ActualDuration: 3, SpeedFactor: 1}}
+	chunks := []Chunk{{ID: 1, Items: []int{0}, Start: 1, End: 4, ActualDuration: 3, SpeedFactor: 1}}
 	var fittedInputs []string
 
 	err := AssembleChunkAudio(plan, chunks, dir, filepath.Join(dir, "out.wav"), func(args []string) error {
@@ -183,18 +243,44 @@ func TestAssembleChunkAudioUsesOneRawFilePerChunk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleChunkAudio() error = %v", err)
 	}
-	if len(fittedInputs) < 2 || !strings.Contains(fittedInputs[0], "chunk_1.wav") {
-		t.Fatalf("fitted inputs = %+v, want first input raw chunk file", fittedInputs)
+	var chunkInputs []string
+	for _, in := range fittedInputs {
+		if strings.HasSuffix(filepath.Base(in), "chunk_1.wav") && !strings.Contains(filepath.Base(in), "silence") {
+			chunkInputs = append(chunkInputs, in)
+		}
 	}
-	if strings.Contains(strings.Join(fittedInputs, " "), "raw/1.wav") || strings.Contains(strings.Join(fittedInputs, " "), "raw/2.wav") {
-		t.Fatalf("fitted inputs = %+v, should not use item raw files for chunk mode", fittedInputs)
+	if len(chunkInputs) < 1 {
+		t.Fatalf("fitted inputs = %+v, want the raw chunk file", fittedInputs)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "fitted", "concat.txt"))
-	if err != nil {
+	if strings.Contains(strings.Join(fittedInputs, " "), filepath.Join("raw", "1.wav")) {
+		t.Fatalf("fitted inputs = %+v, single-cue chunks should keep the chunk wav path", fittedInputs)
+	}
+}
+
+func TestAssembleChunkAudioRejectsMissingRawItemSegment(t *testing.T) {
+	dir := t.TempDir()
+	rawDir := filepath.Join(dir, "raw")
+	if err := os.MkdirAll(rawDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "silence_chunk_1.wav") || !strings.Contains(string(data), "chunk_1.wav") {
-		t.Fatalf("concat list = %q", string(data))
+	if err := os.WriteFile(filepath.Join(rawDir, "1.wav"), []byte("raw"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	plan := []PlanItem{
+		{Index: 1, NewStart: 0, NewEnd: 1, SpeedFactor: 1, ChunkID: 1},
+		{Index: 2, NewStart: 1, NewEnd: 2, SpeedFactor: 1, ChunkID: 1},
+	}
+	chunks := []Chunk{{ID: 1, Items: []int{0, 1}, Start: 0, End: 2, SpeedFactor: 1}}
+	err := AssembleChunkAudio(plan, chunks, dir, filepath.Join(dir, "out.wav"), func(args []string) error {
+		calls++
+		return os.WriteFile(args[len(args)-1], []byte("media"), 0644)
+	})
+	if err == nil || !strings.Contains(err.Error(), "raw chunk segment") {
+		t.Fatalf("AssembleChunkAudio() error = %v, want missing raw chunk segment error", err)
+	}
+	if calls != 0 {
+		t.Fatalf("runner calls = %d, want 0", calls)
 	}
 }
 

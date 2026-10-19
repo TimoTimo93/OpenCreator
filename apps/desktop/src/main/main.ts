@@ -414,7 +414,9 @@ function registerIpcHandlers(input: {
       ? { title: 'Select the default project location', buttonLabel: 'Use this location' }
       : purpose === 'output-root'
         ? { title: 'Select the output location', buttonLabel: 'Use this location' }
-        : { title: 'Add a project folder', buttonLabel: 'Add project' };
+        : purpose === 'download-root'
+          ? { title: 'Select the downloaded video location', buttonLabel: 'Use this location' }
+          : { title: 'Add a project folder', buttonLabel: 'Add project' };
     const result = await dialog.showOpenDialog({
       ...labels,
       properties: ['openDirectory']

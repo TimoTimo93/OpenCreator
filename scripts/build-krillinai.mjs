@@ -136,8 +136,8 @@ console.log(JSON.stringify({ ok: true, reused: false, outputRoot, binaries }));
 function canReuseBuild(path) {
   const cli = join(binDir, `krillinai-cli${executableSuffix}`);
   const srv = join(binDir, `krillinai-server${executableSuffix}`);
-  if (existsSync(cli) && existsSync(srv)) {
-    return true;
+  if (!existsSync(cli) || !existsSync(srv)) {
+    return false;
   }
   if (!existsSync(path)) {
     console.log('[debug] manifest does not exist:', path);

@@ -572,6 +572,8 @@ function createService(
     getCapabilities: vi.fn(async () => structuredClone(capabilities)),
     getConfig: vi.fn(async () => ({ config: structuredClone(config), configuredCredentials })),
     saveConfig: vi.fn(async next => ({ config: structuredClone(next), configuredCredentials })),
+    getDownloadRoot: vi.fn(async () => ({ downloadRoot: config.downloadRoot })),
+    saveDownloadRoot: vi.fn(async (downloadRoot: string) => ({ downloadRoot })),
     resetConfig: vi.fn(async () => ({ config: createDefaultCreatorServicesConfig(), configuredCredentials: [] })),
     testTranscriptionConnection: vi.fn(async () => ({ connected: true, model: 'sensevoice', models: ['sensevoice'], capabilities: ['audio.transcriptions'] })),
     testApiKey: vi.fn(async () => ({ valid: true })),

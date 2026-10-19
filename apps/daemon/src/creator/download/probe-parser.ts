@@ -34,6 +34,12 @@ const probeSchema = z.object({
   width: z.number().nullish(),
   height: z.number().nullish(),
   language: z.string().nullish(),
+  series: z.string().nullish(),
+  season_number: z.number().nullish(),
+  episode_number: z.number().nullish(),
+  playlist_id: z.string().nullish(),
+  playlist_title: z.string().nullish(),
+  playlist: z.string().nullish(),
   formats: z.array(formatSchema).default([])
 }).passthrough();
 
@@ -115,9 +121,31 @@ function parseSingleDownloadProbe(value: unknown, requestedUrl: string): Downloa
     duration: parsed.duration ?? null,
     width: parsed.width ?? largestDimension(formats, 'width'),
     height: parsed.height ?? largestDimension(formats, 'height'),
+    ...seriesMetadata(parsed),
     formats,
     options: createDownloadOptions(formats, parsed.duration ?? null)
   };
+}
+
+function seriesMetadata(parsed: z.infer<typeof probeSchema>): {
+  seriesId: string | null;
+  seriesName: string | null;
+} {
+  const name = firstMeaningfulText(parsed.series, parsed.playlist_title);
+  // Nhiều nền trang đặt playlist_title trùng tiêu đề video cho video đơn; khi
+  // đó không coi đó là một bộ phim.
+  const selfNamed = name === null || name === parsed.title.trim();
+  const seriesName = selfNamed ? null : name;
+  const seriesId = selfNamed ? null : firstMeaningfulText(parsed.playlist_id, parsed.playlist, seriesName);
+  return { seriesId, seriesName };
+}
+
+function firstMeaningfulText(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed !== undefined && trimmed !== '') return trimmed;
+  }
+  return null;
 }
 
 function createDownloadOptions(

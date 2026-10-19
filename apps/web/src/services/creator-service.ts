@@ -56,6 +56,9 @@ export function createCreatorService(client: ClientLike) {
       if (client.rawGet === undefined) throw new Error('Video thumbnail transport is unavailable');
       return client.rawGet(`/creator/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(probeArtifactId)}/thumbnail`);
     },
+    revealDownloadFolder(path?: string): Promise<void> {
+      return client.post('/video-downloads/reveal', path === undefined ? {} : { path }) as Promise<void>;
+    },
     openSubtitlePreview(input: CreatorSubtitlePreviewRequest, options?: { signal?: AbortSignal }): Promise<Response> {
       if (client.rawGet === undefined) throw new Error('Subtitle preview transport is unavailable');
       return client.rawGet(`/creator/subtitle-preview?${new URLSearchParams({ options: JSON.stringify(input) })}`, options);

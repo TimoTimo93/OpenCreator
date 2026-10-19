@@ -4942,6 +4942,7 @@ export function AppController(props: AppControllerProps) {
           selectedConversationId={state.selectedThreadId}
           activeView={state.activeView}
           homeActive={state.activeView === 'conversation' && props.route.view === 'home'}
+          activeWorkspace={props.route.view === 'workbench' ? props.route.tool : undefined}
           projectNavigationMode={props.projectNavigationMode}
           collapsed={effectiveSidebarCollapsed}
           autoCollapsed={sidebarAutoCollapsed}
@@ -4952,6 +4953,10 @@ export function AppController(props: AppControllerProps) {
           onSelectConversation={selectConversation}
           onSelectTask={selectSidebarTask}
           onOpenView={openPrimaryView}
+          onOpenWorkspace={workspace => {
+            closeMobileSidebar();
+            navigateToRoute({ view: 'workbench', tool: workspace });
+          }}
           onAddProject={
             projectService === null
               ? undefined

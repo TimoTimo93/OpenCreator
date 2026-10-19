@@ -27,6 +27,14 @@ export type VideoDownloadBatchView = {
   toolbarActions: ReactNode;
   editor: ReactNode;
   sourceList: ReactNode;
+  /** Tất cả nguồn (link) của hàng đợi hiện tại, gồm cả thông tin series. */
+  sources: DownloadSource[];
+  /** Thử lại một link (chạy lại probe hoặc bước download thất bại). */
+  retrySource(source: DownloadSource): Promise<void>;
+  /** Ẩn một link khỏi hàng đợi (không xóa file đã tải). */
+  removeSource(source: DownloadSource): Promise<void>;
+  /** Mở thư mục chứa video đã tải qua daemon; bỏ trống để mở thư mục gốc. */
+  revealDownloadFolder(path?: string): Promise<void>;
   resolveSession(jobId: string): CreatorSessionContextValue | undefined;
 };
 
@@ -313,6 +321,12 @@ export default function VideoDownloadBatchWorkspace(props: ComponentProps<typeof
   </>;
   const batch: VideoDownloadBatchView = {
     jobs: allJobs, hasSelectedSource: sources.some(source => source.id === activeJobId), sourceList, editor,
+    sources,
+    retrySource: source => retrySource(source),
+    removeSource: source => removeSource(source),
+    revealDownloadFolder: async path => {
+      await props.service.revealDownloadFolder(path);
+    },
     resolveSession,
     toolbarActions: hasAnalyzedVideo ? <button type="button" className="video-download-add-button" disabled={busy} onClick={() => setEditorOpen(value => !value)} aria-expanded={editorOpen} aria-controls={editorOpen ? 'video-download-add-links' : undefined}><Plus size={16} aria-hidden="true" />{l('添加链接', 'Add link')}</button> : null
   };

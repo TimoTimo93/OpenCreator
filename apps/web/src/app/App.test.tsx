@@ -905,7 +905,8 @@ describe('App', () => {
     );
 
     await user.click(await screen.findByRole('button', { name: '工作台' }));
-    await user.click(screen.getByRole('button', { name: /^视频翻译/ }));
+    await user.click(screen.getAllByRole('button', { name: /^视频翻译/ })
+      .find(node => node.className.includes('dashboard-app-card'))!);
 
     expect(await screen.findByRole('heading', { name: '视频翻译配音' })).toBeInTheDocument();
     expect(screen.queryByLabelText('OpenCreator 导航')).not.toBeInTheDocument();
@@ -1394,7 +1395,8 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: '空白视频翻译' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '工作台' }));
     expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /^视频翻译/ }));
+    await user.click(screen.getAllByRole('button', { name: /^视频翻译/ })
+      .find(node => node.className.includes('dashboard-app-card'))!);
     expect(screen.getByRole('heading', { name: '视频翻译配音' })).toBeInTheDocument();
     await user.type(
       screen.getByRole('textbox', { name: '视频链接' }),

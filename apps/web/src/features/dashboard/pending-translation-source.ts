@@ -9,6 +9,14 @@ export type PendingTranslationSource = {
   path: string;
   /** Display title of the queue task, used for notices. */
   title?: string;
+  /**
+   * Thông tin bộ phim khi tập thuộc một series (tùy chọn). Workspace dùng nó
+   * (hoặc tự dò từ hàng đợi tải) để đề nghị "Thêm cả bộ" các tập đã tải.
+   */
+  series?: {
+    id?: string;
+    title?: string;
+  };
 };
 
 let pending: PendingTranslationSource | undefined;

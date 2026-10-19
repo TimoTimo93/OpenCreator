@@ -11,17 +11,23 @@ import {
   AlertCircle,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ChevronUp,
   Clock3,
   Download,
+  ExternalLink,
   FileAudio,
   FileVideo,
+  FolderOpen,
+  Languages,
   Link2,
   LoaderCircle,
   Music2,
   PackageOpen,
   Play,
   RefreshCw,
+  Trash2,
   Video,
   XCircle
 } from 'lucide-react';
@@ -38,6 +44,12 @@ import {
   createCreatorArtifactObjectUrl,
   useOptionalCreatorSession
 } from './creator-session-store.js';
+import { setPendingTranslationSource } from './pending-translation-source.js';
+import {
+  downloadSeriesKey,
+  seriesTitleFromName,
+  type DownloadSource
+} from './video-download-batch.js';
 import type { RuntimeDependenciesController } from '../../app/use-runtime-dependencies.js';
 import type { VideoDownloadBatchView } from './VideoDownloadBatchWorkspace.js';
 
@@ -46,9 +58,18 @@ type DownloadResultTab = 'formats' | 'outputs';
 type DownloadHistoryItem = {
   ownerJobId?: string;
   sourceTitle?: string;
+  sourceUrl?: string;
+  seriesKey?: string;
+  seriesTitle?: string;
   option?: DownloadOption;
   stage?: CreatorStageRun;
   artifact?: CreatorArtifact;
+};
+type DownloadHistoryGroup = {
+  key: string;
+  title?: string;
+  series: boolean;
+  items: DownloadHistoryItem[];
 };
 type DownloadArtifactPreview = {
   artifactId: string;
@@ -91,6 +112,8 @@ export default function VideoDownloadWorkspace(props: {
   >();
   const [ytDlpRecoveryError, setYtDlpRecoveryError] = useState('');
   const [artifactPreview, setArtifactPreview] = useState<DownloadArtifactPreview>();
+  const [collapsedSeriesKeys, setCollapsedSeriesKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const [revealingFolder, setRevealingFolder] = useState(false);
   const artifactPreviewRequestRef = useRef(0);
   const artifactPreviewUrlRef = useRef<string>();
   const artifactPreviewMediaRef = useRef<HTMLMediaElement | null>(null);
@@ -176,11 +199,29 @@ export default function VideoDownloadWorkspace(props: {
       const sourceProbe = sourceProbeArtifact === undefined ? undefined : readDownloadProbe(sourceProbeArtifact.metadata);
       const artifacts = job.artifacts.filter(artifact => artifact.status === 'completed'
         && (artifact.kind === 'source_video' || artifact.kind === 'source_audio')).sort(compareArtifactFreshness);
+      const seriesId = readString(sourceProbeArtifact?.metadata.seriesId) ?? readString(job.state.seriesId);
+      const seriesName = readString(sourceProbeArtifact?.metadata.seriesName) ?? readString(job.state.seriesName);
+      const heuristicSeries = seriesTitleFromName(sourceProbe?.title);
+      const seriesTitle = seriesName ?? heuristicSeries;
+      const seriesKey = seriesId !== undefined || seriesName !== undefined
+        ? downloadSeriesKey({ ...(seriesId === undefined ? {} : { seriesId }), ...(seriesName === undefined ? {} : { seriesName }) })
+        : seriesTitle === undefined ? undefined : `name:${seriesTitle.toLocaleLowerCase()}`;
       return downloadHistoryItems(sourceProbe?.options ?? [],
         job.stages.filter(stage => stage.stageId === 'download'), artifacts, sourceProbeArtifact, sourceProbe)
-        .map(item => ({ ...item, ownerJobId: job.id, sourceTitle: sourceProbe?.title ?? sourceUrl }));
+        .map(item => ({
+          ...item,
+          ownerJobId: job.id,
+          sourceTitle: sourceProbe?.title ?? sourceUrl,
+          ...(sourceUrl === '' ? {} : { sourceUrl }),
+          ...(seriesKey === undefined ? {} : { seriesKey }),
+          ...(seriesTitle === undefined ? {} : { seriesTitle })
+        }));
     }),
     [downloadArtifacts, downloadStages, options, probe, probeArtifact, props.batch?.jobs]
+  );
+  const historyGroups = useMemo(
+    () => groupDownloadHistory(historyItems),
+    [historyItems]
   );
   const latestTaskStage = session?.job.stages.at(-1);
   const resumableStage = latestTaskStage?.status === 'canceled'
@@ -537,6 +578,65 @@ export default function VideoDownloadWorkspace(props: {
     void openArtifactPreview(artifact);
   }
 
+  function toggleSeriesGroup(key: string) {
+    setCollapsedSeriesKeys(current => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function addToTranslation(artifact: CreatorArtifact) {
+    if (artifact.path === null || artifact.path.trim() === '') return;
+    setPendingTranslationSource({
+      path: artifact.path,
+      title: artifactFileName(artifact).replace(/\.[a-z0-9]+$/i, '')
+    });
+    window.location.hash = '#/workbench?tool=video-translation';
+  }
+
+  async function revealDownloadFolder(path?: string) {
+    const reveal = props.batch?.revealDownloadFolder;
+    if (reveal === undefined || revealingFolder) return;
+    setRevealingFolder(true);
+    try {
+      await reveal(path);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message !== ''
+        ? cause.message
+        : t('dashboard.download.folderOpenFailed'));
+    } finally {
+      setRevealingFolder(false);
+    }
+  }
+
+  function historySource(item: DownloadHistoryItem): DownloadSource | undefined {
+    return props.batch?.sources.find(source => source.id === item.ownerJobId);
+  }
+
+  function openSourceLink(item: DownloadHistoryItem) {
+    const sourceUrl = item.sourceUrl
+      ?? historySource(item)?.url
+      ?? (item.ownerJobId === undefined ? url : undefined);
+    const trimmed = sourceUrl?.trim();
+    if (trimmed === undefined || trimmed === '') return;
+    window.open(trimmed, '_blank', 'noopener');
+  }
+
+  function retryHistoryItem(item: DownloadHistoryItem) {
+    const source = historySource(item);
+    if (source === undefined) return;
+    void props.batch!.retrySource(source);
+  }
+
+  function removeHistoryItem(item: DownloadHistoryItem) {
+    const source = historySource(item);
+    if (source === undefined || source.status === 'analyzing' || source.status === 'downloading') return;
+    void props.batch!.removeSource(source);
+  }
+
   function handleArtifactPreviewError(artifact: CreatorArtifact) {
     const artifactId = artifact.id;
     if (artifactPreview?.artifactId !== artifactId) return;
@@ -664,6 +764,277 @@ export default function VideoDownloadWorkspace(props: {
       {props.batch?.toolbarActions}
     </div>
   );
+
+  function renderHistoryRow(item: DownloadHistoryItem, render: { h3?: boolean } = {}) {
+    const { artifact, option, stage } = item;
+    const status = artifact === undefined
+      ? stage?.status ?? 'queued'
+      : 'succeeded';
+    const percent = downloadProgressPercent(stage, artifact);
+    const preparing = status === 'running'
+      && stage?.progress.phase === 'preparing_download';
+    const previewOpen = artifact !== undefined
+      && artifactPreview?.artifactId === artifact.id;
+    const fileName = artifact === undefined
+      ? undefined
+      : artifactFileName(artifact);
+    const source = historySource(item);
+    const sourceBusy = source !== undefined
+      && (source.status === 'analyzing' || source.status === 'downloading');
+    const artifactPath = artifact?.path?.trim();
+    const canReveal = artifactPath !== undefined && artifactPath !== ''
+      && props.batch?.revealDownloadFolder !== undefined;
+    const retriable = status === 'failed' || status === 'canceled' || status === 'interrupted';
+    return (
+      <Fragment key={`${item.ownerJobId ?? ''}:${artifact?.id ?? stage?.id ?? `${option?.id ?? 'download'}`}`}>
+      {render.h3 === true
+        ? <h3 className="video-download-work-source">{item.sourceTitle}</h3> : null}
+      <div
+        className="video-result-file-row video-download-progress-row"
+        data-status={status}
+      >
+        <span aria-hidden="true">
+          {downloadHistoryIcon(item)}
+        </span>
+        <div>
+          <strong>
+            {artifact === undefined
+              ? downloadPendingTitle(item.sourceTitle ?? probe?.title ?? url, option, l)
+              : artifactFileName(artifact)}
+          </strong>
+          <small>
+            {artifact === undefined
+              ? downloadStageDescription(stage, option, l)
+              : artifactDescription(artifact, l)}
+          </small>
+          {status === 'queued' || status === 'running' ? (
+            <div
+              className="video-download-row-progress"
+              data-indeterminate={preparing || undefined}
+              role="progressbar"
+              aria-label={preparing
+                ? l('正在准备下载', 'Preparing download')
+                : `${l('下载进度', 'Download progress')} ${Math.round(percent)}%`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={preparing
+                ? undefined
+                : Math.round(percent)}
+              aria-valuetext={preparing
+                ? l('正在准备下载', 'Preparing download')
+                : undefined}
+            >
+              <span style={preparing
+                ? undefined
+                : { width: `${percent}%` }} />
+            </div>
+          ) : null}
+        </div>
+        <div className="video-download-file-actions">
+          {artifact === undefined ? (
+            <span className="video-download-row-status">
+              {status === 'failed'
+                ? l('失败', 'Failed')
+                : status === 'canceled'
+                  ? l('已取消', 'Canceled')
+                  : status === 'interrupted'
+                    ? l('已中断', 'Interrupted')
+                    : preparing
+                      ? l('准备中', 'Preparing')
+                      : `${Math.round(percent)}%`}
+            </span>
+          ) : (
+            <>
+              {artifactPath !== undefined && artifactPath !== '' ? (
+                <button
+                  type="button"
+                  className="video-download-translate-button"
+                  onClick={() => addToTranslation(artifact)}
+                  aria-label={`${t('dashboard.download.addToTranslation')} ${fileName}`}
+                  title={t('dashboard.download.addToTranslation')}
+                >
+                  <Languages size={16} strokeWidth={1.8} aria-hidden="true" />
+                  <span>{t('dashboard.download.addToTranslation')}</span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => toggleArtifactPreview(artifact)}
+                aria-label={previewOpen
+                  ? `${l('收起预览', 'Close preview')} ${fileName}`
+                  : artifact.kind === 'source_audio'
+                    ? `${l('播放音频', 'Play audio')} ${fileName}`
+                    : `${l('预览视频', 'Preview video')} ${fileName}`}
+                title={previewOpen
+                  ? l('收起预览', 'Close preview')
+                  : artifact.kind === 'source_audio'
+                    ? l('播放音频', 'Play audio')
+                    : l('预览视频', 'Preview video')}
+              >
+                {previewOpen && artifactPreview.status === 'loading'
+                  ? <LoaderCircle className="smart-dubbing-spinner" size={16} />
+                  : previewOpen
+                    ? <ChevronUp size={16} strokeWidth={1.8} />
+                    : <Play size={16} strokeWidth={1.8} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => void downloadArtifact(artifact)}
+                aria-label={`${l('保存到本机', 'Save locally')} ${fileName}`}
+                title={l('保存到本机', 'Save locally')}
+              >
+                <Download size={16} strokeWidth={1.8} />
+              </button>
+            </>
+          )}
+          {canReveal ? (
+            <button
+              type="button"
+              disabled={revealingFolder}
+              onClick={() => void revealDownloadFolder(artifactPath)}
+              aria-label={`${t('dashboard.download.openFolder')} ${fileName ?? ''}`}
+              title={t('dashboard.download.openFolder')}
+            >
+              <FolderOpen size={16} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          ) : null}
+          {item.sourceUrl !== undefined && item.sourceUrl.trim() !== '' ? (
+            <button
+              type="button"
+              onClick={() => openSourceLink(item)}
+              aria-label={`${t('dashboard.download.openSourceLink')} ${item.sourceTitle ?? fileName ?? ''}`}
+              title={t('dashboard.download.openSourceLink')}
+            >
+              <ExternalLink size={16} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          ) : null}
+          {retriable && source !== undefined ? (
+            <button
+              type="button"
+              disabled={sourceBusy}
+              onClick={() => retryHistoryItem(item)}
+              aria-label={`${t('dashboard.download.redownload')} ${item.sourceTitle ?? fileName ?? ''}`}
+              title={t('dashboard.download.redownload')}
+            >
+              <RefreshCw size={16} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          ) : null}
+          {source !== undefined ? (
+            <button
+              type="button"
+              disabled={sourceBusy || status === 'queued' || status === 'running'}
+              onClick={() => removeHistoryItem(item)}
+              aria-label={`${t('dashboard.download.remove')} ${item.sourceTitle ?? fileName ?? ''}`}
+              title={t('dashboard.download.remove')}
+            >
+              <Trash2 size={16} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
+        {artifact !== undefined && previewOpen ? (
+          <div
+            className="video-download-media-preview"
+            data-media={artifact.kind === 'source_audio' ? 'audio' : 'video'}
+          >
+            {artifactPreview.status === 'loading' ? (
+              <div
+                className="video-download-media-status"
+                role="status"
+              >
+                <LoaderCircle
+                  className="smart-dubbing-spinner"
+                  size={18}
+                  aria-hidden="true"
+                />
+                <span>
+                  {artifact.kind === 'source_audio'
+                    ? l('正在加载音频...', 'Loading audio...')
+                    : l('正在加载视频预览...', 'Loading video preview...')}
+                </span>
+              </div>
+            ) : artifactPreview.status === 'failed' ? (
+              <div className="video-download-media-status" role="status">
+                <span>
+                  {l(
+                    '可重新加载预览或保存到本机',
+                    'Reload the preview or save the file locally.'
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void openArtifactPreview(artifact)}
+                >
+                  <RefreshCw size={15} strokeWidth={1.8} aria-hidden="true" />
+                  {l('重新加载', 'Reload')}
+                </button>
+              </div>
+            ) : artifact.kind === 'source_audio' ? (
+              <audio
+                ref={element => {
+                  artifactPreviewMediaRef.current = element;
+                }}
+                autoPlay
+                controls
+                preload="metadata"
+                src={artifactPreview.objectUrl}
+                aria-label={`${l('音频播放', 'Audio playback')} ${fileName}`}
+                onError={() => handleArtifactPreviewError(artifact)}
+              />
+            ) : (
+              <video
+                ref={element => {
+                  artifactPreviewMediaRef.current = element;
+                }}
+                autoPlay
+                controls
+                preload="metadata"
+                src={artifactPreview.objectUrl}
+                aria-label={`${l('视频预览', 'Video preview')} ${fileName}`}
+                onError={() => handleArtifactPreviewError(artifact)}
+              />
+            )}
+          </div>
+        ) : null}
+      </div>
+      </Fragment>
+    );
+  }
+
+  function renderSeriesGroup(group: DownloadHistoryGroup) {
+    const collapsed = collapsedSeriesKeys.has(group.key);
+    const count = group.items.length;
+    const active = group.items.filter(item => item.artifact === undefined
+      && (item.stage === undefined || item.stage.status === 'queued' || item.stage.status === 'running')).length;
+    const failed = group.items.filter(item => item.artifact === undefined
+      && (item.stage?.status === 'failed' || item.stage?.status === 'canceled' || item.stage?.status === 'interrupted')).length;
+    const summary = active > 0
+      ? t('dashboard.download.episodesProgress', { active, count })
+      : failed > 0
+        ? t('dashboard.download.episodesFailed', { count: failed })
+        : t('dashboard.download.episodesDone', { count });
+    return (
+      <div className="video-download-series-group" key={group.key} data-collapsed={collapsed || undefined}>
+        <button
+          type="button"
+          className="video-download-series-toggle"
+          data-collapsed={collapsed || undefined}
+          aria-expanded={!collapsed}
+          onClick={() => toggleSeriesGroup(group.key)}
+        >
+          {collapsed
+            ? <ChevronRight size={15} strokeWidth={1.8} aria-hidden="true" />
+            : <ChevronDown size={15} strokeWidth={1.8} aria-hidden="true" />}
+          <strong>{group.title}</strong>
+          <small>{t('dashboard.download.episodes', { count })} · {summary}</small>
+        </button>
+        {collapsed ? null : (
+          <div className="video-download-series-episodes">
+            {group.items.map(item => renderHistoryRow(item))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <CreatorToolShell
@@ -1052,180 +1423,25 @@ export default function VideoDownloadWorkspace(props: {
                           : l('当前任务保存的真实下载产物', 'Downloaded artifacts saved by this job')}
                       </p>
                     </div>
+                    {props.batch?.revealDownloadFolder !== undefined ? (
+                      <button
+                        type="button"
+                        disabled={revealingFolder}
+                        onClick={() => void revealDownloadFolder()}
+                        title={t('dashboard.download.openDownloadsRoot')}
+                      >
+                        <FolderOpen size={15} strokeWidth={1.8} aria-hidden="true" />
+                        {t('dashboard.download.openDownloadsRoot')}
+                      </button>
+                    ) : null}
                   </header>
                   {historyItems.length > 0 ? (
                     <div className="download-record-list">
-                      {historyItems.map((item, index) => {
-                        const { artifact, option, stage } = item;
-                        const status = artifact === undefined
-                          ? stage?.status ?? 'queued'
-                          : 'succeeded';
-                        const percent = downloadProgressPercent(stage, artifact);
-                        const preparing = status === 'running'
-                          && stage?.progress.phase === 'preparing_download';
-                        const previewOpen = artifact !== undefined
-                          && artifactPreview?.artifactId === artifact.id;
-                        const fileName = artifact === undefined
-                          ? undefined
-                          : artifactFileName(artifact);
-                        return (
-                          <Fragment key={`${item.ownerJobId ?? ''}:${artifact?.id ?? stage?.id ?? `${option?.id ?? 'download'}-${index}`}`}>
-                          {item.ownerJobId !== undefined && historyItems[index - 1]?.ownerJobId !== item.ownerJobId
-                            ? <h3 className="video-download-work-source">{item.sourceTitle}</h3> : null}
-                          <div
-                            className="video-result-file-row video-download-progress-row"
-                            data-status={status}
-                            key={artifact?.id ?? stage?.id ?? `${option?.id ?? 'download'}-${index}`}
-                          >
-                            <span aria-hidden="true">
-                              {downloadHistoryIcon(item)}
-                            </span>
-                            <div>
-                              <strong>
-                                {artifact === undefined
-                                  ? downloadPendingTitle(item.sourceTitle ?? probe?.title ?? url, option, l)
-                                  : artifactFileName(artifact)}
-                              </strong>
-                              <small>
-                                {artifact === undefined
-                                  ? downloadStageDescription(stage, option, l)
-                                  : artifactDescription(artifact, l)}
-                              </small>
-                              {status === 'queued' || status === 'running' ? (
-                                <div
-                                  className="video-download-row-progress"
-                                  data-indeterminate={preparing || undefined}
-                                  role="progressbar"
-                                  aria-label={preparing
-                                    ? l('正在准备下载', 'Preparing download')
-                                    : `${l('下载进度', 'Download progress')} ${Math.round(percent)}%`}
-                                  aria-valuemin={0}
-                                  aria-valuemax={100}
-                                  aria-valuenow={preparing
-                                    ? undefined
-                                    : Math.round(percent)}
-                                  aria-valuetext={preparing
-                                    ? l('正在准备下载', 'Preparing download')
-                                    : undefined}
-                                >
-                                  <span style={preparing
-                                    ? undefined
-                                    : { width: `${percent}%` }} />
-                                </div>
-                              ) : null}
-                            </div>
-                            {artifact === undefined ? (
-                              <span className="video-download-row-status">
-                                {status === 'failed'
-                                  ? l('失败', 'Failed')
-                                  : status === 'canceled'
-                                    ? l('已取消', 'Canceled')
-                                    : status === 'interrupted'
-                                      ? l('已中断', 'Interrupted')
-                                      : preparing
-                                        ? l('准备中', 'Preparing')
-                                        : `${Math.round(percent)}%`}
-                              </span>
-                            ) : (
-                              <div className="video-download-file-actions">
-                                <button
-                                  type="button"
-                                  onClick={() => toggleArtifactPreview(artifact)}
-                                  aria-label={previewOpen
-                                    ? `${l('收起预览', 'Close preview')} ${fileName}`
-                                    : artifact.kind === 'source_audio'
-                                      ? `${l('播放音频', 'Play audio')} ${fileName}`
-                                      : `${l('预览视频', 'Preview video')} ${fileName}`}
-                                  title={previewOpen
-                                    ? l('收起预览', 'Close preview')
-                                    : artifact.kind === 'source_audio'
-                                      ? l('播放音频', 'Play audio')
-                                      : l('预览视频', 'Preview video')}
-                                >
-                                  {previewOpen && artifactPreview.status === 'loading'
-                                    ? <LoaderCircle className="smart-dubbing-spinner" size={16} />
-                                    : previewOpen
-                                      ? <ChevronUp size={16} strokeWidth={1.8} />
-                                      : <Play size={16} strokeWidth={1.8} />}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void downloadArtifact(artifact)}
-                                  aria-label={`${l('保存到本机', 'Save locally')} ${fileName}`}
-                                  title={l('保存到本机', 'Save locally')}
-                                >
-                                  <Download size={16} strokeWidth={1.8} />
-                                </button>
-                              </div>
-                            )}
-                            {artifact !== undefined && previewOpen ? (
-                              <div
-                                className="video-download-media-preview"
-                                data-media={artifact.kind === 'source_audio' ? 'audio' : 'video'}
-                              >
-                                {artifactPreview.status === 'loading' ? (
-                                  <div
-                                    className="video-download-media-status"
-                                    role="status"
-                                  >
-                                    <LoaderCircle
-                                      className="smart-dubbing-spinner"
-                                      size={18}
-                                      aria-hidden="true"
-                                    />
-                                    <span>
-                                      {artifact.kind === 'source_audio'
-                                        ? l('正在加载音频...', 'Loading audio...')
-                                        : l('正在加载视频预览...', 'Loading video preview...')}
-                                    </span>
-                                  </div>
-                                ) : artifactPreview.status === 'failed' ? (
-                                  <div className="video-download-media-status" role="status">
-                                    <span>
-                                      {l(
-                                        '可重新加载预览或保存到本机',
-                                        'Reload the preview or save the file locally.'
-                                      )}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => void openArtifactPreview(artifact)}
-                                    >
-                                      <RefreshCw size={15} strokeWidth={1.8} aria-hidden="true" />
-                                      {l('重新加载', 'Reload')}
-                                    </button>
-                                  </div>
-                                ) : artifact.kind === 'source_audio' ? (
-                                  <audio
-                                    ref={element => {
-                                      artifactPreviewMediaRef.current = element;
-                                    }}
-                                    autoPlay
-                                    controls
-                                    preload="metadata"
-                                    src={artifactPreview.objectUrl}
-                                    aria-label={`${l('音频播放', 'Audio playback')} ${fileName}`}
-                                    onError={() => handleArtifactPreviewError(artifact)}
-                                  />
-                                ) : (
-                                  <video
-                                    ref={element => {
-                                      artifactPreviewMediaRef.current = element;
-                                    }}
-                                    autoPlay
-                                    controls
-                                    preload="metadata"
-                                    src={artifactPreview.objectUrl}
-                                    aria-label={`${l('视频预览', 'Video preview')} ${fileName}`}
-                                    onError={() => handleArtifactPreviewError(artifact)}
-                                  />
-                                )}
-                              </div>
-                            ) : null}
-                          </div>
-                          </Fragment>
-                        );
-                      })}
+                      {historyGroups.map(group => group.series && group.items.length > 1
+                        ? renderSeriesGroup(group)
+                        : group.items.map((item, index) => renderHistoryRow(item, {
+                          h3: props.batch !== undefined
+                        })))}
                     </div>
                   ) : (
                     <div className="video-result-empty">
@@ -1298,6 +1514,8 @@ function readDownloadProbe(
     duration: readNumber(metadata.duration) ?? null,
     width: readNumber(metadata.width) ?? null,
     height: readNumber(metadata.height) ?? null,
+    ...(readString(metadata.seriesId) === undefined ? {} : { seriesId: readString(metadata.seriesId) }),
+    ...(readString(metadata.seriesName) === undefined ? {} : { seriesName: readString(metadata.seriesName) }),
     formats: [],
     options
   };
@@ -1446,6 +1664,32 @@ function downloadHistoryItems(
     });
   }
   return items;
+}
+
+/** Gộp các dòng kết quả theo bộ phim: hàng cha là tên phim, hàng con là từng tập. */
+function groupDownloadHistory(items: DownloadHistoryItem[]): DownloadHistoryGroup[] {
+  const groups: DownloadHistoryGroup[] = [];
+  const seriesGroupByKey = new Map<string, DownloadHistoryGroup>();
+  items.forEach((item, index) => {
+    const series = item.seriesKey !== undefined && item.seriesTitle !== undefined;
+    const key = series
+      ? `series:${item.seriesKey}`
+      : `item:${item.ownerJobId ?? ''}:${item.artifact?.id ?? item.stage?.id ?? index}`;
+    const existing = series ? seriesGroupByKey.get(key) : undefined;
+    if (existing !== undefined) {
+      existing.items.push(item);
+      return;
+    }
+    const group: DownloadHistoryGroup = {
+      key,
+      series,
+      ...(series ? { title: item.seriesTitle } : {}),
+      items: [item]
+    };
+    groups.push(group);
+    if (series) seriesGroupByKey.set(key, group);
+  });
+  return groups;
 }
 
 function artifactMatchesProbe(

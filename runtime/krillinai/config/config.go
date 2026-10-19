@@ -124,6 +124,8 @@ type Dubbing struct {
 	MinSubtitleDuration float64 `toml:"min_subtitle_duration"`
 	MaxChunkSize        int     `toml:"max_chunk_size"`
 	GapTolerance        float64 `toml:"gap_tolerance"`
+	MergeGapTolerance   float64 `toml:"merge_gap_tolerance"`
+	MaxDriftSeconds     float64 `toml:"max_drift_seconds"`
 	SpeedMin            float64 `toml:"speed_min"`
 	SpeedAccept         float64 `toml:"speed_accept"`
 	SpeedMax            float64 `toml:"speed_max"`
@@ -214,6 +216,8 @@ var Conf = Config{
 		MinSubtitleDuration: 2.5,
 		MaxChunkSize:        5,
 		GapTolerance:        1.5,
+		MergeGapTolerance:   0.3,
+		MaxDriftSeconds:     3.0,
 		SpeedMin:            0.95,
 		SpeedAccept:         1.15,
 		SpeedMax:            1.30,

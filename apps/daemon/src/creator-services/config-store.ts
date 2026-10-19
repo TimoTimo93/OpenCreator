@@ -5,6 +5,7 @@ import type {
 } from '@opencreator/protocol';
 import { createDefaultCreatorServicesConfig } from '@opencreator/protocol';
 import { z } from 'zod';
+import { isAbsolute } from 'node:path';
 import {
   readOpenCreatorConfig,
   updateOpenCreatorConfig
@@ -85,6 +86,14 @@ const volcengineAsrSchema = z.object({
 const creatorServicesDefaults = createDefaultCreatorServicesConfig();
 const imageConfigDefault = creatorServicesDefaults.image;
 const videoConfigDefault = creatorServicesDefaults.video;
+/**
+ * Thư mục gốc lưu video sau khi tải về. Rỗng = dùng mặc định Documents/OpenCreator;
+ * chấp nhận đường dẫn tuyệt đối hoặc bắt đầu bằng "~".
+ */
+const downloadRootSchema = z.string().trim().max(4096).default('').refine(
+  value => value === '' || isAbsolute(value) || value.startsWith('~'),
+  'Download root must be an absolute directory path'
+);
 const llmConfigSchema = openAiCompatibleSchema.extend({
   jsonMode: z.boolean(),
   source: z.enum(['codex', 'custom', 'agnes']).optional(),
@@ -168,6 +177,7 @@ const ttsConfigSchema = z.object({
 
 export const creatorServicesConfigSchema = z.object({
   proxy: boundedString(2048),
+  downloadRoot: downloadRootSchema,
   llm: llmConfigSchema,
   transcription: z.object({
     provider: z.enum(['openai', 'faster-whisper', 'whisperkit', 'whisper.cpp', 'aliyun', 'volcengine', 'funasr']),

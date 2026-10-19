@@ -13,6 +13,10 @@ export type RecentDownloadedVideo = {
   path: string;
   title: string;
   cover?: string;
+  /** Thuộc một bộ phim (series) — dùng để đề nghị "Thêm cả bộ". */
+  seriesId?: string;
+  seriesTitle?: string;
+  episodeIndex?: number;
 };
 
 export default function VideoSourceInput(props: {

@@ -527,6 +527,38 @@
   .creator-services-spinner { animation: none; }
 }
 
+/* Cấu hình API: hai danh sách key (Agnes AI / ElevenLabs) nằm cùng một hàng,
+   mỗi danh sách chiếm nửa bề ngang; tự xếp dọc khi màn hình hẹp. */
+.creator-api-keys-providers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.creator-api-keys-provider {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.creator-api-keys-provider .multi-key-manager {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.creator-api-keys-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 760px) {
+  .creator-api-keys-providers,
+  .creator-api-keys-provider .creator-api-keys-fields { grid-template-columns: minmax(0, 1fr); }
+}
+
+
 @media (max-width: 760px) {
   .settings-section .creator-services-header { grid-template-columns: minmax(0, 1fr); }
   .creator-services-header > div { display: grid; gap: 4px; }

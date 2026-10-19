@@ -17,6 +17,8 @@ type Config struct {
 	MinSubtitleDuration float64
 	MaxChunkSize        int
 	GapTolerance        float64
+	MergeGapTolerance   float64
+	MaxDriftSeconds     float64
 	SpeedMin            float64
 	SpeedAccept         float64
 	SpeedMax            float64
@@ -30,6 +32,8 @@ func DefaultConfig() Config {
 		MinSubtitleDuration: 2.5,
 		MaxChunkSize:        5,
 		GapTolerance:        1.5,
+		MergeGapTolerance:   0.3,
+		MaxDriftSeconds:     3.0,
 		SpeedMin:            0.95,
 		SpeedAccept:         1.15,
 		SpeedMax:            1.30,

@@ -7,6 +7,8 @@ import type {
   CreatorTtsProvider
 } from '@opencreator/protocol';
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { accessSync, constants, mkdirSync, statSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import { ZodError } from 'zod';
 import {
   CreatorServicesConfigStoreError,
@@ -63,6 +65,37 @@ export async function registerCreatorServicesRoutes(
     } catch (error) { return sendStoreError(reply, error); }
   });
   server.get('/creator-services/capabilities', async () => readCapabilities());
+  server.get('/creator-services/download-root', async (_request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    try { return { downloadRoot: (await store.read()).downloadRoot }; }
+    catch (error) { return sendStoreError(reply, error); }
+  });
+  server.patch<{ Body: unknown }>('/creator-services/download-root', async (request, reply) => {
+    const body = request.body as { downloadRoot?: unknown } | null;
+    const downloadRoot = typeof body?.downloadRoot === 'string' ? body.downloadRoot.trim() : undefined;
+    const valid = downloadRoot !== undefined
+      && downloadRoot.length <= 4096
+      && (downloadRoot === '' || isAbsolute(downloadRoot) || downloadRoot.startsWith('~'))
+      && body !== null
+      && Object.keys(body).every(key => key === 'downloadRoot');
+    if (!valid) {
+      return reply.code(400).send(apiError(
+        'VALIDATION_FAILED',
+        'Enter an absolute folder path for downloaded videos, or clear it to use the default location'
+      ));
+    }
+    if (downloadRoot!.length > 0 && !ensureDownloadDirectory(downloadRoot!)) {
+      return reply.code(400).send(apiError(
+        'VALIDATION_FAILED',
+        'The download folder cannot be created or is not writable'
+      ));
+    }
+    try {
+      const current = await store.read();
+      const saved = await store.write({ ...current, downloadRoot: downloadRoot! });
+      return { downloadRoot: saved.downloadRoot };
+    } catch (error) { return sendStoreError(reply, error); }
+  });
   server.get('/creator-services/model/codex/status', async (_request, reply) => {
     reply.header('Cache-Control', 'no-store');
     try {
@@ -255,6 +288,18 @@ function clearOfficialAddresses(value: unknown): void {
   for (const [key, child] of Object.entries(value)) {
     if (key === 'baseUrl' || key === 'apiKey' || key === 'proxy') (value as Record<string, unknown>)[key] = '';
     else clearOfficialAddresses(child);
+  }
+}
+
+/** Tạo thư mục lưu video nếu thiếu; trả về false khi đường dẫn không dùng được. */
+function ensureDownloadDirectory(path: string): boolean {
+  try {
+    mkdirSync(path, { recursive: true });
+    if (!statSync(path).isDirectory()) return false;
+    accessSync(path, constants.W_OK);
+    return true;
+  } catch {
+    return false;
   }
 }
 

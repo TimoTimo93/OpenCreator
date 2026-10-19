@@ -100,7 +100,7 @@ export type OpenCreatorSettingsViewProps = {
   memoryThreads?: MemoryScopeOption[];
   runtimeDependencies?: RuntimeDependenciesController;
   storageSettingsService?: Pick<OpenCreatorSettingsService, 'getStorageSettings' | 'updateStorageSettings'> | null;
-  onSelectStorageDirectory?(purpose: 'default-project-root' | 'output-root'): Promise<string | null>;
+  onSelectStorageDirectory?(purpose: 'default-project-root' | 'output-root' | 'download-root'): Promise<string | null>;
   codexStatus?: CodexStatusResponse;
   initialTab?: 'general' | SettingsRouteTab;
   initialSection?: CreatorServicesSection;
@@ -376,7 +376,7 @@ function GeneralSettings(props: {
   desktopTelemetryEnabled?: boolean;
   onDesktopTelemetryEnabledChange?(enabled: boolean): void;
   storageSettingsService?: Pick<OpenCreatorSettingsService, 'getStorageSettings' | 'updateStorageSettings'> | null;
-  onSelectStorageDirectory?(purpose: 'default-project-root' | 'output-root'): Promise<string | null>;
+  onSelectStorageDirectory?(purpose: 'default-project-root' | 'output-root' | 'download-root'): Promise<string | null>;
 }) {
   const { language, preference, setPreference, t } = useAppLanguage();
   const confirm = useConfirmDialog();
@@ -385,6 +385,9 @@ function GeneralSettings(props: {
   const [storageDraft, setStorageDraft] = useState<OpenCreatorStorageSettings>();
   const [storageBusy, setStorageBusy] = useState(false);
   const [storageReloadToken, setStorageReloadToken] = useState(0);
+  const [downloadRoot, setDownloadRoot] = useState<string>();
+  const [downloadRootDraft, setDownloadRootDraft] = useState<string>();
+  const [downloadRootBusy, setDownloadRootBusy] = useState(false);
   const pageIssues = usePageIssueState('settings-general');
 
   useEffect(() => {
@@ -481,6 +484,67 @@ function GeneralSettings(props: {
       );
     }
   }
+
+  useEffect(() => {
+    let canceled = false;
+    const service = props.creatorServicesService;
+    if (service === null || service === undefined) return;
+    if (typeof service.getDownloadRoot !== 'function') return;
+    void service.getDownloadRoot()
+      .then(response => {
+        if (canceled) return;
+        setDownloadRoot(response.downloadRoot);
+        setDownloadRootDraft(response.downloadRoot);
+      })
+      .catch(() => {
+        if (!canceled) {
+          setDownloadRoot(undefined);
+          setDownloadRootDraft(undefined);
+        }
+      });
+    return () => { canceled = true; };
+  }, [props.creatorServicesService]);
+
+  async function saveDownloadRoot(selectedValue?: string) {
+    const service = props.creatorServicesService;
+    if (service === null || service === undefined) return;
+    const value = (selectedValue ?? downloadRootDraft ?? '').trim();
+    if (value === (downloadRoot ?? '')) return;
+    setDownloadRootBusy(true);
+    try {
+      const response = await service.saveDownloadRoot(value);
+      setDownloadRoot(response.downloadRoot);
+      setDownloadRootDraft(response.downloadRoot);
+    } catch (cause) {
+      pageIssues.captureOperationFailure(
+        'settings.download-root.save',
+        cause,
+        l(
+          '无法保存视频保存位置，请填写可创建且可写的绝对目录后重试。',
+          'Unable to save the downloaded video location. Enter a writable absolute path and retry.'
+        ),
+        { retryable: true }
+      );
+    } finally {
+      setDownloadRootBusy(false);
+    }
+  }
+
+  async function selectDownloadRoot() {
+    if (props.onSelectStorageDirectory === undefined) return;
+    try {
+      const selected = await props.onSelectStorageDirectory('download-root');
+      if (selected === null) return;
+      setDownloadRootDraft(selected);
+      await saveDownloadRoot(selected);
+    } catch (cause) {
+      pageIssues.captureOperationFailure(
+        'settings.download-root.select',
+        cause,
+        l('无法选择存储目录，请重试。', 'Unable to select a storage directory. Try again.')
+      );
+    }
+  }
   const defaultPermissionOptions: Array<{
     value: DefaultPermissionPreference;
     label: string;
@@ -536,6 +600,22 @@ function GeneralSettings(props: {
                 ? undefined
                 : () => void selectStorageDirectory('outputRoot')}
             />
+            {downloadRootDraft === undefined ? null : (
+              <StorageDirectoryRow
+                id="settings-download-root"
+                label={l('视频保存位置', 'Downloaded video location')}
+                value={downloadRootDraft}
+                savedValue={downloadRoot ?? ''}
+                allowEmpty
+                placeholder={l('默认：Documents/OpenCreator', 'Default: Documents/OpenCreator')}
+                disabled={downloadRootBusy}
+                onChange={setDownloadRootDraft}
+                onSave={() => void saveDownloadRoot()}
+                onSelect={props.onSelectStorageDirectory === undefined
+                  ? undefined
+                  : () => void selectDownloadRoot()}
+              />
+            )}
           </>
         )}
         <SettingsColorModeRow
@@ -632,11 +712,16 @@ function StorageDirectoryRow(props: {
   value: string;
   savedValue: string;
   disabled: boolean;
+  /** Cho phép lưu giá trị rỗng (quay về vị trí mặc định). */
+  allowEmpty?: boolean;
+  placeholder?: string;
   onChange: (value: string) => void;
   onSave: () => void;
   onSelect?: () => void;
 }) {
-  const dirty = props.value.trim().length > 0 && props.value.trim() !== props.savedValue;
+  const trimmed = props.value.trim();
+  const dirty = trimmed !== props.savedValue
+    && (props.allowEmpty === true || trimmed.length > 0);
   return (
     <div className="settings-row settings-control-row settings-directory-row">
       <label htmlFor={props.id}>{props.label}</label>
@@ -644,6 +729,7 @@ function StorageDirectoryRow(props: {
         id={props.id}
         className="settings-directory-input"
         value={props.value}
+        placeholder={props.placeholder}
         disabled={props.disabled}
         onChange={event => props.onChange(event.target.value)}
         onKeyDown={event => {

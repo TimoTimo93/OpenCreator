@@ -8,6 +8,7 @@ import {
   Download,
   FileAudio,
   FileVideo,
+  FolderOpen,
   Mic2,
   PackageOpen,
   RotateCcw,
@@ -45,6 +46,8 @@ export type VideoResultOutput = {
   variant: VideoResultVariant;
   artifactVersion: number;
   fileName?: string;
+  /** Đường dẫn file trên đĩa (nếu có) — dùng cho nút "Mở thư mục". */
+  path?: string | null;
   src?: string;
   previewLoading?: boolean;
   previewError?: string;
@@ -55,6 +58,7 @@ export type SubtitleResultOutput = {
   variant: SubtitleResultVariant;
   artifactVersion: number;
   fileName?: string;
+  path?: string | null;
   cues: SubtitleCue[];
   readOnly: boolean;
   translationPosition?: 'top' | 'bottom';
@@ -72,6 +76,7 @@ export type VoiceResultOutput = {
   artifactId: string;
   artifactVersion: number;
   fileName?: string;
+  path?: string | null;
   src?: string;
   previewLoading?: boolean;
   previewError?: string;
@@ -119,6 +124,10 @@ export default function VideoTranslationResultWorkspace(props: {
   onExport(type: 'video' | 'subtitles' | 'voice', artifactId?: string): void;
   onReloadVoice(): void;
   onPrepareSourceVideo?(): void;
+  /** "Mở thư mục": mở nơi chứa file trong trình quản lý file (REST reveal). */
+  onOpenFolder?(output: { type: 'video' | 'subtitles' | 'voice'; artifactId: string; path?: string | null }): void;
+  /** artifactId đang được mở thư mục (để vô hiệu nút trong lúc chờ). */
+  openFolderPending?: string;
   onRequestRegenerate(): void;
   onCancelRegenerate(): void;
   onConfirmRegenerate(): void;
@@ -271,6 +280,12 @@ export default function VideoTranslationResultWorkspace(props: {
                             >
                               <Download size={16} strokeWidth={1.8} aria-hidden="true" />
                             </button>
+                            <OpenFolderButton
+                              label={l('打开文件夹', 'Open folder')}
+                              pending={props.openFolderPending === output.artifactId}
+                              disabled={!output.path}
+                              onClick={() => props.onOpenFolder?.({ type: 'video', artifactId: output.artifactId, path: output.path })}
+                            />
                           </div>
                         </section>
                       );
@@ -300,6 +315,12 @@ export default function VideoTranslationResultWorkspace(props: {
                           >
                             <Download size={16} strokeWidth={1.8} aria-hidden="true" />
                           </button>
+                          <OpenFolderButton
+                            label={l('打开文件夹', 'Open folder')}
+                            pending={props.openFolderPending === output.artifactId}
+                            disabled={!output.path}
+                            onClick={() => props.onOpenFolder?.({ type: 'subtitles', artifactId: output.artifactId, path: output.path })}
+                          />
                         </div>
                       );
                     })}
@@ -324,6 +345,12 @@ export default function VideoTranslationResultWorkspace(props: {
                       >
                         <Download size={16} strokeWidth={1.8} aria-hidden="true" />
                       </button>
+                      <OpenFolderButton
+                        label={l('打开文件夹', 'Open folder')}
+                        pending={props.openFolderPending === props.voiceOutput.artifactId}
+                        disabled={!props.voiceOutput.path}
+                        onClick={() => props.onOpenFolder?.({ type: 'voice', artifactId: props.voiceOutput!.artifactId, path: props.voiceOutput!.path })}
+                      />
                     </div>
                   </div>
                 </section>
@@ -678,6 +705,26 @@ export default function VideoTranslationResultWorkspace(props: {
         </div>
       ) : null}
     </section>
+  );
+}
+
+/** Nút "Mở thư mục": hiện khi workspace truyền onOpenFolder (ẩn khi không có đường dẫn). */
+function OpenFolderButton(props: {
+  label: string;
+  pending: boolean;
+  disabled: boolean;
+  onClick(): void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={props.pending || props.disabled}
+      onClick={props.onClick}
+      aria-label={props.label}
+      title={props.label}
+    >
+      <FolderOpen size={16} strokeWidth={1.8} aria-hidden="true" />
+    </button>
   );
 }
 

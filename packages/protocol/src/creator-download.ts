@@ -138,6 +138,10 @@ export type DownloadProbe = {
   duration: number | null;
   width: number | null;
   height: number | null;
+  /** Nhận dạng bộ phim/series của video (nếu nguồn khai báo), ví dụ playlist id. */
+  seriesId?: string | null;
+  /** Tên hiển thị của bộ phim/series (nếu nguồn khai báo). */
+  seriesName?: string | null;
   formats: DownloadProbeFormat[];
   options: DownloadOption[];
 };

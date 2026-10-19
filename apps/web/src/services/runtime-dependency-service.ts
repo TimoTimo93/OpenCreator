@@ -18,6 +18,60 @@ import type {
 type ClientLike = {
   get(path: string): Promise<unknown>;
   post(path: string, body?: unknown): Promise<unknown>;
+  patch?(path: string, body?: unknown): Promise<unknown>;
+};
+
+/** Trạng thái một tập trong hàng đợi "dịch cả bộ" (daemon translation-pipeline). */
+export type TranslationBatchEpisode = {
+  id: string;
+  sourcePath: string;
+  title: string;
+  seriesKey: string | null;
+  episodeIndex: number | null;
+  addedAt: string;
+  status: string;
+  jobId: string | null;
+  error: string | null;
+  outputVideoPath: string | null;
+  durationSeconds: number | null;
+  merged: boolean;
+  mergeRunId: string | null;
+};
+
+export type TranslationBatchStatus = {
+  items: TranslationBatchEpisode[];
+  paused: boolean;
+  counts: { queued: number; running: number; completed: number; failed: number };
+  progress: {
+    total: number;
+    queued: number;
+    running: number;
+    completed: number;
+    failed: number;
+    canceled: number;
+    allDone: boolean;
+    percent: number;
+  };
+  merge: {
+    status: string;
+    outputPath: string | null;
+    uploadReady: string | null;
+    episodeCount: number | null;
+    error: string | null;
+  };
+  fullMovie?: {
+    status: string;
+    outputPath: string | null;
+    episodeCount: number | null;
+    seriesName: string | null;
+    error: string | null;
+  };
+  uploadFolder: string;
+};
+
+export type TranslationBatchEnqueueRequest = {
+  items: Array<{ path: string; title?: string; episodeIndex?: number }>;
+  seriesName?: string;
 };
 
 export function createRuntimeDependencyService(client: ClientLike) {
@@ -105,6 +159,29 @@ export function createRuntimeDependencyService(client: ClientLike) {
         titles: [...titles],
         language
       }) as Promise<HongguoDramaTitleTranslationResponse>;
+    },
+    // -------------------------------------------------------------------------
+    // Dịch cả bộ (batch translation): hàng đợi tự động + ghép full movie.
+    // -------------------------------------------------------------------------
+    getTranslationBatch(): Promise<TranslationBatchStatus> {
+      return client.get('/creator/translation-batch') as Promise<TranslationBatchStatus>;
+    },
+    enqueueTranslationBatch(request: TranslationBatchEnqueueRequest): Promise<TranslationBatchStatus> {
+      return client.post('/creator/translation-batch/enqueue', request) as Promise<TranslationBatchStatus>;
+    },
+    mergeTranslationBatch(seriesName?: string): Promise<{ status: string; outputPath: string | null; episodeCount: number | null; seriesName: string | null }> {
+      return client.post('/creator/translation-batch/merge', { seriesName }) as Promise<{ status: string; outputPath: string | null; episodeCount: number | null; seriesName: string | null }>;
+    },
+    /** Mở thư mục chứa file (Windows: Explorer chọn file). */
+    revealTranslationBatch(path: string, mode: 'file' | 'directory' = 'file'): Promise<{ ok: boolean }> {
+      return client.post('/creator/translation-batch/reveal', { path, mode }) as Promise<{ ok: boolean }>;
+    },
+    /** Đặt lại tên project ("Tên phim / bộ" trong workspace). */
+    renameProject(projectId: string, name: string): Promise<{ project: { id: string; name: string } }> {
+      if (client.patch === undefined) {
+        return Promise.reject(new Error('project_rename_unavailable'));
+      }
+      return client.patch(`/projects/${encodeURIComponent(projectId)}`, { name }) as Promise<{ project: { id: string; name: string } }>;
     }
   };
 }

@@ -47,6 +47,39 @@ func TestPlannerDoesNotMergeLongAdjacentCuesOnlyBecauseGapIsSmall(t *testing.T) 
 	}
 }
 
+func TestPlannerDoesNotMergeCuesAcrossNaturalPauses(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MergeGapTolerance = 0.3
+	cues := []Cue{
+		{Index: 1, Start: 0, End: 0.8, Text: "你好"},
+		{Index: 2, Start: 1.3, End: 2.5, Text: "我们开始吧"},
+		{Index: 3, Start: 2.9, End: 4.1, Text: "继续"},
+	}
+	planner := NewPlanner(cfg, NewStatisticalEstimator(), nil)
+	plan, chunks, err := planner.Plan(cues, types.LanguageNameSimplifiedChinese)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(plan) != 3 || len(chunks) != 3 {
+		t.Fatalf("natural pauses must split chunks instead of merging: plan=%+v chunks=%+v", plan, chunks)
+	}
+	seen := map[int]bool{}
+	for _, item := range plan {
+		if seen[item.ChunkID] {
+			t.Fatalf("cues separated by a 0.5s pause share chunk %d: %+v", item.ChunkID, plan)
+		}
+		seen[item.ChunkID] = true
+	}
+}
+
+func TestPlannerDefaultsMergeGapTolerance(t *testing.T) {
+	cfg := Config{MaxChunkSize: 5}
+	planner := NewPlanner(cfg, NewStatisticalEstimator(), nil)
+	if planner.cfg.MergeGapTolerance != DefaultConfig().MergeGapTolerance {
+		t.Fatalf("MergeGapTolerance = %v, want default %v", planner.cfg.MergeGapTolerance, DefaultConfig().MergeGapTolerance)
+	}
+}
+
 func TestPlannerRespectsMaxChunkSizeWhenMergingShortCues(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.MaxChunkSize = 2

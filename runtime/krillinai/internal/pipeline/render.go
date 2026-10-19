@@ -3,7 +3,9 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"krillin-ai/internal/service"
+	"krillin-ai/internal/service/dubbing"
 	subtitlestyle "krillin-ai/internal/subtitle_style"
 	"krillin-ai/internal/types"
 	"os"
@@ -81,6 +83,15 @@ func Render(ctx context.Context, svc StageService, req RenderRequest) (Response,
 			return failRenderStage(req, manifest, renderStage(req), "subtitle_roles_invalid", err)
 		}
 		subtitle = normalized
+	}
+	if req.Dubbed {
+		// Burn the subtitle on the dubbed audio timeline, not the original cue
+		// timing: the dub drifts as chunks get re-fitted to their speech.
+		if aligned, alignErr := dubbing.AlignSubtitleToDubPlan(subtitle, req.Workdir); alignErr == nil {
+			subtitle = aligned
+		} else {
+			manifest.Warnings = append(manifest.Warnings, fmt.Sprintf("dub timeline alignment skipped: %v", alignErr))
+		}
 	}
 	rendered, err := svc.RenderVideo(ctx, service.RenderVideoRequest{
 		Workdir:       req.Workdir,

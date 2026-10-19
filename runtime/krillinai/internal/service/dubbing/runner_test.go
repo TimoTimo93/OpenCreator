@@ -136,6 +136,61 @@ func TestRunWritesCleanedDubbingInput(t *testing.T) {
 	}
 }
 
+func TestRunPreservesIntraChunkPauseAndPerCueSegments(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.srt")
+	video := filepath.Join(dir, "origin.mp4")
+	// Two short cues separated by a 0.1s pause merge into one chunk; the
+	// pause must survive as silence between the per-cue segments.
+	if err := os.WriteFile(input, []byte("1\n00:00:00,000 --> 00:00:00,800\n你好\n\n2\n00:00:00,900 --> 00:00:02,000\n世界\n\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(video, []byte("video"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	deps := Dependencies{
+		TTS:         &fakeTTS{writeOnReturn: true},
+		Language:    "zh_cn",
+		Voice:       "voice",
+		Workdir:     dir,
+		InputSRT:    input,
+		InputVideo:  video,
+		OutputAudio: filepath.Join(dir, "tts_final_audio.wav"),
+		OutputVideo: filepath.Join(dir, "video_with_tts.mp4"),
+		Config:      DefaultConfig(),
+		FFmpeg:      fakeRunnerWritingOutputs(dir),
+		Duration: func(string) (float64, error) {
+			return 0.8, nil
+		},
+	}
+	result, err := NewRunner(deps).Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	concat, err := os.ReadFile(filepath.Join(dir, DubbingDirName, "segments", "fitted", "concat.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := string(concat)
+	if !strings.Contains(joined, "silence_chunk_1_gap_0.wav") {
+		t.Fatalf("concat list = %q, want the original inter-cue pause as silence", joined)
+	}
+	if !strings.Contains(joined, "1.wav") || !strings.Contains(joined, "2.wav") {
+		t.Fatalf("concat list = %q, want per-cue segment files", joined)
+	}
+
+	dubSRT, err := os.ReadFile(result.DubSRT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Speech fills 0 --> 0.8, the original 0.1s pause follows, then the second
+	// cue; both are stretched to the 1.0s minimum display time where possible.
+	if !strings.Contains(string(dubSRT), "00:00:00,000 --> 00:00:00,900") {
+		t.Fatalf("dub.srt = %q, want first cue clamped at the second cue start", string(dubSRT))
+	}
+}
+
 func TestRunRejectsEmptySRTBeforeWritingArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "input.srt")

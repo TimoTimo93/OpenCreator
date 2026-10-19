@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import electronUpdater from 'electron-updater';
 import { startUpdater, resolveUpdaterFeedMode } from '../src/main/updater.js';
 import type { DesktopLogger } from '../src/main/logger.js';
+import type { MessageBoxOptions, MessageBoxReturnValue } from 'electron';
 
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events');
@@ -75,8 +76,8 @@ describe('Desktop updater', () => {
     const stored = { lastCheckAt: new Date(Date.now() - 60_000).toISOString() };
     const checkStore = {
       read: () => ({ lastCheckAt: stored.lastCheckAt }),
-      write: record => {
-        stored.lastCheckAt = record.lastCheckAt;
+      write: (record: { lastCheckAt?: string }) => {
+        stored.lastCheckAt = record.lastCheckAt ?? stored.lastCheckAt;
       }
     };
     const updater = new FakeUpdater();
@@ -111,8 +112,8 @@ describe('Desktop updater', () => {
     await vi.waitFor(() => expect(updater.checkForUpdates).toHaveBeenCalledOnce());
     updater.emit('update-not-available');
     await vi.waitFor(() => expect(records).toHaveLength(1));
-    expect(records[0].lastCheckAt).toEqual(expect.any(String));
-    expect(controller.getSnapshot().lastCheckAt).toEqual(records[0].lastCheckAt);
+    expect(records[0]?.lastCheckAt).toEqual(expect.any(String));
+    expect(controller.getSnapshot().lastCheckAt).toEqual(records[0]?.lastCheckAt);
     controller.dispose();
   });
 
@@ -139,23 +140,26 @@ describe('Desktop updater', () => {
 
   it('opens a two-choice prompt when an update is available', async () => {
     const updater = new FakeUpdater();
-    const showMessageBox = vi.fn(async () => ({
+    const showMessageBox = vi.fn(async (_options: MessageBoxOptions): Promise<MessageBoxReturnValue> => ({
       response: 1,
       checkboxChecked: false
     }));
+    const showMessageBoxForUpdater = showMessageBox as unknown as NonNullable<
+      Parameters<typeof startUpdater>[0]['showMessageBox']
+    >;
     const controller = startUpdater({
       logger: fakeLogger(),
       isPackaged: true,
       updater,
       locale: 'vi-VN',
       initialCheckDelayMs: 3_600_000,
-      showMessageBox
+      showMessageBox: showMessageBoxForUpdater
     });
 
     updater.emit('update-available', { version: '3.2.9' });
     await vi.waitFor(() => expect(showMessageBox).toHaveBeenCalledOnce());
 
-    expect(showMessageBox.mock.calls[0][0].buttons).toEqual(['Cập nhật ngay', 'Để sau']);
+    expect(showMessageBox.mock.calls[0]?.[0]?.buttons).toEqual(['Cập nhật ngay', 'Để sau']);
     await vi.waitFor(() => expect(controller.getSnapshot().state).toBe('available'));
     expect(controller.getSnapshot().availableVersion).toBe('3.2.9');
     expect(updater.downloadUpdate).not.toHaveBeenCalled();
@@ -364,7 +368,7 @@ describe('Desktop updater', () => {
   it('falls back to an explicit GitHub feed without app-update.yml', () => {
     const options: unknown[] = [];
     let built: FakeUpdater | undefined;
-    const holder = electronUpdater as unknown as { NsisUpdater: unknown };
+    const holder = electronUpdater as unknown as Record<string, (...args: unknown[]) => unknown>;
     const spy = vi
       .spyOn(holder, 'NsisUpdater')
       .mockImplementation(((value: unknown) => {

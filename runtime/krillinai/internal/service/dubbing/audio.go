@@ -188,18 +188,28 @@ func AssembleChunkAudio(plan []PlanItem, chunks []Chunk, segmentsDir, outputAudi
 	concatLines := make([]string, 0, len(chunks)*2)
 	lastEnd := 0.0
 	for i, chunk := range chunks {
-		raw := rawChunkPath(segmentsDir, chunk.ID)
-		fitted := fittedChunkPath(segmentsDir, chunk.ID)
-		if err := run([]string{
-			"-y",
-			"-i", raw,
-			"-filter:a", filters[i],
-			"-ar", "44100",
-			"-ac", "1",
-			"-c:a", "pcm_s16le",
-			fitted,
-		}); err != nil {
-			return fmt.Errorf("fit chunk %d: %w", chunk.ID, err)
+		var chunkLines []string
+		if len(chunk.Items) > 1 {
+			lines, err := assembleChunkItems(plan, chunk, segmentsDir, filters[i], fittedDir, run)
+			if err != nil {
+				return err
+			}
+			chunkLines = lines
+		} else {
+			raw := rawChunkPath(segmentsDir, chunk.ID)
+			fitted := fittedChunkPath(segmentsDir, chunk.ID)
+			if err := run([]string{
+				"-y",
+				"-i", raw,
+				"-filter:a", filters[i],
+				"-ar", "44100",
+				"-ac", "1",
+				"-c:a", "pcm_s16le",
+				fitted,
+			}); err != nil {
+				return fmt.Errorf("fit chunk %d: %w", chunk.ID, err)
+			}
+			chunkLines = []string{fmt.Sprintf("file '%s'", filepath.Base(fitted))}
 		}
 
 		if chunk.Start > lastEnd {
@@ -216,10 +226,10 @@ func AssembleChunkAudio(plan []PlanItem, chunks []Chunk, segmentsDir, outputAudi
 			}); err != nil {
 				return fmt.Errorf("write silence before chunk %d: %w", chunk.ID, err)
 			}
-			concatLines = append(concatLines, fmt.Sprintf("file '%s'", filepath.Base(silence)))
+			// The pause precedes the chunk content in the assembled timeline.
+			chunkLines = append([]string{fmt.Sprintf("file '%s'", filepath.Base(silence))}, chunkLines...)
 		}
-
-		concatLines = append(concatLines, fmt.Sprintf("file '%s'", filepath.Base(fitted)))
+		concatLines = append(concatLines, chunkLines...)
 		lastEnd = chunkFittedEnd(plan, chunk)
 	}
 
@@ -239,6 +249,51 @@ func AssembleChunkAudio(plan []PlanItem, chunks []Chunk, segmentsDir, outputAudi
 		return fmt.Errorf("concat fitted audio: %w", err)
 	}
 	return nil
+}
+
+// assembleChunkItems fits and schedules every cue of a multi-cue chunk,
+// re-inserting the original inter-cue pauses as silence so the dubbed voice
+// breathes exactly where the source cues do.
+func assembleChunkItems(plan []PlanItem, chunk Chunk, segmentsDir, filter, fittedDir string, run CommandRunner) ([]string, error) {
+	lines := make([]string, 0, len(chunk.Items)*2)
+	for j, idx := range chunk.Items {
+		if idx < 0 || idx >= len(plan) {
+			return nil, fmt.Errorf("chunk %d references plan item %d out of range", chunk.ID, j)
+		}
+		item := plan[idx]
+		raw := filepath.Join(segmentsDir, "raw", fmt.Sprintf("%d.wav", item.Index))
+		fitted := fittedSegmentPath(segmentsDir, item.Index)
+		if err := run([]string{
+			"-y",
+			"-i", raw,
+			"-filter:a", filter,
+			"-ar", "44100",
+			"-ac", "1",
+			"-c:a", "pcm_s16le",
+			fitted,
+		}); err != nil {
+			return nil, fmt.Errorf("fit chunk %d segment %d: %w", chunk.ID, item.Index, err)
+		}
+		lines = append(lines, fmt.Sprintf("file '%s'", filepath.Base(fitted)))
+
+		if gap := planItemGap(plan, chunk, j); gap > 0 {
+			silence := filepath.Join(fittedDir, fmt.Sprintf("silence_chunk_%d_gap_%d.wav", chunk.ID, j))
+			if err := run([]string{
+				"-y",
+				"-f", "lavfi",
+				"-i", "anullsrc=channel_layout=mono:sample_rate=44100",
+				"-t", fmt.Sprintf("%.3f", gap),
+				"-ar", "44100",
+				"-ac", "1",
+				"-c:a", "pcm_s16le",
+				silence,
+			}); err != nil {
+				return nil, fmt.Errorf("write pause after segment %d in chunk %d: %w", item.Index, chunk.ID, err)
+			}
+			lines = append(lines, fmt.Sprintf("file '%s'", filepath.Base(silence)))
+		}
+	}
+	return lines, nil
 }
 
 func validateAssemblePlan(plan []PlanItem, segmentsDir string) ([]string, error) {
@@ -299,13 +354,36 @@ func validateAssembleChunkPlan(plan []PlanItem, chunks []Chunk, segmentsDir stri
 		}
 		filters[i] = filter
 
-		raw := rawChunkPath(segmentsDir, chunk.ID)
-		if err := ensureNonEmptyFile(raw, "raw chunk"); err != nil {
-			return nil, err
+		if len(chunk.Items) > 1 {
+			if err := validateChunkItemSegments(plan, chunk, segmentsDir); err != nil {
+				return nil, err
+			}
+		} else {
+			raw := rawChunkPath(segmentsDir, chunk.ID)
+			if err := ensureNonEmptyFile(raw, "raw chunk"); err != nil {
+				return nil, err
+			}
 		}
 		lastEnd = end
 	}
 	return filters, nil
+}
+
+func validateChunkItemSegments(plan []PlanItem, chunk Chunk, segmentsDir string) error {
+	for itemIndex, idx := range chunk.Items {
+		if idx < 0 || idx >= len(plan) {
+			return fmt.Errorf("chunk %d references plan item %d out of range", chunk.ID, itemIndex)
+		}
+		item := plan[idx]
+		if item.NewEnd <= item.NewStart {
+			return fmt.Errorf("chunk %d item %d new end must be greater than new start: start %.3f end %.3f", chunk.ID, itemIndex, item.NewStart, item.NewEnd)
+		}
+		raw := filepath.Join(segmentsDir, "raw", fmt.Sprintf("%d.wav", item.Index))
+		if err := ensureNonEmptyFile(raw, "raw chunk segment"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func chunkSpeedFactor(plan []PlanItem, chunk Chunk) float64 {

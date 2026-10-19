@@ -84,6 +84,8 @@ func (s Service) srtFileToSpeech(ctx context.Context, stepParam *types.SubtitleT
 			MinSubtitleDuration: config.Conf.Dubbing.MinSubtitleDuration,
 			MaxChunkSize:        config.Conf.Dubbing.MaxChunkSize,
 			GapTolerance:        config.Conf.Dubbing.GapTolerance,
+			MergeGapTolerance:   config.Conf.Dubbing.MergeGapTolerance,
+			MaxDriftSeconds:     config.Conf.Dubbing.MaxDriftSeconds,
 			SpeedMin:            config.Conf.Dubbing.SpeedMin,
 			SpeedAccept:         config.Conf.Dubbing.SpeedAccept,
 			SpeedMax:            config.Conf.Dubbing.SpeedMax,

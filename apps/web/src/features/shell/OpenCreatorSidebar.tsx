@@ -5,12 +5,14 @@ import {
   Archive,
   CircleAlert,
   Clock3,
+  Download,
   Folder,
   FolderCog,
   FolderKanban,
   FolderMinus,
   FolderPlus,
   FolderOpen,
+  Languages,
   LayoutTemplate,
   LoaderCircle,
   KeyRound,
@@ -28,9 +30,11 @@ import {
   SquarePen,
   Trash2,
   TriangleAlert,
+  Users,
   type LucideIcon
 } from 'lucide-react';
 import type { ActiveView } from '../../app/app-state.js';
+import type { CreatorWorkspace } from '../dashboard/creator-workspace.js';
 import { useLocalizedCopy } from '../../i18n/useLocalizedCopy.js';
 import OpenCreatorMark from '../../components/brand/OpenCreatorMark.js';
 import { ConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
@@ -59,12 +63,16 @@ export function OpenCreatorSidebar(props: {
   selectedConversationId?: string;
   activeView: ActiveView;
   homeActive?: boolean;
+  /** Không gian làm việc đang mở trên workbench (nếu có), để tô sáng đúng nút. */
+  activeWorkspace?: CreatorWorkspace;
   projectNavigationMode?: 'library' | 'tree';
   collapsed?: boolean;
   autoCollapsed?: boolean;
   colorMode?: ColorMode;
   onNewConversation(projectId?: string): void;
   onOpenHome(): void;
+  /** Mở thẳng một không gian làm việc (Trình tải video, Dịch video, Quản Lý Đa Kênh…). */
+  onOpenWorkspace?(workspace: CreatorWorkspace): void;
   onSelectProject(projectId: string): void;
   onSelectConversation(conversationId: string): void;
   onSelectTask(threadId: string): void;  onOpenView(view: ActiveView): void;
@@ -137,6 +145,24 @@ export function OpenCreatorSidebar(props: {
       icon: PanelsTopLeft,
       current: props.activeView === 'dashboard',
       onClick: () => props.onOpenView('dashboard')
+    },
+    {
+      label: t('nav.videoDownloader'),
+      icon: Download,
+      current: props.activeWorkspace === 'video-download',
+      onClick: () => props.onOpenWorkspace?.('video-download')
+    },
+    {
+      label: t('nav.videoTranslation'),
+      icon: Languages,
+      current: props.activeWorkspace === 'video-translation',
+      onClick: () => props.onOpenWorkspace?.('video-translation')
+    },
+    {
+      label: t('nav.multiChannel'),
+      icon: Users,
+      current: props.activeWorkspace === 'social-channels',
+      onClick: () => props.onOpenWorkspace?.('social-channels')
     },
     {
       label: t('nav.home'),

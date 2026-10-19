@@ -87,6 +87,18 @@ func GenerateRawChunkSegments(
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
+		if len(outChunks[i].Items) > 1 {
+			// Multi-cue chunks synthesize each cue separately so the natural
+			// pause between cues survives as silence during assembly instead of
+			// being read away as one run-on sentence.
+			if err := generateChunkItemSegments(tts, outPlan, outChunks[i], voice, rawDir, run, duration); err != nil {
+				return nil, nil, err
+			}
+			if reportProgress != nil {
+				reportProgress(i+1, len(outChunks))
+			}
+			continue
+		}
 		text, err := chunkSpeechText(outPlan, outChunks[i])
 		if err != nil {
 			return nil, nil, err
@@ -117,6 +129,47 @@ func GenerateRawChunkSegments(
 	}
 
 	return outPlan, outChunks, nil
+}
+
+// generateChunkItemSegments synthesizes every cue of a multi-cue chunk on its
+// own and records the measured duration on the plan item, so assembly can
+// rebuild the original inter-cue gaps.
+func generateChunkItemSegments(
+	tts types.Ttser,
+	plan []PlanItem,
+	chunk Chunk,
+	voice,
+	rawDir string,
+	run CommandRunner,
+	duration DurationProbe,
+) error {
+	for _, idx := range chunk.Items {
+		if idx < 0 || idx >= len(plan) {
+			return fmt.Errorf("chunk %d references plan item %d out of range", chunk.ID, idx)
+		}
+		item := plan[idx]
+		output := filepath.Join(rawDir, fmt.Sprintf("%d.wav", item.Index))
+		text := strings.Join(strings.Fields(item.SpokenText), " ")
+		if IsSilenceOnlyText(text) {
+			if err := WriteTinySilence(output, run); err != nil {
+				return fmt.Errorf("write silence for chunk %d segment %d: %w", chunk.ID, item.Index, err)
+			}
+		} else {
+			if tts == nil {
+				return errors.New("tts is required for non-silence text")
+			}
+			if err := retryTTS(tts, text, voice, output, 3); err != nil {
+				return fmt.Errorf("tts chunk %d segment %d failed: %w", chunk.ID, item.Index, err)
+			}
+		}
+
+		dur, err := duration(output)
+		if err != nil {
+			return fmt.Errorf("measure chunk %d segment %d duration failed for %s: %w", chunk.ID, item.Index, output, err)
+		}
+		plan[idx].ActualDuration = dur
+	}
+	return nil
 }
 
 func chunkSpeechText(plan []PlanItem, chunk Chunk) (string, error) {

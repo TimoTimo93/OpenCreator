@@ -23,6 +23,12 @@ export function createCreatorServicesService(client: ClientLike) {
   return {
     getNetwork(): Promise<{ proxy: string }> { return client.get('/creator-services/network'); },
     saveNetwork(network: { proxy: string }): Promise<{ proxy: string }> { return client.patch('/creator-services/network', network); },
+    getDownloadRoot(): Promise<{ downloadRoot: string }> {
+      return client.get('/creator-services/download-root');
+    },
+    saveDownloadRoot(downloadRoot: string): Promise<{ downloadRoot: string }> {
+      return client.patch('/creator-services/download-root', { downloadRoot });
+    },
     getCodexModelStatus(): Promise<CodexProviderConfig> {
       return client.get('/creator-services/model/codex/status');
     },

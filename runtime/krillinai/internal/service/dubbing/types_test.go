@@ -7,6 +7,9 @@ func TestDefaultConfigValues(t *testing.T) {
 	if cfg.MinSubtitleDuration != 2.5 || cfg.MaxChunkSize != 5 || cfg.GapTolerance != 1.5 {
 		t.Fatalf("DefaultConfig timing = %+v", cfg)
 	}
+	if cfg.MergeGapTolerance != 0.3 || cfg.MaxDriftSeconds != 3.0 {
+		t.Fatalf("DefaultConfig merge/drift = %v %v, want 0.3 and 3.0", cfg.MergeGapTolerance, cfg.MaxDriftSeconds)
+	}
 	if cfg.SpeedMin != 0.95 || cfg.SpeedAccept != 1.15 || cfg.SpeedMax != 1.30 {
 		t.Fatalf("DefaultConfig speed = %+v", cfg)
 	}

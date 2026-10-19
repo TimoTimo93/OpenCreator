@@ -595,6 +595,11 @@ async function restoreBackgroundMusicForDubbedStage(
   ));
   if (ffmpeg === undefined) return artifacts;
   const ffmpegPath = resolveInside(input.resourceRoot, ffmpeg.path);
+  const ffprobe = input.manifest.resources.find(resource => (
+    resource.kind === 'executable'
+    && /(?:^|\/)ffprobe(?:\.exe)?$/i.test(resource.path)
+  ));
+  const ffprobePath = ffprobe === undefined ? undefined : resolveInside(input.resourceRoot, ffprobe.path);
 
   const reportLocal = (progress: Record<string, unknown>) => input.stage.reportProgress({
     krillinMode: 'local-audio',
@@ -648,6 +653,7 @@ async function restoreBackgroundMusicForDubbedStage(
       const dubbedVideoPath = resolve(input.jobsRoot, dubbedVideo.relativePath);
       await replaceDubbedVideoAudio({
         ffmpegPath,
+        ffprobePath,
         dubbedVideoPath,
         mixedAudioPath: mixedPath,
         reportProgress: reportLocal,

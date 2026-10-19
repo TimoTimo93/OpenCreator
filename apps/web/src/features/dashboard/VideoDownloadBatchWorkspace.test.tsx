@@ -5,7 +5,8 @@ import { LanguageProvider } from '../../i18n/LanguageProvider.js';
 import type { CreatorWebService } from '../../services/creator-service.js';
 import { CreatorSessionProvider } from './creator-session-store.js';
 import VideoDownloadBatchWorkspace from './VideoDownloadBatchWorkspace.js';
-import { DOWNLOAD_BATCH_HIDDEN, DOWNLOAD_BATCH_PARENT, parseDownloadLink } from './video-download-batch.js';
+import { peekPendingTranslationSource, takePendingTranslationSource } from './pending-translation-source.js';
+import { DOWNLOAD_BATCH_HIDDEN, DOWNLOAD_BATCH_PARENT, parseDownloadLink, seriesTitleFromName } from './video-download-batch.js';
 
 const firstUrl = 'https://www.youtube.com/watch?v=first';
 type CreateDownloadJobRequest = Extract<CreateCreatorJobRequest, { templateId: string }>;
@@ -277,6 +278,59 @@ describe('video download link batches', () => {
     expect(screen.queryByRole('button', { name: '下载 1080p' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '作品' }));
     expect(screen.getByText('root.mp4')).toBeInTheDocument();
+  });
+
+  it('derives the series name from episode titles for grouping', () => {
+    expect(seriesTitleFromName('Phim A - Tập 02')).toBe('Phim A');
+    expect(seriesTitleFromName('Phim A - Tap 02')).toBe('Phim A');
+    expect(seriesTitleFromName('悬镜 第5集')).toBe('悬镜');
+    expect(seriesTitleFromName('Show S02E05')).toBe('Show');
+    expect(seriesTitleFromName('Phim A')).toBeUndefined();
+    expect(seriesTitleFromName('Tập 02')).toBeUndefined();
+    expect(seriesTitleFromName('')).toBeUndefined();
+  });
+
+  it('groups episodes of one series under a collapsible parent row in Works', async () => {
+    const ep1 = readyJob('child-1', firstUrl, 'root');
+    ep1.artifacts[0]!.metadata.title = 'Phim A - Tập 01';
+    ep1.artifacts.push(fileArtifact(ep1));
+    const ep2 = readyJob('child-2', secondUrl, 'root');
+    ep2.artifacts[0]!.metadata.title = 'Phim A - Tập 02';
+    ep2.artifacts.push(fileArtifact(ep2));
+    const root = readyJob('root', thirdUrl);
+    root.artifacts.push(fileArtifact(root));
+    setup(root, [ep1, ep2]);
+
+    fireEvent.click(screen.getByRole('tab', { name: '作品' }));
+    expect(await screen.findByText('child-1.mp4')).toBeInTheDocument();
+    expect(screen.getByText('child-2.mp4')).toBeInTheDocument();
+    // Hai tập cùng bộ phim gộp thành một hàng cha; link lẻ vẫn có tiêu đề riêng.
+    expect(screen.getByRole('heading', { name: 'Video third' })).toBeInTheDocument();
+    const toggle = screen.getByText('Phim A', { selector: '.video-download-series-toggle > strong' }).closest('button')!;
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveTextContent('共 2 集');
+    expect(toggle).toHaveTextContent('已下载 2 集');
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.queryByText('child-1.mp4')).not.toBeInTheDocument());
+    expect(screen.queryByText('child-2.mp4')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Phim A', { selector: '.video-download-series-toggle > strong' }).closest('button')!);
+    await screen.findByText('child-1.mp4');
+    expect(screen.getByText('child-2.mp4')).toBeInTheDocument();
+  });
+
+  it('hands a completed download to the translation workspace from the works row', async () => {
+    takePendingTranslationSource();
+    const child = readyJob('child', secondUrl, 'root');
+    child.artifacts.push(fileArtifact(child));
+    setup(readyJob('root', firstUrl), [child]);
+
+    fireEvent.click(screen.getByRole('tab', { name: '作品' }));
+    fireEvent.click(await screen.findByRole('button', { name: '加入视频翻译 child.mp4' }));
+
+    expect(peekPendingTranslationSource()).toEqual({ path: '/tmp/child.mp4', title: 'child' });
+    expect(window.location.hash).toBe('#/workbench?tool=video-translation');
   });
 });
 

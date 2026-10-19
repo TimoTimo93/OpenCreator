@@ -20,7 +20,7 @@ export type DesktopPreferences = {
   telemetryEnabled: boolean;
 };
 
-export type DirectorySelectionPurpose = 'project' | 'default-project-root' | 'output-root';
+export type DirectorySelectionPurpose = 'project' | 'default-project-root' | 'output-root' | 'download-root';
 export type ExternalNavigation = { navigate(url: string): void; close(): void };
 
 export type HostWindowChrome = {

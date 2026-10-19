@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { copyFile, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type {
   CreatorJson,
@@ -20,6 +22,7 @@ import { CreatorExecutorError } from '../executor.js';
 import { sanitizeIssueDetail } from '../issues.js';
 import { spawnCreatorProcess } from '../process-tree.js';
 import { validateMediaFile } from '../validators/media.js';
+import { expandHome } from '../../platform/paths.js';
 import { withYtDlpProxy } from '../yt-dlp/args.js';
 import type { YtDlpRuntime } from '../yt-dlp/runtime.js';
 import { parseDownloadProbe } from './probe-parser.js';
@@ -71,15 +74,17 @@ export function createDownloadExecutor(
           'Only public YouTube, Bilibili, X, TikTok, Instagram, Douyin, Facebook, Xiaohongshu, Pinterest, and Reddit video URLs are supported'
         );
       }
-      const proxy = (await input.configStore.read()).proxy.trim();
+      const settings = await input.configStore.read();
+      const proxy = settings.proxy.trim();
+      const downloadRoot = settings.downloadRoot.trim();
       if (stage.stageRun.stageId === 'probe') {
         return probe(input, url, proxy, stage);
       }
       if (stage.stageRun.stageId === 'download') {
         return stage.job.templateId === 'video-download'
           && stage.job.templateVersion >= 2
-          ? downloadSelectedOption(input, url, proxy, stage)
-          : downloadLegacy(input, url, proxy, stage);
+          ? downloadSelectedOption(input, url, proxy, stage, downloadRoot)
+          : downloadLegacy(input, url, proxy, stage, downloadRoot);
       }
       if (stage.stageRun.stageId === 'acquire-source') {
         if (!isYoutube(url)) {
@@ -173,7 +178,8 @@ async function downloadSelectedOption(
   input: DownloadExecutorOptions,
   url: string,
   proxy: string,
-  stage: CreatorExecutorInput
+  stage: CreatorExecutorInput,
+  downloadRoot = ''
 ): Promise<CreatorExecutorResult> {
   const probe = await readProbe(stage);
   if (normalizeSourceUrl(probe.requestedUrl) !== normalizeSourceUrl(url)) {
@@ -274,6 +280,9 @@ async function downloadSelectedOption(
     option,
     output
   );
+  const savedTo = downloadRoot.length > 0
+    ? await copyDownloadedFileToRoot(downloadRoot, output.path)
+    : undefined;
   const progress = {
     status: 'succeeded',
     phase: 'completed',
@@ -288,7 +297,10 @@ async function downloadSelectedOption(
       kind: option.mediaType === 'audio' ? 'source_audio' : 'source_video',
       status: 'completed',
       path: output.path,
-      metadata
+      metadata: {
+        ...metadata,
+        ...(savedTo === undefined ? {} : { savedTo })
+      }
     }],
     progress
   };
@@ -522,7 +534,8 @@ async function downloadLegacy(
   input: DownloadExecutorOptions,
   url: string,
   proxy: string,
-  stage: CreatorExecutorInput
+  stage: CreatorExecutorInput,
+  downloadRoot = ''
 ): Promise<CreatorExecutorResult> {
   const probe = await readProbe(stage);
   const formatId = typeof stage.job.state.formatId === 'string'
@@ -581,6 +594,9 @@ async function downloadLegacy(
     input.ffprobePrefixArgs
   );
   const info = await stat(path);
+  const savedTo = downloadRoot.length > 0
+    ? await copyDownloadedFileToRoot(downloadRoot, path)
+    : undefined;
   return {
     outputs: [{
       kind: 'source_video',
@@ -593,7 +609,8 @@ async function downloadLegacy(
         size: info.size,
         bytes: info.size,
         mimeType: mimeTypeFor(path),
-        sha256: await sha256File(path)
+        sha256: await sha256File(path),
+        ...(savedTo === undefined ? {} : { savedTo })
       }
     }]
   };
@@ -617,6 +634,47 @@ async function readProbe(stage: CreatorExecutorInput): Promise<DownloadProbe> {
       'Download probe could not be read'
     );
   }
+}
+
+/**
+ * Sao chép tệp đã tải về vào thư mục lưu video người dùng cấu hình
+ * (downloadRoot). Tạo thư mục nếu thiếu; đường dẫn không hợp lệ hoặc lỗi ghi
+ * chỉ cảnh báo log và bỏ qua bản sao — kết quả tải về gốc vẫn nguyên vẹn.
+ */
+async function copyDownloadedFileToRoot(
+  root: string,
+  path: string
+): Promise<string | undefined> {
+  try {
+    const target = resolve(expandHome(root, homedir()));
+    if (!isAbsolute(target)) return undefined;
+    await mkdir(target, { recursive: true });
+    const destination = await availableDownloadDestination(target, basename(path));
+    await copyFile(path, destination);
+    return destination;
+  } catch (error) {
+    console.warn(
+      `[download] Could not save the downloaded file into the configured download root: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return undefined;
+  }
+}
+
+async function availableDownloadDestination(
+  directory: string,
+  fileName: string
+): Promise<string> {
+  const extension = extname(fileName);
+  const stem = basename(fileName, extension);
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const candidate = attempt === 0
+      ? join(directory, fileName)
+      : join(directory, `${stem} (${attempt})${extension}`);
+    if (!existsSync(candidate)) return candidate;
+  }
+  return join(directory, `${stem}-${Date.now()}${extension}`);
 }
 
 function downloadPartWeights(
@@ -787,7 +845,13 @@ function sourceMetadata(probe: DownloadProbe): Record<string, CreatorJson> {
     sourceId: probe.id,
     title: probe.title,
     uploader: probe.uploader,
-    thumbnailUrl: probe.thumbnailUrl
+    thumbnailUrl: probe.thumbnailUrl,
+    ...(probe.seriesId === undefined || probe.seriesId === null
+      ? {}
+      : { seriesId: probe.seriesId }),
+    ...(probe.seriesName === undefined || probe.seriesName === null
+      ? {}
+      : { seriesName: probe.seriesName })
   };
 }
 

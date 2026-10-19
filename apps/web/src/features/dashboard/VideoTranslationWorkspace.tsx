@@ -31,6 +31,7 @@ import { LocalTranscriptionNotice } from './LocalTranscriptionNotice.js';
 import { useLocalizedCopy, type LocalizeCopy } from '../../i18n/useLocalizedCopy.js';
 import type { CreatorServicesSettingsService } from '../../services/creator-services-service.js';
 import type { VideoMetadataService } from '../../services/video-metadata-service.js';
+import type { TranslationBatchStatus } from '../../services/runtime-dependency-service.js';
 import VideoTranslationAgentPanel from './VideoTranslationAgentPanel.js';
 import CreatorResizableLayout from './CreatorResizableLayout.js';
 import CreatorTaskSummary from './CreatorTaskSummary.js';
@@ -1721,6 +1722,16 @@ export default function VideoTranslationWorkspace(props: {
   // gần nhất" ở bước chọn nguồn.
   const [recentDownloads, setRecentDownloads] = useState<RecentDownloadedVideo[]>([]);
   const [recentDownloadsLoading, setRecentDownloadsLoading] = useState(false);
+  // "Dịch cả bộ": bộ phim đang làm việc (dò từ hàng đợi tải Hồng Quả), trạng
+  // thái hàng chờ dịch + ghép full movie theo tiến độ tổng.
+  const [activeSeries, setActiveSeries] = useState<{ id: string | null; title: string | null }>();
+  const [seriesNameInput, setSeriesNameInput] = useState('');
+  const [batchStatus, setBatchStatus] = useState<TranslationBatchStatus>();
+  const [batchPending, setBatchPending] = useState(false);
+  const [batchNotice, setBatchNotice] = useState('');
+  const [openFolderPendingId, setOpenFolderPendingId] = useState<string>();
+  const pendingHandoffPathRef = useRef<string>();
+  const batchPollTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const parsedVideoSource = useMemo(() => parseVideoSource(videoUrl), [videoUrl]);
   const currentUrlMetadata = sourceType === 'url' && urlMetadata?.url === videoUrl ? urlMetadata.value : undefined;
   const sourceSelectionReady = sourceType !== 'url' || (parsedVideoSource.kind !== 'invalid'
@@ -1885,6 +1896,13 @@ export default function VideoTranslationWorkspace(props: {
     const pending = takePendingTranslationSource();
     if (pending === undefined) return;
     if (localSourceRef.current !== undefined) return;
+    // Ghi lại đường dẫn hand-off: khi danh sách video đã tải về xuất hiện, dò
+    // xem tập này thuộc bộ nào để đề nghị "Thêm cả bộ".
+    pendingHandoffPathRef.current = pending.path;
+    if (pending.series !== undefined) {
+      setActiveSeries({ id: pending.series.id ?? null, title: pending.series.title ?? null });
+      setSeriesNameInput(current => current || pending.series?.title || '');
+    }
     localSourceRef.current = { path: pending.path, status: 'loading' };
     let cancelled = false;
     void (async () => {
@@ -1926,9 +1944,17 @@ export default function VideoTranslationWorkspace(props: {
             const title = task.title ?? task.videoInfo?.title ?? task.filename
               ?? path.split(/[\\/]/).pop() ?? path;
             const cover = task.videoInfo?.cover;
-            return { path, title, ...(cover === undefined || cover === '' ? {} : { cover }) };
+            return {
+              path, title, ...(cover === undefined || cover === '' ? {} : { cover }),
+              // Thông tin series để gom cả bộ khi người dùng bấm "Thêm cả bộ".
+              ...(task.hongguoInfo?.series_id ? { seriesId: task.hongguoInfo.series_id } : {}),
+              ...(task.hongguoInfo?.series_title ? { seriesTitle: task.hongguoInfo.series_title } : {}),
+              ...(typeof task.hongguoInfo?.vid_index === 'number'
+                ? { episodeIndex: task.hongguoInfo.vid_index }
+                : {})
+            };
           })
-          .slice(0, 8));
+          .slice(0, 50));
       })
       .catch(() => { if (active) setRecentDownloads([]); })
       .finally(() => { if (active) setRecentDownloadsLoading(false); });
@@ -2542,6 +2568,7 @@ export default function VideoTranslationWorkspace(props: {
       variant,
       artifactVersion: artifact.version,
       fileName: artifactFileName(artifact),
+      path: artifact.path,
       src: preview?.src,
       previewLoading: preview?.loading ?? openArtifact !== undefined,
       previewError: preview?.error ? mediaPreviewErrorMessage('video', l) : undefined
@@ -2555,6 +2582,7 @@ export default function VideoTranslationWorkspace(props: {
       variant,
       artifactVersion: artifact.version,
       fileName: artifactFileName(artifact),
+      path: artifact.path,
       cues: variant === 'horizontal' ? displayedHorizontalSubtitleCues : displayedVerticalSubtitleCues,
       readOnly: false,
       translationPosition: variant === 'horizontal' && selectedResultSettings?.bilingual === true
@@ -2594,6 +2622,7 @@ export default function VideoTranslationWorkspace(props: {
         artifactId: selectedVoiceArtifact.id,
         artifactVersion: selectedVoiceArtifact.version,
         fileName: artifactFileName(selectedVoiceArtifact),
+        path: selectedVoiceArtifact.path,
         src: voicePreview.src,
         previewLoading: voicePreview.loading,
         previewError: voicePreview.error ? mediaPreviewErrorMessage('voice', l) : undefined
@@ -2841,6 +2870,14 @@ export default function VideoTranslationWorkspace(props: {
   function chooseRecentDownload(video: RecentDownloadedVideo) {
     if (localSourceRef.current?.status === 'loading') return;
     localSourceRef.current = { path: video.path, status: 'loading' };
+    // Tập vừa chọn thuộc bộ nào → nêu bối cảnh "dịch cả bộ" cho cả bộ này.
+    pendingHandoffPathRef.current = undefined;
+    if (video.seriesId !== undefined || video.seriesTitle !== undefined) {
+      setActiveSeries({ id: video.seriesId ?? null, title: video.seriesTitle ?? null });
+      setSeriesNameInput(current => current || video.seriesTitle || '');
+    } else {
+      setActiveSeries(undefined);
+    }
     void (async () => {
       try {
         const file = await fileFromLocalPath(video.path);
@@ -2857,6 +2894,225 @@ export default function VideoTranslationWorkspace(props: {
         ));
       }
     })();
+  }
+
+  // -------------------------------------------------------------------------
+  // "Dịch cả bộ": thêm mọi tập đã tải của cùng bộ phim vào hàng chờ dịch tự
+  // động, theo dõi tiến độ tổng (x/y tập xong) và ghép full movie khi xong.
+  // -------------------------------------------------------------------------
+
+  const batchService = props.runtimeDependencies?.service;
+
+  // Theo dõi trạng thái hàng chờ dịch + ghép (poll nhẹ mỗi 5 giây).
+  useEffect(() => {
+    if (batchService === undefined) return;
+    let active = true;
+    const poll = () => {
+      if (!active) return;
+      batchService.getTranslationBatch()
+        .then(response => { if (active) setBatchStatus(response); })
+        .catch(() => { if (active) setBatchStatus(undefined); })
+        .finally(() => {
+          if (active) batchPollTimerRef.current = setTimeout(poll, 5000);
+        });
+    };
+    poll();
+    return () => {
+      active = false;
+      if (batchPollTimerRef.current !== undefined) clearTimeout(batchPollTimerRef.current);
+    };
+  }, [batchService]);
+
+  // Dò bộ phim của video hand-off từ hàng đợi tải (DramaPanes không gửi kèm
+  // series, nên khớp theo đường dẫn trong danh sách video đã tải).
+  useEffect(() => {
+    const handoffPath = pendingHandoffPathRef.current;
+    if (handoffPath === undefined || recentDownloads.length === 0) return;
+    const matched = recentDownloads.find(item => item.path === handoffPath);
+    if (matched === undefined) return;
+    pendingHandoffPathRef.current = undefined;
+    if (matched.seriesId !== undefined || matched.seriesTitle !== undefined) {
+      setActiveSeries({ id: matched.seriesId ?? null, title: matched.seriesTitle ?? null });
+      setSeriesNameInput(current => current || matched.seriesTitle || '');
+    }
+  }, [recentDownloads]);
+
+  // Các tập ĐÃ TẢI của cùng bộ phim đang làm việc.
+  const seriesVideos = useMemo(() => {
+    if (activeSeries === undefined) return [];
+    return recentDownloads.filter(item => {
+      if (activeSeries.id !== null && activeSeries.id !== '') return item.seriesId === activeSeries.id;
+      if (activeSeries.title !== null && activeSeries.title !== '') {
+        return item.seriesTitle === activeSeries.title;
+      }
+      return false;
+    });
+  }, [activeSeries, recentDownloads]);
+
+  /** Đặt tên project = tên phim/bộ người dùng gõ (sanitize phía daemon khi ghi file). */
+  async function applySeriesName() {
+    const service = batchService;
+    const projectId = creatorSession?.job.projectId;
+    const name = seriesNameInput.trim();
+    if (service === undefined || projectId === undefined || name === '') return;
+    try {
+      await service.renameProject(projectId, name);
+      setBatchNotice(l(`项目已使用名称“${name}”。`, `The project now uses the name "${name}".`));
+    } catch (cause) {
+      if ((cause as { message?: unknown })?.message === 'project_rename_unavailable') return;
+      setBatchNotice(l('无法重命名项目，请重试。', 'Could not rename the project. Try again.'));
+    }
+  }
+
+  /** Nút "Thêm cả bộ": đưa mọi tập đã tải của bộ vào hàng chờ dịch (tự trích số tập, xếp tăng dần phía daemon). */
+  async function addWholeSeries() {
+    const service = batchService;
+    if (service === undefined || seriesVideos.length === 0 || batchPending) return;
+    setBatchPending(true);
+    setBatchNotice('');
+    try {
+      void applySeriesName();
+      const response = await service.enqueueTranslationBatch({
+        items: seriesVideos.map(video => ({
+          path: video.path,
+          title: video.title,
+          ...(video.episodeIndex === undefined ? {} : { episodeIndex: video.episodeIndex })
+        })),
+        ...(seriesNameInput.trim() === '' ? {} : { seriesName: seriesNameInput.trim() })
+      });
+      setBatchStatus(response);
+      setBatchNotice(l(
+        `已把整部 ${response.items.length} 集加入翻译队列，将按集数从小到大依次翻译。`,
+        `Added the whole series (${response.items.length} episodes) to the translation queue.`
+      ));
+    } catch (cause) {
+      setBatchNotice(creatorErrorMessage(cause, l));
+    } finally {
+      setBatchPending(false);
+    }
+  }
+
+  /** Ghép toàn bộ tập đã dịch thành `<Tên phim>-full.mp4` trong thư mục dự án. */
+  async function mergeFullMovie() {
+    const service = batchService;
+    if (service === undefined || batchPending) return;
+    setBatchPending(true);
+    setBatchNotice('');
+    try {
+      await service.mergeTranslationBatch(seriesNameInput.trim() === '' ? undefined : seriesNameInput.trim());
+      setBatchNotice(l('正在合并完整影片...', 'Merging the full movie...'));
+    } catch (cause) {
+      setBatchNotice(creatorErrorMessage(cause, l));
+    } finally {
+      setBatchPending(false);
+    }
+  }
+
+  /** "Mở thư mục": mở nơi chứa file (video dịch / phụ đề / full movie) qua REST reveal. */
+  async function openOutputFolder(output: { artifactId: string; path?: string | null }) {
+    const service = batchService;
+    if (service === undefined) {
+      setResultNotice(l('需要连接本地 Runtime 才能打开文件夹。', 'Connect to the local Runtime to open the folder.'));
+      return;
+    }
+    const path = output.path ?? creatorSession?.job.artifacts.find(artifact => artifact.id === output.artifactId)?.path;
+    if (path === undefined || path === null || path === '') {
+      setResultNotice(l('无法定位文件所在的文件夹。', 'Could not locate the folder of this file.'));
+      return;
+    }
+    setOpenFolderPendingId(output.artifactId);
+    try {
+      await service.revealTranslationBatch(path, 'file');
+    } catch {
+      setResultNotice(l('无法打开文件夹，请重试。', 'Could not open the folder. Try again.'));
+    } finally {
+      setOpenFolderPendingId(undefined);
+    }
+  }
+
+  /** Bảng "dịch cả bộ": thêm cả bộ + tiến độ tổng + trạng thái ghép full movie. */
+  function renderBatchPanel() {
+    if (batchService === undefined) return null;
+    const progress = batchStatus?.progress;
+    const runningItem = batchStatus?.items.find(item => item.status === 'running');
+    const fullMovie = batchStatus?.fullMovie;
+    const fullMovieName = fullMovie?.outputPath === null || fullMovie?.outputPath === undefined
+      ? undefined
+      : fullMovie.outputPath.split(/[\\/]/).pop();
+    const showSeriesRow = seriesVideos.length > 0;
+    const showProgress = progress !== undefined && progress.total > 0;
+    if (!showSeriesRow && !showProgress && batchNotice === '') return null;
+    return (
+      <section className="video-translation-batch" aria-label={l('整批翻译进度', 'Batch translation progress')}>
+        {showSeriesRow ? (
+          <div className="video-translation-batch-series">
+            <label className="video-translation-field">
+              <span>{l('影视剧集名称', 'Series / movie name')}</span>
+              <input
+                type="text"
+                value={seriesNameInput}
+                onChange={event => setSeriesNameInput(event.target.value)}
+                onBlur={() => void applySeriesName()}
+                placeholder={l('用于命名项目和完整影片：名称-full.mp4', 'Names the project and the merged full movie')}
+              />
+            </label>
+            <button
+              type="button"
+              className="video-translation-batch-add"
+              disabled={batchPending}
+              onClick={() => void addWholeSeries()}
+            >
+              {batchPending
+                ? l('正在加入...', 'Adding...')
+                : l(`加入整部（${seriesVideos.length} 集）`, `Add the whole series (${seriesVideos.length} episodes)`)}
+            </button>
+          </div>
+        ) : null}
+        {showProgress ? (
+          <div className="video-translation-batch-progress" data-status={progress!.allDone ? 'done' : 'active'}>
+            <p>
+              <strong>
+                {l(
+                  `整批翻译进度：${progress!.completed}/${progress!.total} 集完成`,
+                  `Batch translation progress: ${progress!.completed}/${progress!.total} episodes done`
+                )}
+              </strong>
+              {progress!.failed > 0 ? ` · ${l(`${progress!.failed} 集失败`, `${progress!.failed} failed`)}` : ''}
+              {runningItem !== undefined ? ` · ${l('正在翻译', 'Translating')}: ${runningItem.title}` : ''}
+            </p>
+            {progress!.allDone && (fullMovie === undefined || fullMovie.status === 'idle') ? (
+              <button type="button" disabled={batchPending} onClick={() => void mergeFullMovie()}>
+                {l('合并完整影片', 'Merge the full movie')}
+              </button>
+            ) : null}
+            {fullMovie?.status === 'running' || batchStatus?.merge.status === 'running' ? (
+              <p role="status">{l('正在合并完整影片...', 'Merging the full movie...')}</p>
+            ) : null}
+            {fullMovie?.status === 'completed' && fullMovie.outputPath !== null ? (
+              <p role="status">
+                {l(
+                  `完整影片已就绪：${fullMovieName ?? ''}`,
+                  `Full movie ready: ${fullMovieName ?? ''}`
+                )}
+                {' '}
+                <button type="button" onClick={() => void openOutputFolder({ artifactId: 'full-movie', path: fullMovie.outputPath })}>
+                  {l('打开文件夹', 'Open folder')}
+                </button>
+              </p>
+            ) : null}
+            {fullMovie?.status === 'failed' ? (
+              <p role="alert">
+                {l(
+                  `合并完整影片失败：${fullMovie.error ?? ''}`,
+                  `Merging the full movie failed: ${fullMovie.error ?? ''}`
+                )}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        {batchNotice !== '' ? <p className="video-result-notice" role="status">{batchNotice}</p> : null}
+      </section>
+    );
   }
 
   function selectBilibiliPart(index: number) {
@@ -3026,66 +3282,88 @@ export default function VideoTranslationWorkspace(props: {
     }
     creatorSession.clearError();
     setStartRevisionConflict(false);
-    setSubmitting(true);
-    setSubmissionPhase(sourceType === 'file' && videoFile !== null && !selectedFileRegistered
-      ? 'uploading'
-      : 'starting');
-    setResultNotice('');
-    try {
-      const isRegeneration = draftBaseVersion !== undefined
-        && selectedResult !== undefined
-        && regenerationSettings !== undefined
-        && regenerationSource !== undefined;
-      if (isRegeneration && !hasPendingChanges) {
-        setResultNotice(l(
-          '当前版本没有修改，不需要生成新版本',
-          'Nothing changed, so a new version is not needed'
-        ));
-        return;
-      }
-      const stageId = isRegeneration
-        ? videoTranslationRegenerationStage(
-            selectedResult,
-            regenerationSettings,
-            regenerationSource,
-            subtitleNeedsRegeneration
-          )
-        : 'subtitle';
-      if (sourceType === 'file' && videoFile !== null && !selectedFileRegistered) {
-        setResultNotice(l('正在上传本地视频...', 'Uploading the local video...'));
-        await creatorSession.uploadSourceVideo(videoFile);
-        setSubmissionPhase('starting');
-        setResultNotice(l('本地视频已上传，正在启动翻译...', 'The local video is uploaded. Starting translation...'));
-      }
-      if (isRegeneration) {
-        await executeRegeneration(stageId);
-      } else {
-        await creatorSession.applyAction({
-          action: 'run-stage',
-          input: { stageId: 'subtitle', workflow: true }
-        });
-      }
-      setWorkspacePhase('result');
-      setDraftBaseVersion(undefined);
-      setResultNotice(isRegeneration
-        ? stageId === undefined
+    let retriedConflict = false;
+    while (true) {
+      setSubmitting(true);
+      setSubmissionPhase(sourceType === 'file' && videoFile !== null && !selectedFileRegistered
+        ? 'uploading'
+        : 'starting');
+      setResultNotice('');
+      let conflictRetrying = false;
+      try {
+        const isRegeneration = draftBaseVersion !== undefined
+          && selectedResult !== undefined
+          && regenerationSettings !== undefined
+          && regenerationSource !== undefined;
+        if (isRegeneration && !hasPendingChanges) {
+          setResultNotice(l(
+            '当前版本没有修改，不需要生成新版本',
+            'Nothing changed, so a new version is not needed'
+          ));
+          return;
+        }
+        const stageId = isRegeneration
+          ? videoTranslationRegenerationStage(
+              selectedResult,
+              regenerationSettings,
+              regenerationSource,
+              subtitleNeedsRegeneration
+            )
+          : 'subtitle';
+        if (sourceType === 'file' && videoFile !== null && !selectedFileRegistered) {
+          setResultNotice(l('正在上传本地视频...', 'Uploading the local video...'));
+          await creatorSession.uploadSourceVideo(videoFile);
+          setSubmissionPhase('starting');
+          setResultNotice(l('本地视频已上传，正在启动翻译...', 'The local video is uploaded. Starting translation...'));
+        }
+        if (isRegeneration) {
+          await executeRegeneration(stageId);
+        } else {
+          await creatorSession.applyAction({
+            action: 'run-stage',
+            input: { stageId: 'subtitle', workflow: true }
+          });
+        }
+        setWorkspacePhase('result');
+        setDraftBaseVersion(undefined);
+        setResultNotice(isRegeneration
+          ? stageId === undefined
+            ? l(
+                '修改已保存，本次无需重新转录或生成',
+                'Changes were saved without retranscribing or regenerating.'
+              )
+            : l(
+                `新版本已从“${translationStageLabel(stageId, l)}”开始，已有前置产物会直接复用`,
+                `The new version started from "${translationStageLabel(stageId, l)}" and will reuse existing upstream outputs.`
+              )
+          : translationStartedNotice);
+      } catch (cause) {
+        const conflict = (cause as { code?: unknown })?.code === 'creator_revision_conflict';
+        if (conflict && !retriedConflict && creatorSession.error?.code === 'creator_revision_conflict') {
+          // Store đã tự nạp lại snapshot mới nhất của job khi gặp xung đột —
+          // thử lại đúng MỘT lần với revision mới trước khi báo lỗi người dùng.
+          retriedConflict = true;
+          conflictRetrying = true;
+          setResultNotice(l(
+            '项目刚在其他地方被更新，已重新加载状态，正在重试...',
+            'The project was just updated elsewhere. The latest status is loaded — retrying...'
+          ));
+          continue;
+        }
+        if (conflict) setStartRevisionConflict(true);
+        setResultNotice(conflict
           ? l(
-              '修改已保存，本次无需重新转录或生成',
-              'Changes were saved without retranscribing or regenerating.'
+              '项目刚在其他地方被更新，已重新加载状态，请再试一次。',
+              'The project was just updated elsewhere. The latest status is loaded — please try again.'
             )
-          : l(
-              `新版本已从“${translationStageLabel(stageId, l)}”开始，已有前置产物会直接复用`,
-              `The new version started from "${translationStageLabel(stageId, l)}" and will reuse existing upstream outputs.`
-            )
-        : translationStartedNotice);
-    } catch (cause) {
-      if ((cause as { code?: unknown })?.code === 'creator_revision_conflict') {
-        setStartRevisionConflict(true);
+          : creatorErrorMessage(cause, l));
+      } finally {
+        if (!conflictRetrying) {
+          setSubmitting(false);
+          setSubmissionPhase(undefined);
+        }
       }
-      setResultNotice(creatorErrorMessage(cause, l));
-    } finally {
-      setSubmitting(false);
-      setSubmissionPhase(undefined);
+      return;
     }
   }
 
@@ -3433,6 +3711,8 @@ export default function VideoTranslationWorkspace(props: {
               onAdjustSettings={adjustSettingsFromResult}
               onExport={exportResult}
               onReloadVoice={() => setVoicePreviewReload(value => value + 1)}
+              onOpenFolder={output => void openOutputFolder(output)}
+              openFolderPending={openFolderPendingId}
               onRequestRegenerate={() => {
                 setResultProposal('regenerate');
                 setResultNotice('');
@@ -3493,6 +3773,7 @@ export default function VideoTranslationWorkspace(props: {
                 onSelect={selectBilibiliPart}
               />
             ) : null}
+            {renderBatchPanel()}
             </>
           ) : null}
 
@@ -4111,7 +4392,10 @@ function creatorErrorMessage(cause: unknown, l: LocalizeCopy): string {
   const candidate = cause as { code?: unknown; message?: unknown };
   const code = typeof candidate?.code === 'string' ? candidate.code : '';
   if (code === 'creator_revision_conflict') {
-    return l('任务状态刚刚发生变化，请重试一次。你的设置没有丢失。', 'The task changed just now. Retry once; your settings are preserved.');
+    return l(
+      '项目刚在其他地方被更新，已重新加载状态，请再试一次。',
+      'The project was just updated elsewhere. The latest status is loaded — please try again.'
+    );
   }
   if (code === 'creator_job_not_running') {
     return l('任务已经结束，无需再次终止。', 'The task has already ended.');

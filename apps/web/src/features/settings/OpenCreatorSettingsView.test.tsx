@@ -147,8 +147,8 @@ describe('OpenCreatorSettingsView', () => {
     render(<OpenCreatorSettingsView runtimeStatus={runtimeStatus} gatewayAccountService={service} gatewayAccountState={gateway} creatorServicesService={creatorServicesService} initialTab="api-keys" onBack={vi.fn()} />);
 
     expect(await screen.findByRole('heading', { name: 'API 配置' })).toBeInTheDocument();
-    expect(screen.getByText('Agnes AI API Key 列表（agnes-ai.com）')).toBeInTheDocument();
-    expect(screen.getByText('ElevenLabs API Key 列表（自动轮换故障转移）')).toBeInTheDocument();
+    expect(screen.getByText('Agnes AI API Key 列表')).toBeInTheDocument();
+    expect(screen.getByText('ElevenLabs API Key 列表')).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: '保存 API Key 列表' }));
     await waitFor(() => expect(creatorServicesService.saveConfig).toHaveBeenCalled());
   });
@@ -477,6 +477,44 @@ describe('OpenCreatorSettingsView', () => {
     });
     expect(output).toHaveValue('/Users/demo/Custom Exports');
     expect(screen.queryByRole('button', { name: 'Select 完成产物位置' })).not.toBeInTheDocument();
+  });
+
+  it('sets the downloaded video location and allows clearing it back to the default', async () => {
+    const user = userEvent.setup();
+    const saveDownloadRoot = vi.fn(async (downloadRoot: string) => ({ downloadRoot }));
+    const onSelectStorageDirectory = vi.fn(async () => '/Users/demo/Videos');
+    render(
+      <OpenCreatorSettingsView
+        runtimeStatus={runtimeStatus}
+        storageSettingsService={{
+          getStorageSettings: async () => ({
+            configured: false,
+            settings: {
+              defaultProjectRoot: '/Users/demo/Documents/OpenCreator',
+              outputRoot: '/Users/demo/Documents/OpenCreator/Exports'
+            }
+          }),
+          updateStorageSettings: vi.fn()
+        }}
+        creatorServicesService={{
+          getDownloadRoot: vi.fn(async () => ({ downloadRoot: '' })),
+          saveDownloadRoot
+        } as unknown as CreatorServicesSettingsService}
+        onSelectStorageDirectory={onSelectStorageDirectory}
+        onBack={vi.fn()}
+      />
+    );
+
+    const row = await screen.findByRole('textbox', { name: '视频保存位置' });
+    expect(row).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: 'Select 视频保存位置' }));
+    expect(onSelectStorageDirectory).toHaveBeenCalledWith('download-root');
+    await waitFor(() => expect(saveDownloadRoot).toHaveBeenCalledWith('/Users/demo/Videos'));
+    expect(screen.getByRole('textbox', { name: '视频保存位置' })).toHaveValue('/Users/demo/Videos');
+
+    await user.clear(screen.getByRole('textbox', { name: '视频保存位置' }));
+    await user.click(screen.getByRole('button', { name: 'Save 视频保存位置' }));
+    await waitFor(() => expect(saveDownloadRoot).toHaveBeenLastCalledWith(''));
   });
 
   it('shows the anonymous telemetry scope and allows Desktop users to disable it', () => {

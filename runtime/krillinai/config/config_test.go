@@ -21,6 +21,12 @@ func TestDefaultDubbingConfig(t *testing.T) {
 	if Conf.Dubbing.GapTolerance != 1.5 {
 		t.Fatalf("GapTolerance = %v, want 1.5", Conf.Dubbing.GapTolerance)
 	}
+	if Conf.Dubbing.MergeGapTolerance != 0.3 {
+		t.Fatalf("MergeGapTolerance = %v, want 0.3", Conf.Dubbing.MergeGapTolerance)
+	}
+	if Conf.Dubbing.MaxDriftSeconds != 3.0 {
+		t.Fatalf("MaxDriftSeconds = %v, want 3.0", Conf.Dubbing.MaxDriftSeconds)
+	}
 	if Conf.Dubbing.SpeedMin != 0.95 || Conf.Dubbing.SpeedAccept != 1.15 || Conf.Dubbing.SpeedMax != 1.30 {
 		t.Fatalf("speed config = %+v", Conf.Dubbing)
 	}

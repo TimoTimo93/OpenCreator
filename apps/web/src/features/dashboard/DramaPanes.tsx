@@ -26,7 +26,7 @@ import type { RuntimeDependenciesController } from '../../app/use-runtime-depend
 import type { RuntimeDependencyService } from '../../services/runtime-dependency-service.js';
 import { setPendingTranslationSource } from './pending-translation-source.js';
 import { setPendingSocialHandoffSource } from './pending-social-handoff.js';
-import { localizeDramaLabel, localizeDramaTags } from './drama-labels.js';
+import { localizeDramaLabel } from './drama-labels.js';
 import { useDramaTitleTranslations } from './drama-title-translations.js';
 import './drama-panes.css';
 
@@ -1066,6 +1066,22 @@ const HOT_FALLBACK = [
   ['hot-ai-drama', 'Phim ngắn AI']
 ] as const;
 
+/** Mỗi lượt "Tải thêm" chỉ mở thêm số thẻ này để không render vài nghìn node cùng lúc. */
+const HOT_VISIBLE_STEP = 60;
+
+/** Gộp mục của trang mới vào danh sách đã có, bỏ trùng giữa các trang. */
+function mergeHotItems(previous: HongguoDramaItem[], incoming: HongguoDramaItem[]): { list: HongguoDramaItem[]; added: number } {
+  if (incoming.length === 0) return { list: previous, added: 0 };
+  const seen = new Set(previous.map(item => String(item.series_id)));
+  const fresh: HongguoDramaItem[] = [];
+  for (const item of incoming) {
+    if (seen.has(String(item.series_id))) continue;
+    seen.add(String(item.series_id));
+    fresh.push(item);
+  }
+  return { list: [...previous, ...fresh], added: fresh.length };
+}
+
 export function DramaHotPane(props: DramaPaneProps) {
   const { t, language } = useAppLanguage();
   const { service, phase, failure, downloadsRoot, probe } = useDramaBackend(props.runtimeDependencies);
@@ -1076,8 +1092,14 @@ export function DramaHotPane(props: DramaPaneProps) {
   // Dữ liệu đã tải trước lúc app khởi động: hiển thị ngay thay vì chờ tải lại.
   const preloaded = useRef(dramaPreload.hot.get(dramaListKey(DRAMA_HOT_DEFAULT))).current;
   const [items, setItems] = useState<HongguoDramaItem[]>(filterHotItems(preloaded?.results));
-  const [index, setIndex] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(preloaded?.totalPages ?? preloaded?.meta?.totalPages ?? 0);
+  const [hasMore, setHasMore] = useState(preloaded?.hasMore === true);
+  // Cửa sổ render: mỗi lượt chỉ vẽ thêm HOT_VISIBLE_STEP thẻ để danh sách cực dài
+  // không phải dựng vài nghìn node cùng lúc.
+  const [visibleCount, setVisibleCount] = useState(HOT_VISIBLE_STEP);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [detailId, setDetailId] = useState<string | null>(null);
   const listRequest = useRef(0);
@@ -1093,10 +1115,18 @@ export function DramaHotPane(props: DramaPaneProps) {
       .catch(() => undefined);
   }, [probe, service]);
 
-  const loadList = useCallback(async (forceRefresh: boolean) => {
+  /** Đọc meta phân trang của một phản hồi browse (API có trả từng trang hay không). */
+  const applyPagination = useCallback((response: HongguoDramaBrowseResponse) => {
+    setTotalPages(response.totalPages ?? response.meta?.totalPages ?? 0);
+    setHasMore(response.hasMore === true);
+  }, []);
+
+  const loadFirst = useCallback(async (forceRefresh: boolean) => {
     if (service === null) return;
     const cacheKey = dramaListKey({ source: 'hongguo', category, page: 1 });
     const request = ++listRequest.current;
+    // Lượt mới đè lên mọi lượt "tải thêm" đang treo.
+    setLoadingMore(false);
     // Có dữ liệu tải trước thì làm mới nền, không nháy vòng xoay.
     setLoading(dramaPreload.hot.get(cacheKey) === undefined);
     setError('');
@@ -1105,30 +1135,72 @@ export function DramaHotPane(props: DramaPaneProps) {
       if (request !== listRequest.current) return;
       if (!response.success) {
         setItems([]);
+        setPage(1);
+        setVisibleCount(HOT_VISIBLE_STEP);
+        setTotalPages(0);
+        setHasMore(false);
         setError(response.error || t('dashboard.drama.loadFailed'));
         return;
       }
       dramaPreload.hot.set(cacheKey, response);
       setItems(filterHotItems(response.results));
-      setIndex(0);
+      setPage(1);
+      setVisibleCount(HOT_VISIBLE_STEP);
+      applyPagination(response);
     } catch (cause) {
       if (request !== listRequest.current) return;
       setError(`${t('dashboard.drama.loadFailed')}: ${messageOf(cause)}`);
     } finally {
       if (request === listRequest.current) setLoading(false);
     }
-  }, [category, service, t]);
+  }, [applyPagination, category, service, t]);
 
   useEffect(() => {
-    if (phase === 'ready') void loadList(false);
-  }, [loadList, phase]);
+    if (phase === 'ready') void loadFirst(false);
+  }, [loadFirst, phase]);
 
-  const selected = items[index];
-  const upcoming = items.slice(index + 1, index + 5);
-  const introduction = selected?.intro ?? selected?.series_intro;
+  // API có trả trang tiếp theo hay không tự suy từ phản hồi: hasMore hoặc totalPages chưa tới.
+  const morePages = hasMore || (totalPages > 0 && page < totalPages);
+
+  const loadMore = useCallback(async () => {
+    if (service === null || loadingMore) return;
+    // Còn mục đã tải nhưng chưa vẽ: mở rộng cửa sổ render trước, không cần gọi mạng.
+    if (visibleCount < items.length) {
+      setVisibleCount(count => count + HOT_VISIBLE_STEP);
+      return;
+    }
+    if (!morePages) return;
+    const request = ++listRequest.current;
+    setLoadingMore(true);
+    try {
+      const response = await service.browseDrama({ source: 'hongguo', category, page: page + 1 });
+      if (request !== listRequest.current) return;
+      if (!response.success) {
+        setError(response.error || t('dashboard.drama.loadFailed'));
+        return;
+      }
+      const merged = mergeHotItems(items, filterHotItems(response.results));
+      setError('');
+      setItems(merged.list);
+      setPage(page + 1);
+      setVisibleCount(count => count + HOT_VISIBLE_STEP);
+      applyPagination(response);
+      // Trang mới toàn mục trùng (bảng xếp hạng xáo trộn giữa hai lần gọi): ngừng đánh trang.
+      if (merged.added === 0) setHasMore(false);
+    } catch (cause) {
+      if (request !== listRequest.current) return;
+      setError(`${t('dashboard.drama.loadFailed')}: ${messageOf(cause)}`);
+    } finally {
+      if (request === listRequest.current) setLoadingMore(false);
+    }
+  }, [applyPagination, category, items, loadingMore, morePages, page, service, t, visibleCount]);
+
+  const visibleItems = useMemo(() => items.slice(0, visibleCount), [items, visibleCount]);
+  const hiddenLoaded = Math.max(0, items.length - visibleItems.length);
   const translateTitle = useDramaTitleTranslations(
     service,
-    useMemo(() => items.map(item => item.series_title), [items])
+    // Chỉ dịch tên đang hiển thị để gói dịch không vượt giới hạn 200 tên/lần gọi của daemon.
+    useMemo(() => visibleItems.map(item => item.series_title), [visibleItems])
   );
 
   return (
@@ -1140,7 +1212,7 @@ export function DramaHotPane(props: DramaPaneProps) {
             <p className="drama-subtitle">{t('dashboard.drama.hotSubtitle')}</p>
           </div>
           <div className="drama-pane-actions">
-            <button type="button" className="drama-btn" disabled={loading} onClick={() => void loadList(true)}>
+            <button type="button" className="drama-btn" disabled={loading} onClick={() => void loadFirst(true)}>
               <RefreshCw size={14} aria-hidden="true" />
               {t('dashboard.drama.refresh')}
             </button>
@@ -1162,76 +1234,69 @@ export function DramaHotPane(props: DramaPaneProps) {
         </div>
 
         {loading ? <DramaSpinner label={t('dashboard.drama.loading')} /> : null}
-        {!loading && (error !== '' || selected === undefined) ? (
+        {!loading && items.length === 0 ? (
           <DramaNotice
             tone={error === '' ? 'info' : 'error'}
             title={error === '' ? t('dashboard.drama.empty') : t('dashboard.drama.loadFailed')}
             {...(error === '' ? {} : { hint: error })}
             actionLabel={t('dashboard.drama.retry')}
-            onAction={() => void loadList(true)}
+            onAction={() => void loadFirst(true)}
           />
         ) : null}
 
-        {!loading && selected !== undefined ? (
-          <>
-            <div className="drama-feature">
-              <div className="drama-feature-cover" onClick={() => setDetailId(String(selected.series_id))}>
-                {selected.cover ? <img src={selected.cover} alt="" /> : <div className="drama-cover-ph"><Film size={26} aria-hidden="true" /></div>}
-              </div>
-              <div className="drama-feature-copy">
-                <p className="drama-feature-rank">
-                  {typeof selected.rank === 'number' && selected.rank > 0
-                    ? t('dashboard.drama.rank', { rank: selected.rank })
-                    : `#${index + 1}`}
-                  {selected.heat !== undefined && selected.heat !== '' ? ` · ${selected.heat}` : ''}
-                </p>
-                <h3>{translateTitle(selected.series_title)}</h3>
-                <p className="drama-feature-tags">
-                  {[
-                    typeof selected.episode_count === 'number' && selected.episode_count > 0
-                      ? t('dashboard.drama.episodes', { count: selected.episode_count })
-                      : undefined,
-                    ...localizeDramaTags(selected.tags, language)
-                  ].filter(Boolean).join(' · ')}
-                </p>
-                {typeof introduction === 'string' && introduction.trim() !== ''
-                  ? <p className="drama-feature-intro">{introduction}</p>
-                  : null}
-                <div className="drama-feature-actions">
-                  <button type="button" className="drama-btn drama-btn-primary" onClick={() => setDetailId(String(selected.series_id))}>
-                    <Download size={15} aria-hidden="true" />
-                    {t('dashboard.drama.detailTitle')}
-                  </button>
-                  <button type="button" className="drama-btn" disabled={index === 0} onClick={() => setIndex(index - 1)}>
-                    {t('dashboard.drama.prevPage')}
-                  </button>
-                  <button type="button" className="drama-btn" disabled={index >= items.length - 1} onClick={() => setIndex(index + 1)}>
-                    {t('dashboard.drama.nextPage')}
-                  </button>
-                  <span className="drama-stat" aria-live="polite">{index + 1} / {items.length}</span>
+        {!loading && visibleItems.length > 0 ? (
+          <div className="drama-grid">
+            {visibleItems.map((item, position) => (
+              <button
+                key={item.series_id}
+                type="button"
+                className="drama-card"
+                title={translateTitle(item.series_title)}
+                onClick={() => setDetailId(String(item.series_id))}
+              >
+                <div className="drama-cover">
+                  <span className="drama-rank">
+                    {typeof item.rank === 'number' && item.rank > 0
+                      ? t('dashboard.drama.rank', { rank: item.rank })
+                      : `#${position + 1}`}
+                  </span>
+                  {item.cover ? <img src={item.cover} alt="" loading="lazy" /> : <div className="drama-cover-ph"><Film size={20} aria-hidden="true" /></div>}
+                  {item.episode_label !== undefined && item.episode_label !== ''
+                    ? <span className="drama-ep-badge">{item.episode_label}</span>
+                    : typeof item.episode_count === 'number' && item.episode_count > 0
+                      ? <span className="drama-ep-badge">{t('dashboard.drama.episodes', { count: item.episode_count })}</span>
+                      : null}
                 </div>
-              </div>
-            </div>
+                <div className="drama-card-title">{translateTitle(item.series_title)}</div>
+                {item.completion_status === 'completed' ? <div className="drama-card-flag">{t('dashboard.drama.completionCompleted')}</div> : null}
+                {item.completion_status === 'ongoing' ? <div className="drama-card-flag">{t('dashboard.drama.completionOngoing')}</div> : null}
+                {item.heat !== undefined ? <div className="drama-card-heat">{item.heat}</div> : null}
+                {(item.tags ?? []).length > 0 ? (
+                  <div className="drama-card-tags">
+                    {(item.tags ?? []).slice(0, 2).map(tag => <span key={tag} className="drama-tag">{localizeDramaLabel(tag, language)}</span>)}
+                  </div>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
-            {upcoming.length > 0 ? (
-              <div className="drama-upcoming">
-                {upcoming.map((item, offset) => (
-                  <button
-                    key={item.series_id}
-                    type="button"
-                    className="drama-upcoming-item"
-                    onClick={() => setIndex(index + offset + 1)}
-                  >
-                    {item.cover ? <img src={item.cover} alt="" loading="lazy" /> : <div className="drama-cover-ph"><Film size={15} aria-hidden="true" /></div>}
-                    <span>
-                      <strong>{translateTitle(item.series_title)}</strong>
-                      <small>{typeof item.rank === 'number' && item.rank > 0 ? t('dashboard.drama.rank', { rank: item.rank }) : `#${index + offset + 2}`}</small>
-                    </span>
-                  </button>
-                ))}
-              </div>
+        {!loading && error !== '' && visibleItems.length > 0 ? (
+          <p className="drama-inline-error" role="alert">{error}</p>
+        ) : null}
+
+        {!loading && visibleItems.length > 0 ? (
+          <div className="drama-pager">
+            {hiddenLoaded > 0 || (visibleItems.length > 0 && morePages) ? (
+              <button type="button" className="drama-pager-btn" disabled={loadingMore} onClick={() => void loadMore()}>
+                {loadingMore ? <LoaderCircle className="drama-spin" size={14} aria-hidden="true" /> : null}
+                {loadingMore ? t('dashboard.drama.hotLoadingMore') : t('dashboard.drama.hotLoadMore')}
+              </button>
             ) : null}
-          </>
+            <span className="drama-pager-info" aria-live="polite">
+              {t('dashboard.drama.hotShown', { shown: visibleItems.length, total: items.length })}{morePages ? '+' : ''}
+            </span>
+          </div>
         ) : null}
 
         {detailId !== null && service !== null ? (

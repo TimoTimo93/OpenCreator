@@ -97,7 +97,7 @@ func (r *Runner) Run(ctx context.Context) (Result, error) {
 	}
 
 	dubSRT := filepath.Join(dubbingDir, DubSubtitleFileName)
-	if err := WriteSRTFile(dubSRT, BuildDubCues(fitted)); err != nil {
+	if err := WriteSRTFile(dubSRT, NormalizeDubCues(BuildDubCues(fitted))); err != nil {
 		return Result{}, err
 	}
 	if err := writeJSON(filepath.Join(dubbingDir, DubbingPlanFileName), fitted); err != nil {

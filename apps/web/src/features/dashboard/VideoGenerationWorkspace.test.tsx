@@ -831,6 +831,7 @@ function GenerationUpdateControls() {
 function createVideoConfig() {
   return {
     proxy: '',
+    downloadRoot: '',
     llm: {
       baseUrl: '',
       apiKey: '',

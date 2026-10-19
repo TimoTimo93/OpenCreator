@@ -99,7 +99,7 @@ export type DesktopHostNotification = {
   approvalId?: string;
 };
 
-export type DirectorySelectionPurpose = 'project' | 'default-project-root' | 'output-root';
+export type DirectorySelectionPurpose = 'project' | 'default-project-root' | 'output-root' | 'download-root';
 
 export type DesktopUpdaterState =
   | 'idle'

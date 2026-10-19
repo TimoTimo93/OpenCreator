@@ -159,6 +159,11 @@ export function resolveEffectiveTranscriptionProvider(
 
 export type CreatorServicesConfig = {
   proxy: string;
+  /**
+   * Thư mục gốc lưu video sau khi tải về (Trình tải video). Rỗng = dùng mặc định
+   * Documents/OpenCreator; giá trị không hợp lệ sẽ bị bỏ kèm cảnh báo log.
+   */
+  downloadRoot: string;
   llm: OpenAiCompatibleConfig & {
     jsonMode: boolean;
     source: 'codex' | 'custom' | 'agnes';
@@ -323,6 +328,7 @@ export const defaultVolcengineTtsVoiceId = 'BV001_streaming';
 export function createDefaultCreatorServicesConfig(): CreatorServicesConfig {
   return {
     proxy: '',
+    downloadRoot: '',
     llm: {
       baseUrl: 'http://localhost:20128/v1',
       apiKey: '9router-local',
