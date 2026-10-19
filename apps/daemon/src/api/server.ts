@@ -260,6 +260,11 @@ import { registerCreatorRoutes } from './routes.creator.js';
 import { registerCreatorRuntimeRoutes } from './routes.creator-runtime.js';
 import { registerCreatorDramaRoutes } from './routes.creator-drama.js';
 import { registerTranslationPipelineRoutes } from './routes.creator-translation-pipeline.js';
+import { registerSocialRoutes } from './routes.social.js';
+import { launchClusterBrowser } from '../social/browser-launcher.js';
+import { createSocialService, type SocialService } from '../social/service.js';
+import { createSocialWorker } from '../social/worker.js';
+import { defaultSocialExecutors } from '../social/executors.js';
 import {
   createTranslationPipelineService,
   type TranslationPipelineService
@@ -1531,6 +1536,7 @@ export async function buildServer(input: BuildServerInput) {
     await capture(() => creatorStageScheduler?.close());
     await capture(() => creatorStageRunner?.close());
     await capture(() => agentCapabilityTokens.close());
+    await capture(() => socialAutomation?.close());
     if (ownsDb) {
       await capture(() => {
         if (db.open) db.close();
@@ -1697,6 +1703,19 @@ export async function buildServer(input: BuildServerInput) {
     console.warn(`Translation pipeline init failed: ${formatError(error)}`);
   }
   await registerTranslationPipelineRoutes(server, translationPipeline);
+  let socialAutomation: SocialService | undefined;
+  try {
+    const socialWorker = createSocialWorker({
+      executors: defaultSocialExecutors,
+      browserLauncher: (clusterId, proxyServer, profileDir) =>
+        launchClusterBrowser({ clusterId, proxyServer, profileDir }),
+      keepBrowserOpenAfterJob: false
+    });
+    socialAutomation = createSocialService({ dataDir, worker: socialWorker });
+  } catch (error) {
+    console.warn(`Social automation init failed: ${formatError(error)}`);
+  }
+  await registerSocialRoutes(server, socialAutomation);
   await registerAgentToolRoutes(server, {
     capabilities: agentCapabilityTokens,
     schedules: agentScheduleOperations,

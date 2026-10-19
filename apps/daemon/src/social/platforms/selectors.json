@@ -1,0 +1,45 @@
+{
+  "youtube_studio": {
+    "upload_url": "https://studio.youtube.com",
+    "create_btn": "ytcp-button#create-icon, button[aria-label*='Tạo'], button[aria-label*='Create']",
+    "upload_menu_item": "tp-yt-paper-item#text-item-0, ytcp-text-menu-item:has-text('Tải video lên'), ytcp-text-menu-item:has-text('Upload videos')",
+    "file_input": "input[type='file']",
+    "title_box": "ytcp-social-suggestions-textbox#title-textarea div#textbox",
+    "desc_box": "ytcp-social-suggestions-textbox#description-textarea div#textbox",
+    "not_for_kids_radio": "tp-yt-paper-radio-button[name='VIDEO_MADE_FOR_KIDS_NOT_MFK']",
+    "next_btn": "ytcp-button#next-button",
+    "schedule_radio": "tp-yt-paper-radio-button[name='SCHEDULE'], #schedule-radio-button",
+    "date_trigger": "ytcp-text-dropdown-trigger#datepicker-trigger",
+    "date_input": "ytcp-date-picker input.tp-yt-paper-input",
+    "time_input": "ytcp-form-input-container#time-of-day-container input",
+    "done_btn": "ytcp-button#done-button",
+    "close_dialog_btn": "ytcp-button#close-button"
+  },
+  "tiktok_studio": {
+    "upload_url": "https://www.tiktok.com/tiktokstudio/upload",
+    "comment_url": "https://www.tiktok.com/tiktokstudio/comment",
+    "file_input": "input[type='file'][accept*='video']",
+    "upload_complete_indicator": "div:has-text('Uploaded'), div:has-text('Đã tải lên'), span[data-e2e='upload-status-success']",
+    "caption_editor": "div.public-DraftEditor-content[contenteditable='true'], div[contenteditable='true'][role='combobox']",
+    "schedule_radio": "input[type='radio'][value='schedule'], label:has-text('Lên lịch'), label:has-text('Schedule')",
+    "schedule_date_input": "div[class*='date-picker'] input, input[placeholder*='YYYY-MM-DD']",
+    "schedule_time_input": "div[class*='time-picker'] input",
+    "post_btn": "button[data-e2e='post_video_button'], button:has-text('Lên lịch'), button:has-text('Đăng'), button:has-text('Schedule')",
+    "unreplied_filter": "div[role='tab']:has-text('Chưa trả lời'), div[role='tab']:has-text('Unreplied')",
+    "comment_item": "div[data-e2e='comment-item'], div[class*='CommentItem']",
+    "comment_text": "span[data-e2e='comment-level-1'], div[class*='comment-text']",
+    "reply_trigger_btn": "span[data-e2e='comment-reply-btn'], button:has-text('Trả lời'), button:has-text('Reply')",
+    "reply_input": "div[contenteditable='true'], textarea[placeholder*='Trả lời'], textarea[placeholder*='Reply']",
+    "reply_submit_btn": "button[data-e2e='comment-post'], button:has-text('Đăng'), button:has-text('Send')"
+  },
+  "facebook_browser": {
+    "business_home_url": "https://business.facebook.com/latest/home",
+    "create_post_btn": "div[role='button']:has-text('Tạo bài viết'), div[role='button']:has-text('Create post'), div[aria-label*='Tạo']:visible",
+    "photo_video_option": "span:has-text('Ảnh/Video'), span:has-text('Photo/video')",
+    "file_input": "input[type='file'][accept*='video']",
+    "composer_text_box": "div[role='textbox'][contenteditable='true']",
+    "next_btn": "div[role='button'][aria-label='Tiếp theo'], div[role='button']:has-text('Tiếp')",
+    "schedule_toggle": "div[role='radio']:has-text('Lên lịch'), div[role='switch']:has-text('Schedule')",
+    "publish_btn": "div[aria-label='Đăng'][role='button'], div[role='button']:has-text('Đăng bài'), div[role='button']:has-text('Publish')"
+  }
+}
