@@ -168,7 +168,7 @@ describe('dashboard CSS contracts', () => {
   });
 
   it('matches video download settings width to translation and centers labeled platforms', () => {
-    expect(cssBlocks('.video-download-workspace-page .creator-tool-stack')[0]).toContain('width: min(960px, 100%);');
+    expect(cssBlocks('.video-download-workspace-page .creator-tool-stack')[0]).toContain('width: min(1240px, 100%);');
     expect(cssBlocks('.video-download-platforms')[0]).toContain('justify-content: center;');
     expect(cssBlocks('.video-download-platforms')[0]).toContain('flex-wrap: wrap;');
     expect(cssBlocks('.video-download-platforms img')[0]).toContain('width: 32px;');

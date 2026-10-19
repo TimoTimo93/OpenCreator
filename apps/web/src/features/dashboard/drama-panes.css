@@ -927,3 +927,76 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* GĐ4 — Hàng đợi tải gom nhóm theo bộ phim + thu gọn thanh tiến độ */
+.drama-queue-groups { display: flex; flex-direction: column; gap: 10px; }
+
+.drama-queue-group {
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.drama-queue-group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+}
+
+.drama-queue-group-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drama-queue-group-cover {
+  width: 40px;
+  height: 54px;
+}
+
+.drama-queue-group-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.drama-queue-group-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drama-queue-group-summary {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.drama-queue-chevron { flex: 0 0 auto; color: var(--muted); transition: transform 120ms ease; }
+.drama-queue-chevron.is-open { transform: rotate(0deg); }
+.drama-queue-chevron:not(.is-open) { transform: rotate(-90deg); }
+
+.drama-queue-group-translate-all { flex: 0 0 auto; }
+
+/* Hàng con: thu gọn hơn bản đơn. */
+.drama-queue-children { padding: 0 8px 8px; gap: 6px; }
+.drama-queue-child { padding: 7px 10px; background: transparent; }
+.drama-queue-child .drama-queue-cover { width: 36px; height: 48px; }
+.drama-queue-child .drama-queue-title { font-size: 12.5px; }
+
+/* Thanh tiến độ occupying nửa bề ngang thân hàng. */
+.drama-queue-bar { width: 55%; min-width: 140px; }

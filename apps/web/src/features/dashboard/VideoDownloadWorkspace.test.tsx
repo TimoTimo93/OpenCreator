@@ -951,7 +951,11 @@ describe('VideoDownloadWorkspace', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '加入视频翻译' }));
 
-    expect(peekPendingTranslationSource()).toEqual({ path: savePath, title: 'PHIM B - Tập 002' });
+    expect(peekPendingTranslationSource()).toEqual({
+      path: savePath,
+      title: 'PHIM B - Tập 002',
+      series: { title: 'PHIM B' }
+    });
     expect(window.location.hash).toBe('#/workbench?tool=video-translation');
   });
 });

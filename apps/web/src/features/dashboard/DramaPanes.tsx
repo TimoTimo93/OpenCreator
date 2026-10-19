@@ -18,7 +18,8 @@ import {
   RefreshCw,
   Search,
   Send,
-  X
+  X,
+  ChevronDown
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAppLanguage } from '../../i18n/LanguageProvider.js';
@@ -852,10 +853,32 @@ function queueStatusKey(status: string | undefined): 'pending' | 'downloading' |
   }
 }
 
+// ---------------------------------------------------------------------------
+// Hàng đợi tải (tác vụ tải tập do Hồng Quả thực thi)
+// ---------------------------------------------------------------------------
+
+/** Khóa gom nhóm một tác vụ tải theo bộ phim: ưu tiên series Hồng Qua, sau đó trích từ tiêu đề. */
+function seriesKeyOfTask(task: HongguoDramaTask): { key: string; name: string } {
+  const raw = (task.title ?? task.videoInfo?.title ?? task.filename ?? '').trim();
+  const seriesId = task.hongguoInfo?.series_id;
+  const seriesTitle = (task.hongguoInfo?.series_title ?? '').trim();
+  if (seriesId !== undefined && String(seriesId).trim() !== '') {
+    return { key: `honggua:${String(seriesId)}`, name: seriesTitle !== '' ? seriesTitle : raw };
+  }
+  // 《Tên phim》 Tập 12 — phim Hồng Qua thường dùng khối 《》.
+  const bracket = raw.match(/《(.+?)》/);
+  if (bracket !== null) return { key: `title:${bracket[1] ?? ''}`, name: bracket[1] ?? raw };
+  // “Tên phim - Tập 12” / “… EP03” / đuôi số.
+  const prefix = raw.replace(/\s*[-—]?\s*(?:Tập|Tap|Tạp|EP\.?|E\d*|Phần)?\s*\d{1,4}\s*$/i, '').trim();
+  if (prefix !== '' && prefix !== raw) return { key: `title:${prefix}`, name: prefix };
+  return { key: `solo:${task.id ?? raw}`, name: raw };
+}
+
 export function DramaQueuePane(props: DramaPaneProps) {
   const { t } = useAppLanguage();
   const { service, phase, failure, downloadsRoot, probe } = useDramaBackend(props.runtimeDependencies);
   const [tasks, setTasks] = useState<HongguoDramaTask[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const translateTitle = useDramaTitleTranslations(
@@ -921,7 +944,12 @@ export function DramaQueuePane(props: DramaPaneProps) {
   const openInTranslation = useCallback((task: HongguoDramaTask, title: string) => {
     const path = task.savePath;
     if (path === undefined || path === '') return;
-    setPendingTranslationSource({ path, title });
+    const seriesTitle = task.hongguoInfo?.series_title ?? seriesKeyOfTask(task).name;
+    setPendingTranslationSource({
+      path,
+      title,
+      ...(seriesTitle !== '' ? { series: { title: seriesTitle } } : {})
+    });
     window.location.hash = '#/workbench?tool=video-translation';
   }, []);
 
@@ -931,6 +959,115 @@ export function DramaQueuePane(props: DramaPaneProps) {
     setPendingSocialHandoffSource({ path, title });
     window.location.hash = '#/workbench?tool=social-channels';
   }, []);
+
+        /** Nhóm tác vụ theo bộ phim (danh sách giữ thứ tự xuất hiện). */
+  const groups = useMemo(() => {
+    const list: Array<{ key: string; name: string; tasks: HongguoDramaTask[] }> = [];
+    const byKey = new Map<string, { key: string; name: string; tasks: HongguoDramaTask[] }>();
+    for (const task of tasks) {
+      const series = seriesKeyOfTask(task);
+      let group = byKey.get(series.key);
+      if (group === undefined) {
+        group = { key: series.key, name: series.name, tasks: [] };
+        byKey.set(series.key, group);
+        list.push(group);
+      }
+      group.tasks.push(task);
+    }
+    return list;
+  }, [tasks]);
+
+  const toggleGroup = useCallback((key: string) => {
+    setExpandedGroups(previous => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  /** Nút "Thêm cả bộ vào dịch": chỉ hiện khi toàn bộ tập của nhóm đã tải xong. */
+  const openSeriesInTranslation = useCallback((group: { name: string; tasks: HongguoDramaTask[] }) => {
+    const firstDone = group.tasks.find(task => queueStatusKey(task.status) === 'completed' && (task.savePath ?? '') !== '');
+    const path = firstDone?.savePath;
+    if (path === undefined || path === '') return;
+    setPendingTranslationSource({
+      path,
+      title: group.name,
+      ...(group.name !== '' ? { series: { title: group.name } } : {})
+    });
+    window.location.hash = '#/workbench?tool=video-translation';
+  }, []);
+
+  /** Một dòng tác vụ — dùng lại cho cả bản nhóm (compact) và bản đơn. */
+  const renderTaskRow = useCallback((task: HongguoDramaTask, index: number, compact: boolean) => {
+    const key = queueStatusKey(task.status);
+    const percent = Math.max(0, Math.min(100, Math.round(Number(task.progress) || 0)));
+    const cover = task.videoInfo?.cover ?? '';
+    const rawTitle = task.title ?? task.videoInfo?.title ?? task.filename;
+    const title = rawTitle === undefined || rawTitle === ''
+      ? t('dashboard.drama.queueUntitled')
+      : translateTitle(rawTitle);
+    const size = task.receivedBytes !== undefined && task.totalBytes !== undefined && task.totalBytes > 0
+      ? `${formatBytes(task.receivedBytes)} / ${formatBytes(task.totalBytes)}`
+      : '';
+    const meta = [
+      task.downloadQuality !== undefined && task.downloadQuality !== ''
+        ? t('dashboard.drama.queueQuality', { quality: task.downloadQuality })
+        : undefined,
+      size
+    ].filter(Boolean).join(' · ');
+    return (
+      <li className={`drama-queue-item${compact ? ' drama-queue-child' : ''}`} key={task.id ?? `${title}-${index}`}>
+        <div className="drama-queue-cover">
+          {cover !== ''
+            ? <img src={cover} alt="" loading="lazy" />
+            : <div className="drama-cover-ph"><Film size={16} aria-hidden="true" /></div>}
+        </div>
+        <div className="drama-queue-body">
+          <p className="drama-queue-title" title={title}>{title}</p>
+          {meta !== '' ? <p className="drama-queue-meta">{meta}</p> : null}
+          <div
+            className={`drama-queue-bar drama-queue-bar-${key}`}
+            role="progressbar"
+            aria-label={title}
+            aria-valuenow={percent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <span style={{ width: `${percent}%` }} />
+          </div>
+          {key === 'failed' && task.error !== undefined && task.error !== '' ? (
+            <p className="drama-queue-error">{task.error}</p>
+          ) : null}
+          {key === 'completed' && task.savePath !== undefined && task.savePath !== '' ? (
+            <div className="drama-queue-actions">
+              <button
+                type="button"
+                className="drama-btn drama-btn-sm drama-queue-translate"
+                onClick={() => openInTranslation(task, title)}
+              >
+                <Languages size={14} aria-hidden="true" />
+                {t('dashboard.drama.queueTranslate')}
+              </button>
+              <button
+                type="button"
+                className="drama-btn drama-btn-sm"
+                onClick={() => openInSocial(task, title)}
+              >
+                <Send size={14} aria-hidden="true" />
+                {t('dashboard.social.handoff')}
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <div className="drama-queue-side">
+          <span className={`drama-queue-status drama-queue-status-${key}`}>{statusLabel(task.status)}</span>
+          {key === 'downloading' || key === 'pending' ? <span className="drama-queue-percent">{percent}%</span> : null}
+        </div>
+      </li>
+    );
+  }, [t, translateTitle, openInTranslation, openInSocial, statusLabel]);
 
   return (
     <BackendGate phase={phase} failure={failure} onRetry={() => void probe()} {...(props.onOpenRuntimeComponents === undefined ? {} : { onOpenRuntimeComponents: props.onOpenRuntimeComponents })}>
@@ -974,78 +1111,59 @@ export function DramaQueuePane(props: DramaPaneProps) {
           />
         ) : null}
 
-        {tasks.length > 0 ? (
-          <ul className="drama-queue-list">
-            {tasks.map((task, index) => {
-              const key = queueStatusKey(task.status);
-              const percent = Math.max(0, Math.min(100, Math.round(Number(task.progress) || 0)));
-              const cover = task.videoInfo?.cover ?? '';
-              const rawTitle = task.title ?? task.videoInfo?.title ?? task.filename;
-              const title = rawTitle === undefined || rawTitle === ''
-                ? t('dashboard.drama.queueUntitled')
-                : translateTitle(rawTitle);
-              const size = task.receivedBytes !== undefined && task.totalBytes !== undefined && task.totalBytes > 0
-                ? `${formatBytes(task.receivedBytes)} / ${formatBytes(task.totalBytes)}`
-                : '';
-              const meta = [
-                task.downloadQuality !== undefined && task.downloadQuality !== ''
-                  ? t('dashboard.drama.queueQuality', { quality: task.downloadQuality })
-                  : undefined,
-                size
-              ].filter(Boolean).join(' · ');
-              return (
-                <li className="drama-queue-item" key={task.id ?? `${title}-${index}`}>
-                  <div className="drama-queue-cover">
-                    {cover !== ''
-                      ? <img src={cover} alt="" loading="lazy" />
-                      : <div className="drama-cover-ph"><Film size={16} aria-hidden="true" /></div>}
-                  </div>
-                  <div className="drama-queue-body">
-                    <p className="drama-queue-title" title={title}>{title}</p>
-                    {meta !== '' ? <p className="drama-queue-meta">{meta}</p> : null}
-                    <div
-                      className={`drama-queue-bar drama-queue-bar-${key}`}
-                      role="progressbar"
-                      aria-label={title}
-                      aria-valuenow={percent}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                    >
-                      <span style={{ width: `${percent}%` }} />
-                    </div>
-                    {key === 'failed' && task.error !== undefined && task.error !== '' ? (
-                      <p className="drama-queue-error">{task.error}</p>
-                    ) : null}
-                    {key === 'completed' && task.savePath !== undefined && task.savePath !== '' ? (
-                      <div className="drama-queue-actions">
-                        <button
-                          type="button"
-                          className="drama-btn drama-btn-sm drama-queue-translate"
-                          onClick={() => openInTranslation(task, title)}
-                        >
-                          <Languages size={14} aria-hidden="true" />
-                          {t('dashboard.drama.queueTranslate')}
-                        </button>
-                        <button
-                          type="button"
-                          className="drama-btn drama-btn-sm"
-                          onClick={() => openInSocial(task, title)}
-                        >
-                          <Send size={14} aria-hidden="true" />
-                          {t('dashboard.social.handoff')}
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="drama-queue-side">
-                    <span className={`drama-queue-status drama-queue-status-${key}`}>{statusLabel(task.status)}</span>
-                    {key === 'downloading' || key === 'pending' ? <span className="drama-queue-percent">{percent}%</span> : null}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        ) : null}
+
+  {tasks.length > 0 ? (
+    <div className="drama-queue-groups">
+      {groups.map(group => {
+        const groupCover = group.tasks[0]!.videoInfo?.cover ?? '';
+        const allDone = group.tasks.every(task => queueStatusKey(task.status) === 'completed');
+        return group.tasks.length > 1 ? (
+        <section className="drama-queue-group" key={group.key}>
+          <div className="drama-queue-group-row">
+            <button
+              type="button"
+              className="drama-queue-group-toggle"
+              aria-expanded={expandedGroups.has(group.key)}
+              onClick={() => toggleGroup(group.key)}
+            >
+              <span className="drama-queue-cover drama-queue-group-cover" aria-hidden="true">
+                {groupCover !== ''
+                  ? <img src={groupCover} alt="" loading="lazy" />
+                  : <span className="drama-cover-ph"><Film size={15} aria-hidden="true" /></span>}
+              </span>
+              <span className="drama-queue-group-info">
+                <span className="drama-queue-group-name" title={group.name}>
+                  {group.name !== '' ? group.name : t('dashboard.drama.queueUntitled')}
+                </span>
+                <span className="drama-queue-group-summary">{group.tasks.length} {t('dashboard.drama.queueEpisodes')}</span>
+              </span>
+              <ChevronDown size={15} className={`drama-queue-chevron${expandedGroups.has(group.key) ? ' is-open' : ''}`} aria-hidden="true" />
+            </button>
+            {allDone ? (
+              <button
+                type="button"
+                className="drama-btn drama-btn-sm drama-queue-translate drama-queue-group-translate-all"
+                onClick={() => openSeriesInTranslation(group)}
+              >
+                <Languages size={14} aria-hidden="true" />
+                {t('dashboard.drama.queueGroupTranslateAll')}
+              </button>
+            ) : null}
+          </div>
+          {expandedGroups.has(group.key) ? (
+            <ul className="drama-queue-list drama-queue-children">
+              {group.tasks.map((task, index) => renderTaskRow(task, index, true))}
+            </ul>
+          ) : null}
+        </section>
+      ) : (
+        <ul className="drama-queue-list" key={group.key}>
+          {renderTaskRow(group.tasks[0]!, 0, false)}
+        </ul>
+      );
+      })}
+    </div>
+  ) : null}
 
         {downloadsRoot !== undefined ? (
           <p className="drama-foot-note">{t('dashboard.drama.downloadsNote', { path: downloadsRoot })}</p>

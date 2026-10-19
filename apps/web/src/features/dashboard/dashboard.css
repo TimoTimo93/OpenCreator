@@ -1912,11 +1912,11 @@
 }
 
 .video-download-workspace-page .creator-tool-stack {
-  width: min(960px, 100%);
+  width: min(1240px, 100%);
 }
 
 .video-download-workspace-page .creator-workspace-layout {
-  --creator-workspace-pane-width: calc(80% - 3.5px);
+  --creator-workspace-pane-width: calc(88% - 3.5px);
 }
 
 .auto-clip-tool-stack {
