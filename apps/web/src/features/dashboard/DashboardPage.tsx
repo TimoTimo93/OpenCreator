@@ -18,6 +18,7 @@ import {
   Search,
   ServerOff,
   Sparkles,
+  Send,
   UserRound,
   WandSparkles,
   type LucideIcon
@@ -35,6 +36,8 @@ import StickmanVideoWorkspace from './StickmanVideoWorkspace.js';
 import VideoDownloadBatchWorkspace from './VideoDownloadBatchWorkspace.js';
 import VideoTranslationWorkspace from './VideoTranslationWorkspace.js';
 import VideoGenerationWorkspace from './VideoGenerationWorkspace.js';
+import SocialWorkspace from './SocialWorkspace.js';
+import type { SocialService } from '../../services/social-service.js';
 import type { CreatorWebService } from '../../services/creator-service.js';
 import { ApiClientError } from '../../runtime/errors.js';
 import { createCreatorSnapshotSubscription, type CreatorConnectionState } from '../../runtime/creator-sse.js';
@@ -200,6 +203,14 @@ const creatorTools: DashboardEntry[] = [
     category: '数字人',
     icon: UserRound,
     workspace: 'digital-avatar'
+  },
+  {
+    title: '多渠道发布',
+    description: 'YouTube、TikTok、Facebook 定时群发',
+    prompt: '帮我把这些视频排入多渠道发布队列，先确认频道的代理和登录状态。',
+    category: '视频编辑',
+    icon: Send,
+    workspace: 'social-channels'
   }
 ];
 
@@ -229,6 +240,7 @@ export default function DashboardPage(props: {
   jobId?: string;
   projectId?: string;
   creatorService?: CreatorWebService | null;
+  socialService?: SocialService | null;
   runtimeDependencies?: RuntimeDependenciesController;
   onJobCreated?(job: CreatorJob): void;
   onAskIssue?(issue: OpenCreatorIssue, question: string): void;
@@ -432,6 +444,12 @@ export default function DashboardPage(props: {
         onBack={closeWorkspace}
       />
     ));
+  }
+
+  if (activeWorkspace === 'social-channels') {
+    return props.socialService === null || props.socialService === undefined
+      ? <p className="video-result-empty" role="status">{t('dashboard.social.serviceUnavailable')}</p>
+      : <SocialWorkspace service={props.socialService} onBack={closeWorkspace} />;
   }
 
   if (activeWorkspace === 'digital-avatar') {
@@ -1024,6 +1042,8 @@ const englishDashboardLabels: Record<string, string> = {
   文案创作: 'Writing',
   音频处理: 'Audio',
   视频编辑: 'Video Editing',
+  多渠道发布: 'Multi-Channel Publishing',
+  'YouTube、TikTok、Facebook 定时群发': 'Scheduled publishing to YouTube, TikTok, and Facebook',
   数字人: 'Avatars',
   火柴人动画: 'Stick Figure Animation',
   视频翻译配音: 'Translate & Dub Video',

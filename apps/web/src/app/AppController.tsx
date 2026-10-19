@@ -158,6 +158,7 @@ import { createProfileService } from '../services/profile-service.js';
 import { createRunService } from '../services/run-service.js';
 import { createRuntimeDependencyService } from '../services/runtime-dependency-service.js';
 import { createScheduleService } from '../services/schedule-service.js';
+import { createSocialService } from '../services/social-service.js';
 import { createSearchService } from '../services/search-service.js';
 import { createSkillMarketService } from '../services/skill-market-service.js';
 import { createTaskService } from '../services/task-service.js';
@@ -594,6 +595,10 @@ export function AppController(props: AppControllerProps) {
   );
   const scheduleService = useMemo(
     () => runtimeClient === null ? null : createScheduleService(runtimeClient),
+    [runtimeClient]
+  );
+  const socialService = useMemo(
+    () => runtimeClient === null ? null : createSocialService(runtimeClient),
     [runtimeClient]
   );
   const mcpService = useMemo(
@@ -4667,6 +4672,7 @@ export function AppController(props: AppControllerProps) {
       onWorkspaceModeChange={handleCreatorWorkspaceModeChange}
       projectId={state.currentProjectId}
       creatorService={creatorService}
+      socialService={socialService}
       runtimeDependencies={runtimeDependencies}
       creatorServicesService={creatorServicesService}
       gatewayState={gatewayAccountState ?? (gatewayAccountService ? null : undefined)}

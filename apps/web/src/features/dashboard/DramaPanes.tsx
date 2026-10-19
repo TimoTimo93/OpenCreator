@@ -17,6 +17,7 @@ import {
   Lock,
   RefreshCw,
   Search,
+  Send,
   X
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -24,6 +25,7 @@ import { useAppLanguage } from '../../i18n/LanguageProvider.js';
 import type { RuntimeDependenciesController } from '../../app/use-runtime-dependencies.js';
 import type { RuntimeDependencyService } from '../../services/runtime-dependency-service.js';
 import { setPendingTranslationSource } from './pending-translation-source.js';
+import { setPendingSocialHandoffSource } from './pending-social-handoff.js';
 import { localizeDramaLabel, localizeDramaTags } from './drama-labels.js';
 import { useDramaTitleTranslations } from './drama-title-translations.js';
 import './drama-panes.css';
@@ -923,6 +925,13 @@ export function DramaQueuePane(props: DramaPaneProps) {
     window.location.hash = '#/workbench?tool=video-translation';
   }, []);
 
+  const openInSocial = useCallback((task: HongguoDramaTask, title: string) => {
+    const path = task.savePath;
+    if (path === undefined || path === '') return;
+    setPendingSocialHandoffSource({ path, title });
+    window.location.hash = '#/workbench?tool=social-channels';
+  }, []);
+
   return (
     <BackendGate phase={phase} failure={failure} onRetry={() => void probe()} {...(props.onOpenRuntimeComponents === undefined ? {} : { onOpenRuntimeComponents: props.onOpenRuntimeComponents })}>
       <section className="drama-pane" aria-label={t('dashboard.drama.queueTitle')}>
@@ -1008,14 +1017,24 @@ export function DramaQueuePane(props: DramaPaneProps) {
                       <p className="drama-queue-error">{task.error}</p>
                     ) : null}
                     {key === 'completed' && task.savePath !== undefined && task.savePath !== '' ? (
-                      <button
-                        type="button"
-                        className="drama-btn drama-btn-sm drama-queue-translate"
-                        onClick={() => openInTranslation(task, title)}
-                      >
-                        <Languages size={14} aria-hidden="true" />
-                        {t('dashboard.drama.queueTranslate')}
-                      </button>
+                      <div className="drama-queue-actions">
+                        <button
+                          type="button"
+                          className="drama-btn drama-btn-sm drama-queue-translate"
+                          onClick={() => openInTranslation(task, title)}
+                        >
+                          <Languages size={14} aria-hidden="true" />
+                          {t('dashboard.drama.queueTranslate')}
+                        </button>
+                        <button
+                          type="button"
+                          className="drama-btn drama-btn-sm"
+                          onClick={() => openInSocial(task, title)}
+                        >
+                          <Send size={14} aria-hidden="true" />
+                          {t('dashboard.social.handoff')}
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                   <div className="drama-queue-side">

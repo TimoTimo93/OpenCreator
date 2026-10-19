@@ -18,7 +18,8 @@ export type CreatorWorkspace =
   | 'digital-avatar'
   | 'cover-generator'
   | 'image-generation'
-  | 'video-generation';
+  | 'video-generation'
+  | 'social-channels';
 
 export const creatorWorkspaces = [
   'video-translation',
@@ -32,7 +33,8 @@ export const creatorWorkspaces = [
   'digital-avatar',
   'cover-generator',
   'image-generation',
-  'video-generation'
+  'video-generation',
+  'social-channels'
 ] as const satisfies readonly CreatorWorkspace[];
 
 export const visibleCreatorWorkspaces = [
@@ -46,7 +48,8 @@ export const visibleCreatorWorkspaces = [
   'wechat-article',
   'cover-generator',
   'image-generation',
-  'video-generation'
+  'video-generation',
+  'social-channels'
 ] as const satisfies readonly CreatorWorkspace[];
 
 const templateByWorkspace: Record<CreatorRuntimeWorkspace, string> = {
