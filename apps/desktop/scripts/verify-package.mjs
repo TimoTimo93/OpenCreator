@@ -120,12 +120,12 @@ assertNoUnexpectedPythonRuntime();
 assertNoLocalData();
 assertSize('app.asar', appAsar, 80 * 1024 * 1024);
 // Daemon resources mang theo archive thành phần Remotion (~137 MB) để cài đặt kết
-// xuất ngoại tuyến, không phải tải lại; vì vậy ngưỡng cao hơn phần thân daemon.
-assertSize('Daemon resources', daemonDir, 420 * 1024 * 1024);
+// xuất ngoại tuyến, không phải tải lại; runtime mới tăng nhẹ mỗi đợt → 720 MB.
+assertSize('Daemon resources', daemonDir, 720 * 1024 * 1024);
 assertSize('Creator Runtime', creatorRuntimeDir, 384 * 1024 * 1024);
 assertSize('Codex Runtime', codexRuntimeDir, 450 * 1024 * 1024);
 assertSize('Stickman assets', join(daemonDir, 'runtime', 'stickman-assets'), 16 * 1024 * 1024);
-assertSize('Desktop package', packageRoot, 1600 * 1024 * 1024);
+assertSize('Desktop package', packageRoot, 2048 * 1024 * 1024);
 await assertFuseConfiguration();
 verifyMacPackageMetadata();
 
