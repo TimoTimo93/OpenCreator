@@ -405,6 +405,22 @@ export async function registerAgentToolRoutes(
       flexSocial(request, reply, 'social:manage', () => social.pause()));
     server.post(`${AGENT_TOOL_ROUTE_PREFIX}/social/queue/resume`, async (request, reply) =>
       flexSocial(request, reply, 'social:manage', () => social.resume()));
+    // GĐ3: thống kê + bình luận.
+    server.get(`${AGENT_TOOL_ROUTE_PREFIX}/social/stats`, async (request, reply) =>
+      flexSocial(request, reply, 'social:read', () => social.getStats()));
+    server.get<{ Querystring: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/comments`, async (request, reply) => {
+      const query = request.query as Record<string, string | undefined>;
+      const clusterId = typeof query.clusterId === 'string' && query.clusterId !== '' ? query.clusterId : undefined;
+      const limit = typeof query.limit === 'string' && /^\d+$/.test(query.limit)
+        ? Math.min(Number(query.limit), 200)
+        : undefined;
+      return flexSocial(request, reply, 'social:read', () => social.listComments(clusterId, limit));
+    });
+    server.post<{ Body: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/comments/scan`, async (request, reply) => {
+      const body = typeof request.body === 'object' && request.body !== null ? request.body as Record<string, unknown> : {};
+      const clusterId = typeof body.clusterId === 'string' && body.clusterId !== '' ? body.clusterId : undefined;
+      return flexSocial(request, reply, 'social:manage', () => social.scanComments(clusterId));
+    });
   }
   server.get<{ Params: { id: string } }>(
     `${AGENT_TOOL_ROUTE_PREFIX}/schedules/:id`,
@@ -788,6 +804,10 @@ function clusterPatchFromBody(body: Record<string, unknown>): SocialClusterPatch
     if (times.length > 0) patch.defaultScheduleTimes = times;
   }
   if (typeof body.defaultDescription === 'string') patch.defaultDescription = body.defaultDescription;
+  if (typeof body.ytChannelUrl === 'string') patch.ytChannelUrl = body.ytChannelUrl;
+  if (typeof body.tkProfileUrl === 'string') patch.tkProfileUrl = body.tkProfileUrl;
+  if (typeof body.autoReplyEnabled === 'boolean') patch.autoReplyEnabled = body.autoReplyEnabled;
+  if (typeof body.autoReplyPrompt === 'string') patch.autoReplyPrompt = body.autoReplyPrompt;
   return patch;
 }
 

@@ -343,3 +343,94 @@
   gap: 8px;
   margin-top: 4px;
 }
+
+/* GĐ3 — Thống kê + bình luận + nhập Excel */
+.social-insights {
+  border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.social-insights-tabs { display: flex; gap: 6px; }
+
+.social-stats-meta {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.social-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.social-table th,
+.social-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.08));
+}
+
+.social-table th { opacity: 0.65; font-weight: 500; }
+
+.social-delta-up { color: #4ade80; font-size: 12px; margin-left: 6px; }
+.social-delta-down { color: #f87171; font-size: 12px; margin-left: 6px; }
+
+.social-stats h3 { font-size: 14px; margin: 10px 0 4px; }
+
+.social-comments { display: flex; flex-direction: column; gap: 10px; }
+.social-comments-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.social-comments-hint { font-size: 12px; opacity: 0.65; }
+.social-autoreply-clusters { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.social-comment-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.social-comment-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+}
+
+.social-comment-row.social-comment-sent { border-color: rgba(74, 222, 128, 0.35); }
+.social-comment-row.social-comment-failed { border-color: rgba(248, 113, 113, 0.35); }
+
+.social-comment-main { min-width: 0; }
+.social-comment-text { margin: 0; font-size: 13px; }
+.social-comment-meta { margin: 2px 0 0; font-size: 11px; opacity: 0.6; }
+.social-comment-reply { margin: 4px 0 0; font-size: 12px; opacity: 0.85; }
+.social-comment-skipped { margin: 4px 0 0; font-size: 11px; opacity: 0.55; }
+
+.social-enqueue-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.social-autoreply-editor { display: flex; flex-direction: column; gap: 6px; }
+.social-autoreply-switch { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.social-warn-text { margin: 0; font-size: 12px; color: #fbbf24; }
+
+.social-modal-wide { max-width: 640px; width: min(92vw, 640px); }
+
+.social-excel-preview {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  border-radius: 8px;
+}
+
+.social-excel-preview table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.social-excel-preview th, .social-excel-preview td {
+  text-align: left; padding: 5px 8px;
+  border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.08));
+}
+.social-excel-row-invalid td { color: #f87171; }

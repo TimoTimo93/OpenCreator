@@ -128,6 +128,39 @@ export async function registerSocialRoutes(
   server.post('/social/queue/pause', async () => social.pause());
   server.post('/social/queue/resume', async () => social.resume());
 
+  // ---- GĐ3: thống kê + bình luận -------------------------------------------
+  server.get('/social/stats', async () => social.getStats());
+
+  server.post('/social/stats/refresh', async (request, reply) => {
+    try {
+      return await social.refreshStats();
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.get<{ Querystring: { clusterId?: string; limit?: string } }>('/social/comments', async (request, reply) => {
+    const limitRaw = request.query.limit;
+    const limit = typeof limitRaw === 'string' && /^\d+$/.test(limitRaw) ? Math.min(Number(limitRaw), 500) : undefined;
+    try {
+      return social.listComments(request.query.clusterId, limit);
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.post<{ Body: { clusterId?: unknown } }>('/social/comments/scan', async (request, reply) => {
+    try {
+      const clusterId = typeof (request.body as { clusterId?: unknown } | undefined)?.clusterId === 'string'
+        ? (request.body as { clusterId: string }).clusterId
+        : undefined;
+      return await social.scanComments(clusterId);
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+
   server.get<{ Params: { id: string }; Querystring: { platform?: string } }>('/social/jobs/:id/error-screenshot', async (request, reply) => {
     const overviewNow = social.getOverview();
     const job = overviewNow.jobs.find(candidate => candidate.id === request.params.id);
@@ -215,6 +248,10 @@ function stripClusterPatch(body: SocialClusterPatch): SocialClusterPatch {
     patch.defaultScheduleTimes = body.defaultScheduleTimes.filter((time): time is string => typeof time === 'string');
   }
   if (typeof body.defaultDescription === 'string') patch.defaultDescription = body.defaultDescription;
+  if (typeof body.ytChannelUrl === 'string') patch.ytChannelUrl = body.ytChannelUrl;
+  if (typeof body.tkProfileUrl === 'string') patch.tkProfileUrl = body.tkProfileUrl;
+  if (typeof body.autoReplyEnabled === 'boolean') patch.autoReplyEnabled = body.autoReplyEnabled;
+  if (typeof body.autoReplyPrompt === 'string') patch.autoReplyPrompt = body.autoReplyPrompt;
   return patch;
 }
 

@@ -1716,7 +1716,18 @@ export async function buildServer(input: BuildServerInput) {
         launchClusterBrowser({ clusterId, proxyServer, profileDir }),
       keepBrowserOpenAfterJob: false
     });
-    socialAutomation = createSocialService({ dataDir, worker: socialWorker });
+    socialAutomation = createSocialService({
+      dataDir,
+      worker: socialWorker,
+      readLlmConfig: async () => {
+        const services = await creatorServicesConfigStore.read();
+        return {
+          baseUrl: services.llm.baseUrl,
+          apiKey: services.llm.apiKey,
+          model: services.llm.model
+        };
+      }
+    });
   } catch (error) {
     console.warn(`Social automation init failed: ${formatError(error)}`);
   }

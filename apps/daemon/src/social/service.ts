@@ -30,16 +30,21 @@ import {
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { nextAvailableSlot } from './scheduler.js';
 import { checkProxy } from './proxy-check.js';
+import { createSocialAnalytics } from './analytics.js';
+import { createSocialComments, type SocialLlmConfig } from './comments.js';
 import type { SocialWorker } from './worker.js';
 import {
   type SocialCluster,
   type SocialClusterView,
+  type SocialComment,
+  type SocialCommentScanResult,
   type SocialEnqueueRequest,
   type SocialJob,
   type SocialOverview,
   type SocialPlatform,
   type SocialPlatformState,
-  type SocialQueueState
+  type SocialQueueState,
+  type SocialStatsOverview
 } from './types.js';
 
 export type SocialServiceInput = {
@@ -47,6 +52,11 @@ export type SocialServiceInput = {
   worker: SocialWorker;
   /** Đè khi kiểm thử (mặc định đo proxy thật). */
   checkProxyFn?: typeof checkProxy;
+  /** GĐ3: cấu hình LLM để tự trả lời bình luận (không có → mẫu mặc định). */
+  readLlmConfig?: () => Promise<SocialLlmConfig | null>;
+  /** GĐ3: khoảng quét thống kê/bình luận; 0/âm → chỉ chạy khi gọi thủ công. */
+  analyticsRefreshIntervalMs?: number;
+  commentsScanIntervalMs?: number;
   now?: () => string;
 };
 
@@ -59,6 +69,10 @@ export type SocialClusterPatch = {
   fbPageToken?: string | null;
   defaultScheduleTimes?: string[];
   defaultDescription?: string;
+  ytChannelUrl?: string;
+  tkProfileUrl?: string;
+  autoReplyEnabled?: boolean;
+  autoReplyPrompt?: string;
 };
 
 export type SocialService = {
@@ -75,6 +89,12 @@ export type SocialService = {
   resume(): SocialOverview;
   removeJob(jobId: string): SocialOverview;
   retryFailedPlatforms(jobId: string): SocialOverview;
+  /** GĐ3: thống kê view/sub đã lưu + quét ngay khi cần. */
+  getStats(): SocialStatsOverview;
+  refreshStats(): Promise<SocialStatsOverview>;
+  /** GĐ3: bình luận gần đây + quét/AI trả lời theo yêu cầu. */
+  listComments(clusterId?: string, limit?: number): SocialComment[];
+  scanComments(clusterId?: string): Promise<SocialCommentScanResult>;
   close(): Promise<void>;
 };
 
@@ -98,7 +118,25 @@ export function createSocialService(input: SocialServiceInput): SocialService {
 
   // Daemon vừa khởi động lại: platform "running" → "pending".
   recoverRunningJobs(db);
-  worker.bind({ db, screenshotDir, profileRoot, decryptToken: token => decryptSecret(token, secretKeyPath) });
+  const decryptToken = (token: string | null): string => decryptSecret(token, secretKeyPath);
+  worker.bind({ db, screenshotDir, profileRoot, decryptToken });
+
+  // GĐ3: quét thống kê + bình luận định kỳ.
+  const analytics = createSocialAnalytics({
+    db,
+    worker,
+    decryptToken,
+    refreshIntervalMs: input.analyticsRefreshIntervalMs ?? 6 * 60 * 60_000,
+    log: message => { console.log(`[social] ${message}`); }
+  });
+  const comments = createSocialComments({
+    db,
+    worker,
+    decryptToken,
+    readLlmConfig: input.readLlmConfig ?? (async (): Promise<SocialLlmConfig | null> => null),
+    scanIntervalMs: input.commentsScanIntervalMs ?? 3 * 60 * 60_000,
+    log: message => { console.log(`[social] ${message}`); }
+  });
 
   function snapshotQueueState(): SocialQueueState {
     return kvGet(db, 'queue_state') === 'paused' ? 'paused' : 'running';
@@ -118,6 +156,10 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       fbPageId: cluster.fbPageId,
       defaultScheduleTimes: cluster.defaultScheduleTimes,
       defaultDescription: cluster.defaultDescription,
+      ytChannelUrl: cluster.ytChannelUrl,
+      tkProfileUrl: cluster.tkProfileUrl,
+      autoReplyEnabled: cluster.autoReplyEnabled,
+      autoReplyPrompt: cluster.autoReplyPrompt,
       fbPageTokenConfigured: fbPageTokenEncrypted !== null && fbPageTokenEncrypted !== '',
       createdAt: cluster.createdAt,
       updatedAt: cluster.updatedAt
@@ -156,6 +198,10 @@ export function createSocialService(input: SocialServiceInput): SocialService {
           ? patch.defaultScheduleTimes.filter(time => /^\d{1,2}:\d{2}$/.test(time))
           : ['19:30'],
         defaultDescription: patch.defaultDescription ?? '',
+        ytChannelUrl: patch.ytChannelUrl?.trim() ?? '',
+        tkProfileUrl: patch.tkProfileUrl?.trim() ?? '',
+        autoReplyEnabled: patch.autoReplyEnabled ?? false,
+        autoReplyPrompt: patch.autoReplyPrompt ?? '',
         nowISO: now()
       });
       return overview();
@@ -184,6 +230,10 @@ export function createSocialService(input: SocialServiceInput): SocialService {
         );
       }
       if (patch.defaultDescription !== undefined) update.default_description = patch.defaultDescription;
+      if (patch.ytChannelUrl !== undefined) update.yt_channel_url = patch.ytChannelUrl.trim();
+      if (patch.tkProfileUrl !== undefined) update.tk_profile_url = patch.tkProfileUrl.trim();
+      if (patch.autoReplyEnabled !== undefined) update.auto_reply_enabled = patch.autoReplyEnabled ? 1 : 0;
+      if (patch.autoReplyPrompt !== undefined) update.auto_reply_prompt = patch.autoReplyPrompt;
       const updated = updateClusterRow(db, clusterId, update);
       if (updated === undefined) throw new SocialError('social_cluster_not_found', 'Không tìm thấy cụm kênh');
       return overview();
@@ -323,7 +373,26 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       return overview();
     },
 
+    getStats(): SocialStatsOverview {
+      return analytics.getStats();
+    },
+
+    async refreshStats(): Promise<SocialStatsOverview> {
+      await analytics.refresh();
+      return analytics.getStats();
+    },
+
+    listComments(clusterId?: string, limit?: number): SocialComment[] {
+      return comments.list(clusterId, limit);
+    },
+
+    async scanComments(clusterId?: string): Promise<SocialCommentScanResult> {
+      return comments.scan(clusterId);
+    },
+
     async close(): Promise<void> {
+      analytics.close();
+      comments.close();
       await worker.close();
       closeSocialDatabase(db);
     }

@@ -47,6 +47,14 @@ export type SocialCluster = {
   /** Khung giờ vàng trong ngày, HH:mm (múi giờ máy). */
   defaultScheduleTimes: string[];
   defaultDescription: string;
+  /** GĐ3: URL kênh YouTube (dùng để quét thống kê). */
+  ytChannelUrl: string;
+  /** GĐ3: URL profile TikTok (dùng để quét thống kê). */
+  tkProfileUrl: string;
+  /** GĐ3: bật tự động trả lời bình luận bằng AI. */
+  autoReplyEnabled: boolean;
+  /** GĐ3: chỉ dẫn riêng cho AI khi soạn câu trả lời. */
+  autoReplyPrompt: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -88,6 +96,83 @@ export type SocialOverview = {
   jobs: SocialJob[];
   screenshotDir: string;
   browserOpenClusters: string[];
+};
+
+// -------------------------------------------------------------------------
+// GĐ3 — Thống kê (view/sub) + bình luận
+// -------------------------------------------------------------------------
+
+export type SocialMetricName = 'followers' | 'views' | 'likes' | 'videos';
+
+export type SocialMetricPoint = {
+  value: number;
+  capturedAt: string;
+  /** Giá trị của lần đo trước đó (so sánh chênh lệch). */
+  previous: number | null;
+};
+
+export type SocialChannelStat = {
+  clusterId: string;
+  clusterName: string;
+  platform: SocialPlatform;
+  metrics: Partial<Record<SocialMetricName, SocialMetricPoint>>;
+};
+
+export type SocialVideoStat = {
+  jobId: string;
+  clusterId: string;
+  clusterName: string;
+  title: string;
+  platform: SocialPlatform;
+  externalVideoId: string;
+  views: number | null;
+  likes: number | null;
+  commentsCount: number | null;
+  capturedAt: string;
+  previousViews: number | null;
+};
+
+export type SocialStatsOverview = {
+  channels: SocialChannelStat[];
+  videos: SocialVideoStat[];
+  lastRefreshAt: string | null;
+  refreshError: string | null;
+};
+
+export type SocialStatsRefreshResult = {
+  clustersScanned: number;
+  channelSnapshots: number;
+  videoSnapshots: number;
+  errors: string[];
+};
+
+export type SocialCommentReplyStatus = 'pending' | 'sent' | 'liked' | 'skipped' | 'failed';
+
+export type SocialComment = {
+  id: number;
+  jobId: string | null;
+  clusterId: string;
+  clusterName: string;
+  platform: SocialPlatform;
+  externalVideoId: string;
+  externalCommentId: string;
+  author: string;
+  text: string;
+  commentCreatedAt: string | null;
+  createdAt: string;
+  replyStatus: SocialCommentReplyStatus;
+  replyText: string | null;
+  repliedAt: string | null;
+  skippedReason: string | null;
+};
+
+export type SocialCommentScanResult = {
+  clustersScanned: number;
+  videosScanned: number;
+  newComments: number;
+  repliesAttempted: number;
+  repliesSent: number;
+  errors: string[];
 };
 
 export type SocialEnqueueRequest = {

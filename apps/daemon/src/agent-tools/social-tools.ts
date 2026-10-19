@@ -23,7 +23,10 @@ export const SOCIAL_TOOL_NAMES = [
   'social_remove_job',
   'social_retry_failed',
   'social_pause_queue',
-  'social_resume_queue'
+  'social_resume_queue',
+  'social_stats',
+  'social_list_comments',
+  'social_scan_comments'
 ] as const;
 
 export class SocialToolError extends Error {
@@ -55,7 +58,15 @@ const updateClusterSchema = z.object({
     .describe('Page Access Token riêng của Page — lưu mã hóa trên máy, không trả về dưới dạng thô'),
   defaultScheduleTimes: z.array(z.string().regex(/^\d{1,2}:\d{2}$/)).min(1).max(12).optional()
     .describe('Khung giờ vàng mỗi ngày (giờ cục bộ), ví dụ ["19:30", "07:00"]'),
-  defaultDescription: z.string().min(1).optional()
+  defaultDescription: z.string().min(1).optional(),
+  ytChannelUrl: z.string().min(1).optional()
+    .describe('URL kênh YouTube của cụm — dùng để quét số người đăng ký (thống kê)'),
+  tkProfileUrl: z.string().min(1).optional()
+    .describe('URL profile TikTok của cụm — dùng để quét follower/thả tim'),
+  autoReplyEnabled: z.boolean().optional()
+    .describe('Bật tự động trả lời bình luận bằng AI (cap 25 reply/ngày/cụm)'),
+  autoReplyPrompt: z.string().min(1).optional()
+    .describe('Chỉ dẫn riêng cho AI khi soạn câu trả lời bình luận')
 }).strict();
 
 const clusterIdSchema = z.object({
@@ -130,7 +141,11 @@ export function createSocialToolDefinitions(input: {
             ...(parsed.fbPageId === undefined ? {} : { fbPageId: parsed.fbPageId }),
             ...(parsed.fbPageToken === undefined ? {} : { fbPageToken: parsed.fbPageToken }),
             ...(parsed.defaultScheduleTimes === undefined ? {} : { defaultScheduleTimes: parsed.defaultScheduleTimes }),
-            ...(parsed.defaultDescription === undefined ? {} : { defaultDescription: parsed.defaultDescription })
+            ...(parsed.defaultDescription === undefined ? {} : { defaultDescription: parsed.defaultDescription }),
+            ...(parsed.ytChannelUrl === undefined ? {} : { ytChannelUrl: parsed.ytChannelUrl }),
+            ...(parsed.tkProfileUrl === undefined ? {} : { tkProfileUrl: parsed.tkProfileUrl }),
+            ...(parsed.autoReplyEnabled === undefined ? {} : { autoReplyEnabled: parsed.autoReplyEnabled }),
+            ...(parsed.autoReplyPrompt === undefined ? {} : { autoReplyPrompt: parsed.autoReplyPrompt })
           } as Record<string, unknown>
         });
       }
@@ -238,6 +253,55 @@ export function createSocialToolDefinitions(input: {
       description: 'Chạy lại hàng đợi sau khi tạm dừng.',
       inputSchema: overviewSchema,
       execute: async () => input.request({ method: 'POST', path: '/internal/agent-tools/social/queue/resume' })
+    },
+    social_stats: {
+      description: [
+        'Xem thống kê đa kênh (GĐ3): followers/người đăng ký từng nền tảng theo cụm kèm chênh lệch so lần trước,',
+        'lượt view từng video đã đăng và thời gian quét gần nhất. Dùng khi người dùng hỏi "kênh đang có bao nhiêu sub/view".'
+      ].join(' '),
+      inputSchema: overviewSchema,
+      execute: async () => input.request({ method: 'GET', path: '/internal/agent-tools/social/stats' })
+    },
+    social_list_comments: {
+      description: [
+        'Xem bình luận mới nhất thu được từ các video đã đăng (đặt alongside trạng thái tự trả lời).',
+        'Hỏi clusterId để lọc theo một cụm; bỏ trống để xem tất cả.'
+      ].join(' '),
+      inputSchema: z.object({
+        clusterId: z.string().min(1).optional(),
+        limit: z.number().int().min(1).max(200).optional()
+      }).strict(),
+      execute: async (value: unknown) => {
+        const parsed = z.object({
+          clusterId: z.string().min(1).optional(),
+          limit: z.number().int().min(1).max(200).optional()
+        }).strict().parse(value);
+        return input.request({
+          method: 'GET',
+          path: '/internal/agent-tools/social/comments',
+          query: {
+            ...(parsed.clusterId === undefined ? {} : { clusterId: parsed.clusterId }),
+            ...(parsed.limit === undefined ? {} : { limit: String(parsed.limit) })
+          }
+        });
+      }
+    },
+    social_scan_comments: {
+      description: [
+        'Quét bình luận ngay (Facebook qua Graph API, YouTube qua trình duyệt cụm) và để AI tự trả lời',
+        'các cụm đã bật "auto-reply". Không bật auto-reply → chỉ thu thập, chờ người dùng trả lời.'
+      ].join(' '),
+      inputSchema: z.object({
+        clusterId: z.string().min(1).optional().describe('Chỉ quét một cụm; bỏ trống để quét tất cả')
+      }).strict(),
+      execute: async (value: unknown) => {
+        const parsed = z.object({ clusterId: z.string().min(1).optional() }).strict().parse(value);
+        return input.request({
+          method: 'POST',
+          path: '/internal/agent-tools/social/comments/scan',
+          body: parsed.clusterId === undefined ? {} : { clusterId: parsed.clusterId }
+        });
+      }
     }
   } as const;
 }

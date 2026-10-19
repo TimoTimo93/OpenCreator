@@ -21,6 +21,8 @@ import type {
   SocialOverview
 } from '../../services/social-service.js';
 import type { SocialService } from '../../services/social-service.js';
+import { ExcelImportButton } from './social-excel.js';
+import { SocialInsightsPanel } from './social-insights.js';
 import {
   peekPendingSocialHandoffSource,
   takePendingSocialHandoffSource
@@ -64,6 +66,7 @@ export default function SocialWorkspace(props: { service: SocialService; onBack(
   const [toast, setToast] = useState('');
   const [editing, setEditing] = useState<SocialClusterSummary | 'new' | null>(null);
   const [enqueuePath, setEnqueuePath] = useState(() => peekPendingSocialHandoffSource()?.path ?? '');
+  const [insightsKey, setInsightsKey] = useState(0);
 
   const load = useCallback(async (showSpinner: boolean): Promise<void> => {
     if (showSpinner) setLoading(true);
@@ -71,6 +74,7 @@ export default function SocialWorkspace(props: { service: SocialService; onBack(
       const data = await service.getOverview();
       setOverview(data);
       setError('');
+      setInsightsKey(key => key + 1);
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -197,6 +201,17 @@ export default function SocialWorkspace(props: { service: SocialService; onBack(
               onPathChange={setEnqueuePath}
               t={t}
               onEnqueue={(item, scheduledAt) => void action(t('dashboard.social.enqueued'), () => service.enqueue([{ ...item, ...(scheduledAt === '' ? {} : { scheduledAt }) }]))}
+              onEnqueueMany={(items, summaryMessage) => void action(
+                summaryMessage,
+                async () => {
+                  let last = null;
+                  for (let index = 0; index < items.length; index += 60) {
+                    const chunk = items.slice(index, index + 60);
+                    last = await service.enqueue(chunk);
+                  }
+                  return last;
+                }
+              )}
             />
             {jobs.length === 0 ? (
               <p className="social-empty">{t('dashboard.social.noJobs')}</p>
@@ -216,6 +231,8 @@ export default function SocialWorkspace(props: { service: SocialService; onBack(
           </section>
         </div>
       ) : null}
+
+      <SocialInsightsPanel service={service} clusters={clusters} t={t} refreshKey={insightsKey} />
 
       {editing !== null ? (
         <ClusterEditor
@@ -294,6 +311,8 @@ function EnqueueSheet(props: {
   onPathChange(value: string): void;
   t: Translate;
   onEnqueue(item: SocialEnqueueItem, scheduledAt: string): void;
+  onEnqueueMany(items: SocialEnqueueItem[], summaryMessage: string): void;
+  onError?(message: string): void;
 }) {
   const { t } = props;
   const [clusterId, setClusterId] = useState('');
@@ -349,17 +368,25 @@ function EnqueueSheet(props: {
           />
         </div>
       </div>
-      <button
-        type="button"
-        className="social-btn social-btn-primary"
-        disabled={!valid}
-        onClick={() => {
-          props.onEnqueue({ clusterId, path: props.enqueuePath.trim(), ...(title.trim() === '' ? {} : { title: title.trim() }) }, scheduleNow);
-          setScheduleNow('');
-        }}
-      >
-        <Plus size={14} aria-hidden="true" /> {t('dashboard.social.enqueue')}
-      </button>
+      <div className="social-enqueue-actions">
+        <button
+          type="button"
+          className="social-btn social-btn-primary"
+          disabled={!valid}
+          onClick={() => {
+            props.onEnqueue({ clusterId, path: props.enqueuePath.trim(), ...(title.trim() === '' ? {} : { title: title.trim() }) }, scheduleNow);
+            setScheduleNow('');
+          }}
+        >
+          <Plus size={14} aria-hidden="true" /> {t('dashboard.social.enqueue')}
+        </button>
+        <ExcelImportButton
+          clusters={props.clusters}
+          t={t}
+          onEnqueueMany={props.onEnqueueMany}
+          onError={message => props.onError?.(message)}
+        />
+      </div>
       <p className="social-enqueue-hint">{t('dashboard.social.enqueueHint')}</p>
     </div>
   );
@@ -414,6 +441,10 @@ function ClusterEditor(props: {
     fbPageToken?: string | null;
     defaultScheduleTimes?: string[];
     defaultDescription?: string;
+    ytChannelUrl?: string;
+    tkProfileUrl?: string;
+    autoReplyEnabled?: boolean;
+    autoReplyPrompt?: string;
   }): void;
 }) {
   const { t, cluster } = props;
@@ -425,6 +456,10 @@ function ClusterEditor(props: {
   const [fbPageToken, setFbPageToken] = useState('');
   const [times, setTimes] = useState(cluster?.defaultScheduleTimes.join(', ') ?? '19:30');
   const [description, setDescription] = useState(cluster?.defaultDescription ?? '');
+  const [ytChannelUrl, setYtChannelUrl] = useState(cluster?.ytChannelUrl ?? '');
+  const [tkProfileUrl, setTkProfileUrl] = useState(cluster?.tkProfileUrl ?? '');
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(cluster?.autoReplyEnabled ?? false);
+  const [autoReplyPrompt, setAutoReplyPrompt] = useState(cluster?.autoReplyPrompt ?? '');
   const newToken = fbPageToken.trim();
   return (
     <div className="social-modal-mask" role="dialog" aria-modal="true">
@@ -483,6 +518,47 @@ function ClusterEditor(props: {
           <label htmlFor="social-cluster-desc">{t('dashboard.social.defaultDescription')}</label>
           <textarea id="social-cluster-desc" rows={3} value={description} onChange={event => setDescription(event.target.value)} />
         </div>
+        <div className="social-enqueue-row social-enqueue-inline">
+          <div>
+            <label htmlFor="social-cluster-yt">{t('dashboard.social.ytChannelUrl')}</label>
+            <input
+              id="social-cluster-yt"
+              type="text"
+              placeholder="https://www.youtube.com/@kenhphim"
+              value={ytChannelUrl}
+              onChange={event => setYtChannelUrl(event.target.value)}
+            />
+          </div>
+          <div>
+            <label htmlFor="social-cluster-tk">{t('dashboard.social.tkProfileUrl')}</label>
+            <input
+              id="social-cluster-tk"
+              type="text"
+              placeholder="https://www.tiktok.com/@kenhphim"
+              value={tkProfileUrl}
+              onChange={event => setTkProfileUrl(event.target.value)}
+            />
+          </div>
+        </div>
+        <div className="social-enqueue-row social-autoreply-editor">
+          <label className="social-autoreply-switch">
+            <input
+              id="social-cluster-autoreply"
+              type="checkbox"
+              checked={autoReplyEnabled}
+              onChange={event => setAutoReplyEnabled(event.target.checked)}
+            />
+            {' '}{t('dashboard.social.autoReplyToggle')}
+          </label>
+          <label htmlFor="social-cluster-autoreply-prompt">{t('dashboard.social.autoReplyPrompt')}</label>
+          <textarea
+            id="social-cluster-autoreply-prompt"
+            rows={2}
+            placeholder={t('dashboard.social.autoReplyPromptPlaceholder')}
+            value={autoReplyPrompt}
+            onChange={event => setAutoReplyPrompt(event.target.value)}
+          />
+        </div>
         <div className="social-modal-actions">
           <button type="button" className="social-btn" onClick={props.onClose}>{t('dashboard.drama.close')}</button>
           <button
@@ -497,7 +573,11 @@ function ClusterEditor(props: {
               ...(fbPageId.trim() === '' ? {} : { fbPageId: fbPageId.trim() }),
               ...(fbMode === 'graph_api' && newToken !== '' ? { fbPageToken: newToken } : {}),
               defaultScheduleTimes: times.split(',').map(time => time.trim()).filter(time => /^\d{1,2}:\d{2}$/.test(time)),
-              ...(description.trim() === '' ? {} : { defaultDescription: description.trim() })
+              ...(description.trim() === '' ? {} : { defaultDescription: description.trim() }),
+              ytChannelUrl: ytChannelUrl.trim(),
+              tkProfileUrl: tkProfileUrl.trim(),
+              autoReplyEnabled,
+              autoReplyPrompt: autoReplyPrompt.trim()
             })}
           >
             <Check size={14} aria-hidden="true" /> {t('dashboard.drama.rangeApply')}

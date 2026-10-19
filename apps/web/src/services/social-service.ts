@@ -26,6 +26,10 @@ export type SocialClusterSummary = {
   fbPageTokenConfigured: boolean;
   defaultScheduleTimes: string[];
   defaultDescription: string;
+  ytChannelUrl: string;
+  tkProfileUrl: string;
+  autoReplyEnabled: boolean;
+  autoReplyPrompt: string;
   loginStatus: { youtube: string; tiktok: string; facebook: string };
   browserOpen: boolean;
   createdAt: string;
@@ -83,6 +87,12 @@ export type SocialClusterInput = {
   fbPageToken?: string | null;
   defaultScheduleTimes?: string[];
   defaultDescription?: string;
+  /** GĐ3: URL kênh YouTube / profile TikTok để quét thống kê. */
+  ytChannelUrl?: string;
+  tkProfileUrl?: string;
+  /** GĐ3: bật AI tự trả lời bình luận cho cụm. */
+  autoReplyEnabled?: boolean;
+  autoReplyPrompt?: string;
 };
 
 export type SocialEnqueueItem = {
@@ -97,6 +107,76 @@ export type SocialEnqueueItem = {
 export type SocialProxyCheckResult = {
   status: 'online' | 'dead' | 'no_proxy';
   detail: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// GĐ3 — thống kê view/sub + bình luận
+// ---------------------------------------------------------------------------
+
+export type SocialMetricPoint = {
+  value: number;
+  capturedAt: string;
+  previous: number | null;
+};
+
+export type SocialChannelStat = {
+  clusterId: string;
+  clusterName: string;
+  platform: 'youtube' | 'tiktok' | 'facebook';
+  metrics: {
+    followers?: SocialMetricPoint;
+    views?: SocialMetricPoint;
+    likes?: SocialMetricPoint;
+    videos?: SocialMetricPoint;
+  };
+};
+
+export type SocialVideoStat = {
+  jobId: string;
+  clusterId: string;
+  clusterName: string;
+  title: string;
+  platform: 'youtube' | 'tiktok' | 'facebook';
+  externalVideoId: string;
+  views: number | null;
+  likes: number | null;
+  commentsCount: number | null;
+  capturedAt: string;
+  previousViews: number | null;
+};
+
+export type SocialStatsOverview = {
+  channels: SocialChannelStat[];
+  videos: SocialVideoStat[];
+  lastRefreshAt: string | null;
+  refreshError: string | null;
+};
+
+export type SocialCommentSummary = {
+  id: number;
+  jobId: string | null;
+  clusterId: string;
+  clusterName: string;
+  platform: 'youtube' | 'tiktok' | 'facebook';
+  externalVideoId: string;
+  externalCommentId: string;
+  author: string;
+  text: string;
+  commentCreatedAt: string | null;
+  createdAt: string;
+  replyStatus: 'pending' | 'sent' | 'liked' | 'skipped' | 'failed';
+  replyText: string | null;
+  repliedAt: string | null;
+  skippedReason: string | null;
+};
+
+export type SocialCommentScanResult = {
+  clustersScanned: number;
+  videosScanned: number;
+  newComments: number;
+  repliesAttempted: number;
+  repliesSent: number;
+  errors: string[];
 };
 
 export function createSocialService(client: RuntimeClient) {
@@ -136,6 +216,24 @@ export function createSocialService(client: RuntimeClient) {
     },
     resumeQueue(): Promise<{ queue: 'running' | 'paused' }> {
       return client.post('/social/queue/resume');
+    },
+    /** GĐ3: thống kê view/sub. */
+    getStats(): Promise<SocialStatsOverview> {
+      return client.get('/social/stats');
+    },
+    refreshStats(): Promise<SocialStatsOverview> {
+      return client.post('/social/stats/refresh');
+    },
+    /** GĐ3: bình luận + AI auto-reply. */
+    listComments(clusterId?: string, limit?: number): Promise<SocialCommentSummary[]> {
+      const query = new URLSearchParams();
+      if (clusterId !== undefined) query.set('clusterId', clusterId);
+      if (limit !== undefined) query.set('limit', String(limit));
+      const suffix = query.size > 0 ? `?${query.toString()}` : '';
+      return client.get(`/social/comments${suffix}`);
+    },
+    scanComments(clusterId?: string): Promise<SocialCommentScanResult> {
+      return client.post('/social/comments/scan', clusterId === undefined ? {} : { clusterId });
     }
   };
 }

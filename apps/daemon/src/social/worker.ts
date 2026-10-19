@@ -89,6 +89,8 @@ export type SocialWorker = {
   openClusterBrowser(clusterId: string, proxyServer: string): Promise<void>;
   closeClusterBrowser(clusterId: string): Promise<void>;
   openClusterIds(): string[];
+  /** GĐ3: dùng chung trình duyệt của cụm cho analytics/bình luận. */
+  withClusterBrowser<T>(clusterId: string, fn: (handle: SocialBrowserHandle) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 };
 
@@ -144,6 +146,24 @@ export function createSocialWorker(input: CreateSocialWorkerInput = {}): SocialW
 
     openClusterIds(): string[] {
       return [...browsers.keys()];
+    },
+
+    async withClusterBrowser<T>(clusterId: string, fn: (handle: SocialBrowserHandle) => Promise<T>): Promise<T> {
+      const snapshot = deps;
+      if (snapshot === undefined) throw new Error('Worker chưa bind database');
+      if (closed) throw new Error('Worker đã đóng');
+      const row = getClusterRow(snapshot.db, clusterId);
+      if (row === undefined) throw new Error(`Không tìm thấy cụm kênh: ${clusterId}`);
+      // Analytics/quét bình luận dùng chung profile persistent (trang riêng);
+      // không đánh busyClusters vì không phải lượt upload — Patchright context
+      // cho phép nhiều page song song. Handle để lại trong map, pump tự dọn
+      // theo quy tắc sẵn có (đóng sau job nếu không manual-open).
+      await ensureBrowser(snapshot, clusterId, row.proxy_server);
+      const handle = browsers.get(clusterId);
+      if (handle === undefined) {
+        throw new Error('Trình duyệt cụm không khả dụng (launcher chưa cấu hình)');
+      }
+      return fn(handle);
     },
 
     async close(): Promise<void> {

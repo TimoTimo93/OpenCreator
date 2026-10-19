@@ -13,7 +13,8 @@ export type SocialDB = Database.Database;
 const CLUSTER_COLUMNS = [
   'id', 'name', 'series_name', 'proxy_server', 'proxy_status', 'proxy_detail',
   'yt_login', 'tk_login', 'fb_login', 'fb_mode', 'fb_page_id', 'fb_page_token_encrypted',
-  'default_schedule_times', 'default_description', 'created_at', 'updated_at'
+  'default_schedule_times', 'default_description', 'created_at', 'updated_at',
+  'yt_channel_url', 'tk_profile_url', 'auto_reply_enabled', 'auto_reply_prompt'
 ] as const;
 
 const JOB_COLUMNS = [
@@ -88,7 +89,74 @@ export function openSocialDatabase(path: string): SocialDB {
       value TEXT NOT NULL DEFAULT ''
     );
   `);
+  // GĐ3: bảng thống kê + bình luận (cộng thêm — không đổi bảng cũ).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS social_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cluster_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      metric TEXT NOT NULL,
+      value INTEGER NOT NULL,
+      captured_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_social_stats_channel
+      ON social_stats(cluster_id, platform, metric, captured_at);
+
+    CREATE TABLE IF NOT EXISTS social_video_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id TEXT NOT NULL,
+      cluster_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      external_video_id TEXT NOT NULL,
+      views INTEGER,
+      likes INTEGER,
+      comments_count INTEGER,
+      captured_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_social_video_stats_job
+      ON social_video_stats(job_id, platform, captured_at);
+
+    CREATE TABLE IF NOT EXISTS social_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id TEXT,
+      cluster_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      external_video_id TEXT NOT NULL DEFAULT '',
+      external_comment_id TEXT NOT NULL,
+      author TEXT NOT NULL DEFAULT '',
+      text TEXT NOT NULL DEFAULT '',
+      comment_created_at TEXT,
+      reply_status TEXT NOT NULL DEFAULT 'pending',
+      reply_text TEXT,
+      replied_at TEXT,
+      skipped_reason TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(platform, external_comment_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_social_comments_cluster
+      ON social_comments(cluster_id, platform, created_at);
+  `);
+  migrateColumns(db);
   return db;
+}
+
+/**
+ * ALTER TABLE cộng thêm cột cho các database đã tồn tại (schema v1 không có).
+ * safe-superset: chỉ thêm, không xoá/cột đổi.
+ */
+function migrateColumns(db: SocialDB): void {
+  const missing = (table: string, column: string): boolean => {
+    const columns = db.pragma(`table_info(${table})`) as Array<{ name: string }>;
+    return !columns.some(info => info.name === column);
+  };
+  const addColumn = (table: string, column: string, ddl: string): void => {
+    if (missing(table, column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  };
+  addColumn('social_clusters', 'yt_channel_url', "yt_channel_url TEXT NOT NULL DEFAULT ''");
+  addColumn('social_clusters', 'tk_profile_url', "tk_profile_url TEXT NOT NULL DEFAULT ''");
+  addColumn('social_clusters', 'auto_reply_enabled', 'auto_reply_enabled INTEGER NOT NULL DEFAULT 0');
+  addColumn('social_clusters', 'auto_reply_prompt', "auto_reply_prompt TEXT NOT NULL DEFAULT ''");
+  void missing;
 }
 
 export function closeSocialDatabase(db: SocialDB): void {
@@ -133,6 +201,10 @@ export type SocialClusterRow = {
   default_description: string;
   created_at: string;
   updated_at: string;
+  yt_channel_url: string | null;
+  tk_profile_url: string | null;
+  auto_reply_enabled: number | null;
+  auto_reply_prompt: string | null;
 };
 
 export type SocialJobRow = {
@@ -196,6 +268,10 @@ export function mapCluster(row: SocialClusterRow): SocialCluster {
     fbPageTokenEncrypted: row.fb_page_token_encrypted,
     defaultScheduleTimes: times,
     defaultDescription: row.default_description,
+    ytChannelUrl: row.yt_channel_url ?? '',
+    tkProfileUrl: row.tk_profile_url ?? '',
+    autoReplyEnabled: row.auto_reply_enabled === 1,
+    autoReplyPrompt: row.auto_reply_prompt ?? '',
     createdAt: normalizeDatabaseTimestamp(row.created_at),
     updatedAt: normalizeDatabaseTimestamp(row.updated_at)
   };
@@ -263,6 +339,10 @@ export function createClusterRow(
     fbPageTokenEncrypted: string | null;
     defaultScheduleTimes: string[];
     defaultDescription: string;
+    ytChannelUrl?: string;
+    tkProfileUrl?: string;
+    autoReplyEnabled?: boolean;
+    autoReplyPrompt?: string;
     nowISO: string;
   }
 ): SocialClusterRow {
@@ -281,6 +361,10 @@ export function createClusterRow(
     fb_page_token_encrypted: data.fbPageTokenEncrypted,
     default_schedule_times: JSON.stringify(data.defaultScheduleTimes.length > 0 ? data.defaultScheduleTimes : ['19:30']),
     default_description: data.defaultDescription,
+    yt_channel_url: data.ytChannelUrl ?? '',
+    tk_profile_url: data.tkProfileUrl ?? '',
+    auto_reply_enabled: data.autoReplyEnabled === true ? 1 : 0,
+    auto_reply_prompt: data.autoReplyPrompt ?? '',
     created_at: data.nowISO,
     updated_at: data.nowISO
   };
@@ -288,11 +372,13 @@ export function createClusterRow(
     INSERT INTO social_clusters(
       id, name, series_name, proxy_server, proxy_status, proxy_detail,
       yt_login, tk_login, fb_login, fb_mode, fb_page_id, fb_page_token_encrypted,
-      default_schedule_times, default_description, created_at, updated_at
+      default_schedule_times, default_description, created_at, updated_at,
+      yt_channel_url, tk_profile_url, auto_reply_enabled, auto_reply_prompt
     ) VALUES (
       @id, @name, @series_name, @proxy_server, @proxy_status, @proxy_detail,
       @yt_login, @tk_login, @fb_login, @fb_mode, @fb_page_id, @fb_page_token_encrypted,
-      @default_schedule_times, @default_description, @created_at, @updated_at
+      @default_schedule_times, @default_description, @created_at, @updated_at,
+      @yt_channel_url, @tk_profile_url, @auto_reply_enabled, @auto_reply_prompt
     )
   `).run(row);
   return row;
@@ -324,6 +410,10 @@ export function updateClusterRow(
     default_schedule_times: string;
     default_description: string;
     updated_at: string;
+    yt_channel_url: string;
+    tk_profile_url: string;
+    auto_reply_enabled: number;
+    auto_reply_prompt: string;
   }>
 ): SocialClusterRow | undefined {
   const keys = Object.keys(patch);
@@ -340,6 +430,9 @@ export function updateClusterRow(
 export function deleteClusterRow(db: SocialDB, id: string): boolean {
   const result = db.prepare('DELETE FROM social_clusters WHERE id = ?').run(id);
   db.prepare('DELETE FROM social_jobs WHERE cluster_id = ?').run(id);
+  db.prepare('DELETE FROM social_stats WHERE cluster_id = ?').run(id);
+  db.prepare('DELETE FROM social_video_stats WHERE cluster_id = ?').run(id);
+  db.prepare('DELETE FROM social_comments WHERE cluster_id = ?').run(id);
   return result.changes > 0;
 }
 
@@ -445,4 +538,227 @@ export function recoverRunningJobs(db: SocialDB): void {
     UPDATE social_jobs SET tk_status = 'pending', updated_at = updated_at WHERE tk_status = 'running';
     UPDATE social_jobs SET fb_status = 'pending', updated_at = updated_at WHERE fb_status = 'running';
   `);
+}
+
+// ---------------------------------------------------------------------------
+// GĐ3 — Thống kê kênh / video
+// ---------------------------------------------------------------------------
+
+export type StatsSnapshotRow = {
+  id: number;
+  cluster_id: string;
+  platform: string;
+  metric: string;
+  value: number;
+  captured_at: string;
+};
+
+/** Lưu một điểm đo (Δ: chỉ ghi khi giá trị đổi hoặc lần đo đầu — để giữ history gọn). */
+export function insertStatsSnapshot(
+  db: SocialDB,
+  data: { clusterId: string; platform: string; metric: string; value: number; capturedAt: string }
+): void {
+  db.prepare(`
+    INSERT INTO social_stats(cluster_id, platform, metric, value, captured_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(data.clusterId, data.platform, data.metric, data.value, data.capturedAt);
+}
+
+/** chuỗi lịch sử: điểm gần nhất + trước đó của một chỉ số (mỗi cụm/platform/metric). */
+export function latestStatsWithPrevious(
+  db: SocialDB,
+  clusterId?: string
+): Array<{ cluster_id: string; platform: string; metric: string; value: number; captured_at: string; previous: number | null }> {
+  return db.prepare(`
+    SELECT s.cluster_id, s.platform, s.metric, s.value, s.captured_at,
+      (SELECT older.value FROM social_stats AS older
+        WHERE older.cluster_id = s.cluster_id AND older.platform = s.platform
+          AND older.metric = s.metric AND older.id < s.id
+        ORDER BY older.id DESC LIMIT 1) AS previous
+    FROM (
+      SELECT st.*, ROW_NUMBER() OVER (
+        PARTITION BY st.cluster_id, st.platform, st.metric ORDER BY st.id DESC) AS rn
+      FROM social_stats AS st
+      ${clusterId !== undefined ? 'WHERE st.cluster_id = ?' : ''}
+    ) AS s
+    WHERE s.rn = 1
+    ORDER BY s.cluster_id, s.platform, s.metric
+  `).all(...(clusterId !== undefined ? [clusterId] : [])) as Array<{
+    cluster_id: string; platform: string; metric: string; value: number; captured_at: string; previous: number | null;
+  }>;
+}
+
+export function deleteStatsBefore(db: SocialDB, beforeISO: string): void {
+  db.prepare('DELETE FROM social_stats WHERE captured_at < ?').run(beforeISO);
+  db.prepare('DELETE FROM social_video_stats WHERE captured_at < ?').run(beforeISO);
+}
+
+export function kvDelete(db: SocialDB, key: string): void {
+  db.prepare('DELETE FROM social_kv WHERE key = ?').run(key);
+}
+
+// ---------------------------------------------------------------------------
+// GĐ3 — Video stats
+// ---------------------------------------------------------------------------
+
+export type VideoStatRow = {
+  id: number;
+  job_id: string;
+  cluster_id: string;
+  platform: string;
+  external_video_id: string;
+  views: number | null;
+  likes: number | null;
+  comments_count: number | null;
+  captured_at: string;
+};
+
+export function insertVideoStat(
+  db: SocialDB,
+  data: {
+    jobId: string; clusterId: string; platform: string; externalVideoId: string;
+    views: number | null; likes: number | null; commentsCount: number | null; capturedAt: string;
+  }
+): void {
+  db.prepare(`
+    INSERT INTO social_video_stats(job_id, cluster_id, platform, external_video_id, views, likes, comments_count, captured_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(data.jobId, data.clusterId, data.platform, data.externalVideoId, data.views, data.likes, data.commentsCount, data.capturedAt);
+}
+
+/** Metrics gần nhất mỗi (job, platform) + số views của lượt đo trước đó. */
+export function latestVideoStats(
+  db: SocialDB,
+  clusterId?: string
+): Array<VideoStatRow & { previousViews: number | null }> {
+  return db.prepare(`
+    SELECT s.job_id, s.cluster_id, s.platform, s.external_video_id, s.views, s.likes, s.comments_count, s.captured_at,
+      (SELECT older.views FROM social_video_stats AS older
+        WHERE older.job_id = s.job_id AND older.platform = s.platform
+          AND older.id < s.id ORDER BY older.id DESC LIMIT 1) AS previousViews
+    FROM (
+      SELECT vs.*, ROW_NUMBER() OVER (
+        PARTITION BY vs.job_id, vs.platform ORDER BY vs.id DESC) AS rn
+      FROM social_video_stats AS vs
+      ${clusterId !== undefined ? 'WHERE vs.cluster_id = ?' : ''}
+    ) AS s
+    WHERE s.rn = 1
+    ORDER BY s.captured_at DESC
+  `).all(...(clusterId !== undefined ? [clusterId] : [])) as Array<VideoStatRow & { previousViews: number | null }>;
+}
+
+/** Simplest: điểm đo trước đó của một cặp job+platform. */
+export function previousVideoStatRow(
+  db: SocialDB,
+  jobId: string,
+  platform: string
+): VideoStatRow | undefined {
+  return db.prepare(`
+    SELECT * FROM social_video_stats WHERE job_id = ? AND platform = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(jobId, platform) as VideoStatRow | undefined;
+}
+
+export function latestVideoStatRow(
+  db: SocialDB,
+  jobId: string,
+  platform: string
+): VideoStatRow | undefined {
+  return previousVideoStatRow(db, jobId, platform);
+}
+
+// ---------------------------------------------------------------------------
+// GĐ3 — Bình luận (quét + AI trả lời)
+// ---------------------------------------------------------------------------
+
+export type SocialCommentRowLike = {
+  id: number;
+  job_id: string | null;
+  cluster_id: string;
+  platform: string;
+  external_video_id: string;
+  external_comment_id: string;
+  author: string;
+  text: string;
+  comment_created_at: string | null;
+  reply_status: string;
+  reply_text: string | null;
+  replied_at: string | null;
+  skipped_reason: string | null;
+  created_at: string;
+};
+
+/** Nhập bình luận mới; trả số bản ghi thật sự được tạo (unique theo platform+comment id). */
+export function upsertCommentRow(
+  db: SocialDB,
+  data: {
+    jobId: string | null; clusterId: string; platform: string;
+    externalVideoId: string; externalCommentId: string;
+    author: string; text: string; commentCreatedAt: string | null; nowISO: string;
+  }
+): boolean {
+  const result = db.prepare(`
+    INSERT INTO social_comments(
+      job_id, cluster_id, platform, external_video_id, external_comment_id,
+      author, text, comment_created_at, reply_status, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+    ON CONFLICT(platform, external_comment_id) DO NOTHING
+  `).run(
+    data.jobId, data.clusterId, data.platform, data.externalVideoId, data.externalCommentId,
+    data.author, data.text, data.commentCreatedAt, data.nowISO
+  );
+  return result.changes > 0;
+}
+
+export function listCommentRows(
+  db: SocialDB,
+  filters: { clusterId?: string; limit?: number; replyStatus?: string }
+): SocialCommentRowLike[] {
+  const wheres: string[] = [];
+  const params: Array<string | number> = [];
+  if (filters.clusterId !== undefined) {
+    wheres.push('cluster_id = ?');
+    params.push(filters.clusterId);
+  }
+  if (filters.replyStatus !== undefined) {
+    wheres.push('reply_status = ?');
+    params.push(filters.replyStatus);
+  }
+  const whereSql = wheres.length > 0 ? `WHERE ${wheres.join(' AND ')}` : '';
+  params.push(filters.limit ?? 100);
+  return db.prepare(`
+    SELECT * FROM social_comments ${whereSql}
+    ORDER BY created_at DESC, id DESC LIMIT ?
+  `).all(...params) as SocialCommentRowLike[];
+}
+
+export function getCommentRow(db: SocialDB, id: number): SocialCommentRowLike | undefined {
+  return db.prepare('SELECT * FROM social_comments WHERE id = ?').get(id) as SocialCommentRowLike | undefined;
+}
+
+export function updateCommentRow(
+  db: SocialDB,
+  id: number,
+  patch: { reply_status: string; reply_text?: string | null; replied_at?: string | null; skipped_reason?: string | null }
+): void {
+  db.prepare(`
+    UPDATE social_comments SET
+      reply_status = ?,
+      reply_text = COALESCE(?, reply_text),
+      replied_at = COALESCE(?, replied_at),
+      skipped_reason = COALESCE(?, skipped_reason)
+    WHERE id = ?
+  `).run(patch.reply_status, patch.reply_text ?? null, patch.replied_at ?? null, patch.skipped_reason ?? null, id);
+}
+
+export function countCommentRowsRepliedSince(
+  db: SocialDB,
+  clusterId: string,
+  sinceISO: string
+): number {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS n FROM social_comments
+    WHERE cluster_id = ? AND reply_status = 'sent' AND replied_at >= ?
+  `).get(clusterId, sinceISO) as { n: number };
+  return row.n;
 }

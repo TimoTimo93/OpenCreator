@@ -49,7 +49,7 @@ export async function registerSocialMcpRoute(
     const baseUrl = input.getBaseUrl();
     if (baseUrl === undefined) return reply.code(503).send(jsonRpcError('OpenCreator runtime is not listening'));
     const allowed = new Set(authorization.grant.scopes);
-    const readTools: SocialToolName[] = ['social_overview'];
+    const readTools: SocialToolName[] = ['social_overview', 'social_stats', 'social_list_comments'];
     const manageTools: SocialToolName[] = [
       'social_create_cluster',
       'social_update_cluster',
@@ -61,7 +61,8 @@ export async function registerSocialMcpRoute(
       'social_remove_job',
       'social_retry_failed',
       'social_pause_queue',
-      'social_resume_queue'
+      'social_resume_queue',
+      'social_scan_comments'
     ];
     const enabledTools: SocialToolName[] = [
       ...(allowed.has('social:read') ? readTools : []),
