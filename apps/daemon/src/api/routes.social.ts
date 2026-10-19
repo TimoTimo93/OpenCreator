@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { apiError } from './errors.js';
 import { SocialError, type SocialClusterPatch, type SocialService } from '../social/service.js';
-import { sanitizePlatformSettings, type SocialEnqueueRequest } from '../social/types.js';
+import { sanitizePlatformSettings, type SocialEnqueueRequest, type SocialPlatform } from '../social/types.js';
 
 /**
  * REST cho Mạng Lưới Đăng Đa Kênh:
@@ -15,6 +15,7 @@ import { sanitizePlatformSettings, type SocialEnqueueRequest } from '../social/t
  * - POST /social/clusters/:id/check-proxy       → đo proxy
  * - POST /social/clusters/:id/open-browser      → mở trình duyệt Persistent (đăng nhập tay)
  * - POST /social/clusters/:id/close-browser
+ * - POST /social/clusters/:id/login/:platform   → mở trang đăng nhập nền tảng (youtube|tiktok|facebook)
  * - POST /social/jobs                           → nạp video (1 video × N cụm qua clusterIds)
  * - PATCH /social/jobs/:id                      → đổi giờ hẹn (chưa đăng xong)
  * - DELETE /social/jobs/:id
@@ -82,6 +83,19 @@ export async function registerSocialRoutes(
   server.post<{ Params: { id: string } }>('/social/clusters/:id/close-browser', async (request, reply) => {
     try {
       return await social.closeClusterBrowser(request.params.id);
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.post<{ Params: { id: string; platform: string } }>('/social/clusters/:id/login/:platform', async (request, reply) => {
+    const platform = parseSocialPlatform(request.params.platform);
+    if (platform === undefined) {
+      return reply.code(400).send(apiError('VALIDATION_FAILED', 'param.platform phải là youtube|tiktok|facebook'));
+    }
+    try {
+      // Chỉ mở trang đăng nhập trong trình duyệt cụm — người dùng tự đăng nhập.
+      return await social.openClusterLoginPage(request.params.id, platform);
     } catch (error) {
       return socialFailure(error, reply);
     }
@@ -299,5 +313,9 @@ function stripClusterPatch(body: SocialClusterPatch): SocialClusterPatch {
   if (typeof body.autoReplyEnabled === 'boolean') patch.autoReplyEnabled = body.autoReplyEnabled;
   if (typeof body.autoReplyPrompt === 'string') patch.autoReplyPrompt = body.autoReplyPrompt;
   return patch;
+}
+
+function parseSocialPlatform(value: string | undefined): SocialPlatform | undefined {
+  return value === 'youtube' || value === 'tiktok' || value === 'facebook' ? value : undefined;
 }
 

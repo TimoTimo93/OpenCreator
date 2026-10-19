@@ -13,9 +13,13 @@ import {
   PackageOpen,
   RotateCcw,
   Save,
-  Settings2
+  Send,
+  Settings2,
+  X
 } from 'lucide-react';
 import { useLocalizedCopy, type LocalizeCopy } from '../../i18n/useLocalizedCopy.js';
+import { useAppLanguage } from '../../i18n/LanguageProvider.js';
+import { setPendingSocialHandoffSource } from './pending-social-handoff.js';
 import CreatorResultVersionMenu from './CreatorResultVersionMenu.js';
 import { OriginalErrorDetails } from '../issues/OriginalErrorDetails.js';
 
@@ -82,7 +86,23 @@ export type VoiceResultOutput = {
   previewError?: string;
 };
 
+/** Handoff sang hàng đợi đăng đa kênh: hash mở SocialWorkspace qua workbench. */
+const SOCIAL_WORKSPACE_HASH = '#/workbench?tool=social-channels';
+
+/**
+ * Chốt chặn tự handoff: mỗi artifact video hoàn tất chỉ tự đưa vào hàng đợi
+ * đăng đa kênh đúng một lần mỗi phiên trang (tránh đè khi người dùng tự chọn
+ * video khác bằng nút).
+ */
+const autoSocialHandoffDone = new Set<string>();
+
+/** Chỉ dành cho kiểm thử — xóa chốt chặn tự handoff. */
+export function resetAutoSocialHandoffGuard(): void {
+  autoSocialHandoffDone.clear();
+}
+
 const resultTabs: Array<{
+
   value: VideoTranslationResultTab;
   label: string;
   icon: typeof FileVideo;
@@ -133,6 +153,8 @@ export default function VideoTranslationResultWorkspace(props: {
   onConfirmRegenerate(): void;
 }) {
   const l = useLocalizedCopy();
+  const { t } = useAppLanguage();
+  const [showHandoffBanner, setShowHandoffBanner] = useState(false);
   const availableSubtitleVariants = props.subtitleOutputs.map(output => output.variant);
   const availableSubtitleVariantKey = availableSubtitleVariants.join('|');
   const [selectedSubtitleVariant, setSelectedSubtitleVariant] = useState<SubtitleResultVariant>('horizontal');
@@ -178,6 +200,41 @@ export default function VideoTranslationResultWorkspace(props: {
         : props.execution.status === 'canceled' || props.execution.status === 'interrupted'
           ? l('可在任务面板中继续任务。', 'Resume the task from the task panel.')
           : l(`当前阶段：${props.execution.stageLabel}`, `Current stage: ${props.execution.stageLabel}`);
+
+  // Luồng "dịch xong → đăng đa kênh": bản dịch hoàn tất (kết quả có file) →
+  // tự đưa video hoàn chỉnh đầu tiên vào hàng chờ đăng đa kênh đúng một lần
+  // và báo cho người dùng bằng banner ("Mở ngay" mở SocialWorkspace).
+  const handoffOutput = props.execution === undefined
+    ? props.videoOutputs.find(output => typeof output.path === 'string' && (output.path ?? '').trim() !== '')
+    : undefined;
+  const handoffKey = handoffOutput === undefined
+    ? ''
+    : `${props.version}:${handoffOutput.artifactId}`;
+  const socialHandoffTitleFor = (output: NonNullable<typeof handoffOutput>): string =>
+    output.fileName ?? `${videoVariantArtifactLabel(output.variant, l)}-${props.targetLanguage}-V${props.version}.mp4`;
+
+  useEffect(() => {
+    if (handoffOutput === undefined) return;
+    if (!autoSocialHandoffDone.has(handoffKey)) {
+      autoSocialHandoffDone.add(handoffKey);
+      setPendingSocialHandoffSource({
+        path: handoffOutput.path as string,
+        title: socialHandoffTitleFor(handoffOutput)
+      });
+    }
+    setShowHandoffBanner(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffKey]);
+
+  const openSocialWorkspace = (): void => {
+    window.location.hash = SOCIAL_WORKSPACE_HASH;
+  };
+
+  const queueOutputForSocial = (output: VideoResultOutput): void => {
+    if (typeof output.path !== 'string' || output.path.trim() === '') return;
+    setPendingSocialHandoffSource({ path: output.path, title: socialHandoffTitleFor(output) });
+    openSocialWorkspace();
+  };
 
   useEffect(() => {
     setSelectedSubtitleVariant(availableSubtitleVariants.includes('horizontal')
@@ -233,6 +290,23 @@ export default function VideoTranslationResultWorkspace(props: {
         />
       </div>
 
+      {/* Banner tự handoff: bản dịch xong đã sẵn sàng trong hàng chờ đăng đa kênh */}
+      {showHandoffBanner && handoffOutput !== undefined ? (
+        <div className="video-result-notice" role="status" data-social-handoff-banner="true">
+          <Send size={15} strokeWidth={1.8} aria-hidden="true" />
+          <span>{t('dashboard.social.handoffReadyTitle')}</span>
+          <button type="button" onClick={openSocialWorkspace}>{t('dashboard.social.handoffOpenNow')}</button>
+          <button
+            type="button"
+            aria-label={t('dashboard.social.handoffDismiss')}
+            title={t('dashboard.social.handoffDismiss')}
+            onClick={() => setShowHandoffBanner(false)}
+          >
+            <X size={14} strokeWidth={1.8} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
+
       {props.notice ? <p className="video-result-notice" role="status">{props.notice}</p> : null}
 
       {props.activeTab === 'video' ? (
@@ -280,6 +354,21 @@ export default function VideoTranslationResultWorkspace(props: {
                             >
                               <Download size={16} strokeWidth={1.8} aria-hidden="true" />
                             </button>
+                            {props.execution === undefined
+                              && typeof output.path === 'string'
+                              && output.path.trim() !== '' ? (
+                              <button
+                                type="button"
+                                className="video-translation-secondary-action"
+                                data-social-queue-button="true"
+                                onClick={() => queueOutputForSocial(output)}
+                                aria-label={t('dashboard.social.queueToSocial')}
+                                title={t('dashboard.social.queueToSocial')}
+                              >
+                                <Send size={15} strokeWidth={1.8} aria-hidden="true" />
+                                {t('dashboard.social.queueToSocial')}
+                              </button>
+                            ) : null}
                             <OpenFolderButton
                               label={l('打开文件夹', 'Open folder')}
                               pending={props.openFolderPending === output.artifactId}

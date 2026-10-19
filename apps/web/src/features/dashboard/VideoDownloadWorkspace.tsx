@@ -46,8 +46,9 @@ import {
 } from './creator-session-store.js';
 import { setPendingTranslationSource } from './pending-translation-source.js';
 import {
-  downloadSeriesKey,
-  seriesTitleFromName,
+  downloadSeriesSignal,
+  fileBaseName,
+  keepSharedFolderSignals,
   type DownloadSource
 } from './video-download-batch.js';
 import type { RuntimeDependenciesController } from '../../app/use-runtime-dependencies.js';
@@ -187,25 +188,18 @@ export default function VideoDownloadWorkspace(props: {
   const hasActiveDownloads = activeDownloadStages.length > 0
     || submittingOptionIds.size > 0;
   const historyItems = useMemo(
-    () => props.batch === undefined ? downloadHistoryItems(
-      options,
-      downloadStages,
-      downloadArtifacts,
-      probeArtifact,
-      probe
-    ) : props.batch.jobs.flatMap(job => {
+    () => keepSharedFolderSignals(props.batch === undefined ? standaloneHistoryItems() : batchHistoryItems()),
+    [downloadArtifacts, downloadStages, options, probe, probeArtifact, props.batch?.jobs]
+  );
+
+  /** Hàng đợi link nhiều job: mỗi job nhận tín hiệu series của riêng nó. */
+  function batchHistoryItems(): DownloadHistoryItem[] {
+    return props.batch!.jobs.flatMap(job => {
       const sourceUrl = readString(job.state.sourceUrl) ?? '';
       const sourceProbeArtifact = latestMatchingProbe(job.artifacts, sourceUrl);
       const sourceProbe = sourceProbeArtifact === undefined ? undefined : readDownloadProbe(sourceProbeArtifact.metadata);
       const artifacts = job.artifacts.filter(artifact => artifact.status === 'completed'
         && (artifact.kind === 'source_video' || artifact.kind === 'source_audio')).sort(compareArtifactFreshness);
-      const seriesId = readString(sourceProbeArtifact?.metadata.seriesId) ?? readString(job.state.seriesId);
-      const seriesName = readString(sourceProbeArtifact?.metadata.seriesName) ?? readString(job.state.seriesName);
-      const heuristicSeries = seriesTitleFromName(sourceProbe?.title);
-      const seriesTitle = seriesName ?? heuristicSeries;
-      const seriesKey = seriesId !== undefined || seriesName !== undefined
-        ? downloadSeriesKey({ ...(seriesId === undefined ? {} : { seriesId }), ...(seriesName === undefined ? {} : { seriesName }) })
-        : seriesTitle === undefined ? undefined : `name:${seriesTitle.toLocaleLowerCase()}`;
       return downloadHistoryItems(sourceProbe?.options ?? [],
         job.stages.filter(stage => stage.stageId === 'download'), artifacts, sourceProbeArtifact, sourceProbe)
         .map(item => ({
@@ -213,12 +207,47 @@ export default function VideoDownloadWorkspace(props: {
           ownerJobId: job.id,
           sourceTitle: sourceProbe?.title ?? sourceUrl,
           ...(sourceUrl === '' ? {} : { sourceUrl }),
-          ...(seriesKey === undefined ? {} : { seriesKey }),
-          ...(seriesTitle === undefined ? {} : { seriesTitle })
+          ...seriesSignalForItem(item, {
+            seriesId: readString(sourceProbeArtifact?.metadata.seriesId) ?? readString(job.state.seriesId),
+            seriesName: readString(sourceProbeArtifact?.metadata.seriesName)
+              ?? readString(job.state.seriesName)
+              ?? readString(job.state.seriesTitle),
+            sourceTitle: sourceProbe?.title
+          })
         }));
-    }),
-    [downloadArtifacts, downloadStages, options, probe, probeArtifact, props.batch?.jobs]
-  );
+    });
+  }
+
+  /** Job đơn (tác vụ hiện hành): video tải trong phiên này cũng được gom theo phim. */
+  function standaloneHistoryItems(): DownloadHistoryItem[] {
+    return downloadHistoryItems(options, downloadStages, downloadArtifacts, probeArtifact, probe)
+      .map(item => ({
+        ...item,
+        sourceTitle: probe?.title ?? url,
+        ...seriesSignalForItem(item, {
+          seriesId: readString(probeArtifact?.metadata.seriesId),
+          seriesName: readString(probeArtifact?.metadata.seriesName),
+          sourceTitle: probe?.title
+        })
+      }));
+  }
+
+  /** Tín hiệu gom nhóm cho từng sản phẩm: job-level trước, sau đó tên file/thư mục cha. */
+  function seriesSignalForItem(
+    item: DownloadHistoryItem,
+    jobLevel: { seriesId?: string; seriesName?: string; sourceTitle?: string }
+  ): Pick<DownloadHistoryItem, 'seriesKey' | 'seriesTitle'> {
+    const signal = downloadSeriesSignal({
+      ...jobLevel,
+      fileName: item.artifact === undefined ? undefined : fileBaseName(artifactFileName(item.artifact)),
+      filePath: item.artifact === undefined
+        ? undefined
+        : readString(item.artifact.metadata.savedTo) ?? item.artifact.path ?? undefined
+    });
+    return signal === undefined
+      ? {}
+      : { seriesKey: signal.seriesKey, seriesTitle: signal.seriesTitle };
+  }
   const historyGroups = useMemo(
     () => groupDownloadHistory(historyItems),
     [historyItems]
@@ -781,7 +810,10 @@ export default function VideoDownloadWorkspace(props: {
     const source = historySource(item);
     const sourceBusy = source !== undefined
       && (source.status === 'analyzing' || source.status === 'downloading');
-    const artifactPath = artifact?.path?.trim();
+    // Ưu tiên bản sao trong thư mục tải về (savedTo) để mở đúng thư mục người dùng nhìn thấy.
+    const artifactPath = (
+      readString(artifact?.metadata.savedTo) ?? artifact?.path ?? ''
+    ).trim();
     const canReveal = artifactPath !== undefined && artifactPath !== ''
       && props.batch?.revealDownloadFolder !== undefined;
     const retriable = status === 'failed' || status === 'canceled' || status === 'interrupted';
@@ -796,7 +828,7 @@ export default function VideoDownloadWorkspace(props: {
         <span aria-hidden="true">
           {downloadHistoryIcon(item)}
         </span>
-        <div>
+        <div className="video-download-file-info">
           <strong>
             {artifact === undefined
               ? downloadPendingTitle(item.sourceTitle ?? probe?.title ?? url, option, l)
@@ -807,29 +839,29 @@ export default function VideoDownloadWorkspace(props: {
               ? downloadStageDescription(stage, option, l)
               : artifactDescription(artifact, l)}
           </small>
-          {status === 'queued' || status === 'running' ? (
-            <div
-              className="video-download-row-progress"
-              data-indeterminate={preparing || undefined}
-              role="progressbar"
-              aria-label={preparing
-                ? l('正在准备下载', 'Preparing download')
-                : `${l('下载进度', 'Download progress')} ${Math.round(percent)}%`}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={preparing
-                ? undefined
-                : Math.round(percent)}
-              aria-valuetext={preparing
-                ? l('正在准备下载', 'Preparing download')
-                : undefined}
-            >
-              <span style={preparing
-                ? undefined
-                : { width: `${percent}%` }} />
-            </div>
-          ) : null}
         </div>
+        {status === 'queued' || status === 'running' ? (
+          <div
+            className="video-download-row-progress"
+            data-indeterminate={preparing || undefined}
+            role="progressbar"
+            aria-label={preparing
+              ? l('正在准备下载', 'Preparing download')
+              : `${l('下载进度', 'Download progress')} ${Math.round(percent)}%`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={preparing
+              ? undefined
+              : Math.round(percent)}
+            aria-valuetext={preparing
+              ? l('正在准备下载', 'Preparing download')
+              : undefined}
+          >
+            <span style={preparing
+              ? undefined
+              : { width: `${percent}%` }} />
+          </div>
+        ) : null}
         <div className="video-download-file-actions">
           {artifact === undefined ? (
             <span className="video-download-row-status">
@@ -1079,6 +1111,18 @@ export default function VideoDownloadWorkspace(props: {
           </nav>
         ) : null}
         {props.batch === undefined || sourceTab !== 'link' ? null : resultToolbar}
+        {props.batch?.revealDownloadFolder === undefined ? null : (
+          <button
+            type="button"
+            className="video-download-folder-reveal"
+            disabled={revealingFolder}
+            onClick={() => void revealDownloadFolder()}
+            title={t('dashboard.download.openDownloadsRoot')}
+          >
+            <FolderOpen size={15} strokeWidth={1.8} aria-hidden="true" />
+            {t('dashboard.download.openDownloadsRoot')}
+          </button>
+        )}
       </>}
       taskSummary={probe === undefined ? undefined : <CreatorTaskSummary
         sourceIcon={Link2}
@@ -1423,17 +1467,6 @@ export default function VideoDownloadWorkspace(props: {
                           : l('当前任务保存的真实下载产物', 'Downloaded artifacts saved by this job')}
                       </p>
                     </div>
-                    {props.batch?.revealDownloadFolder !== undefined ? (
-                      <button
-                        type="button"
-                        disabled={revealingFolder}
-                        onClick={() => void revealDownloadFolder()}
-                        title={t('dashboard.download.openDownloadsRoot')}
-                      >
-                        <FolderOpen size={15} strokeWidth={1.8} aria-hidden="true" />
-                        {t('dashboard.download.openDownloadsRoot')}
-                      </button>
-                    ) : null}
                   </header>
                   {historyItems.length > 0 ? (
                     <div className="download-record-list">

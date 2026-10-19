@@ -449,7 +449,12 @@ export default function DashboardPage(props: {
   if (activeWorkspace === 'social-channels') {
     return props.socialService === null || props.socialService === undefined
       ? <p className="video-result-empty" role="status">{t('dashboard.social.serviceUnavailable')}</p>
-      : <SocialWorkspace service={props.socialService} onBack={closeWorkspace} />;
+      : <SocialWorkspace
+          service={props.socialService}
+          creatorService={props.creatorService}
+          projectId={props.projectId}
+          onBack={closeWorkspace}
+        />;
   }
 
   if (activeWorkspace === 'digital-avatar') {

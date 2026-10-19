@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSocialService } from './social-service.js';
 import type { SocialOverview } from './social-service.js';
+import { listTranslatedVideos, translatedVideosFromCreatorJobs } from './social-service.js';
 import SocialWorkspace from '../features/dashboard/SocialWorkspace.js';
 import { LanguageProvider } from '../i18n/LanguageProvider.js';
 import {
@@ -355,5 +356,179 @@ describe('SocialWorkspace — tab Thống kê + Bình luận', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Bình luận' }));
     await waitFor(() => expect(screen.getByText(/Tập 17 hay quá!/)).toBeInTheDocument());
     expect(screen.getByText('AI đã trả')).toBeInTheDocument();
+  });
+});
+
+describe('createSocialService — openClusterLogin (đăng nhập tay)', () => {
+  it('POST đúng route login từng nền tảng và từ chối nền tảng lạ', async () => {
+    const { calls, client } = fakeClient();
+    const service = createSocialService(client);
+    await service.openClusterLogin('a1', 'youtube');
+    await service.openClusterLogin('a1', 'facebook');
+    expect(calls.filter(call => call.method === 'POST').map(call => call.path)).toEqual([
+      '/social/clusters/a1/login/youtube',
+      '/social/clusters/a1/login/facebook'
+    ]);
+    await expect(service.openClusterLogin('a1', 'threads' as never)).rejects.toThrow(/không hỗ trợ/);
+    expect(calls.filter(call => call.method === 'POST' && call.path.includes('/login/'))).toHaveLength(2);
+  });
+});
+
+describe('video đã dịch xong — lọc creator jobs', () => {
+  const creatorJob = (overrides: Partial<Parameters<typeof translatedVideosFromCreatorJobs>[0][number]> = {}) => ({
+    id: 'job_trans_1',
+    projectId: 'proj_1',
+    templateId: 'video-translation',
+    status: 'completed',
+    artifacts: [{
+      id: 'art_h',
+      kind: 'horizontal_video',
+      version: 1,
+      status: 'completed',
+      path: 'D:/projects/dich/tap-1.mp4',
+      createdAt: '2026-10-19T08:00:00.000Z'
+    }],
+    ...overrides
+  }) as Parameters<typeof translatedVideosFromCreatorJobs>[0][number];
+
+  it('chỉ lấy job video-translation đã completed với artifact video hoàn chỉnh, mới nhất trước', () => {
+    const items = translatedVideosFromCreatorJobs([
+      creatorJob(),
+      // Template khác → bỏ
+      creatorJob({ id: 'job_cover', templateId: 'cover' }),
+      // Chưa hoàn tất → bỏ
+      creatorJob({ id: 'job_running', status: 'running' }),
+      // Artifact chưa hoàn tất / không path → bỏ
+      creatorJob({
+        id: 'job_draft',
+        artifacts: [{ id: 'art_draft', kind: 'horizontal_video', version: 1, status: 'draft', path: null, createdAt: '2026-10-19T07:00:00.000Z' }]
+      }),
+      // Bản dập hoàn tất mới hơn (vertical V2) → đứng đầu
+      creatorJob({
+        id: 'job_trans_3',
+        artifacts: [{
+          id: 'art_new', kind: 'vertical_video', version: 2, status: 'completed',
+          path: 'D:/projects/dich/v2.mp4', createdAt: '2026-10-19T09:00:00.000Z'
+        }]
+      })
+    ]);
+    expect(items.map(item => item.path)).toEqual([
+      'D:/projects/dich/v2.mp4',
+      'D:/projects/dich/tap-1.mp4'
+    ]);
+    expect(items[0]).toMatchObject({ title: 'v2.mp4', kind: 'vertical_video', version: 2 });
+  });
+
+  it('bỏ trùng đường dẫn (bản sao cũ hơn bị loại)', () => {
+    const items = translatedVideosFromCreatorJobs([
+      creatorJob({
+        artifacts: [{ id: 'art_a', kind: 'horizontal_video', version: 1, status: 'completed', path: 'D:/x/tap-1.mp4', createdAt: '2026-10-19T08:00:00.000Z' }]
+      }),
+      creatorJob({
+        id: 'job_trans_2',
+        artifacts: [{ id: 'art_b', kind: 'horizontal_video', version: 2, status: 'stale', path: 'D:/x/tap-1.mp4', createdAt: '2026-10-19T10:00:00.000Z' }]
+      })
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ artifactId: 'art_b', version: 2 });
+  });
+
+  it('listTranslatedVideos truyền projectId và trả về { items }', async () => {
+    const calls: Array<string | undefined> = [];
+    const provider = {
+      listJobs: async (projectId?: string) => {
+        calls.push(projectId);
+        return { jobs: [creatorJob()] };
+      }
+    };
+    const result = await listTranslatedVideos(provider, 'proj_1');
+    expect(calls).toEqual(['proj_1']);
+    expect(result.items).toHaveLength(1);
+    expect((await listTranslatedVideos(provider, '  ')).items).toHaveLength(1);
+    expect(calls[1]).toBeUndefined();
+  });
+});
+
+describe('SocialWorkspace — đăng nhập tài khoản trong tab Kênh', () => {
+  afterEach(() => {
+    localStorage.clear();
+    window.location.hash = '';
+  });
+
+  it('hiển thị trạng thái đăng nhập 3 nền tảng; nút Đăng nhập gọi POST login/platform', async () => {
+    const { calls, client } = fakeClient();
+    render(
+      <LanguageProvider initialPreference="vi-VN">
+        <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
+      </LanguageProvider>
+    );
+    await waitFor(() => expect(screen.getByText('Tập 2')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'Kênh' }));
+    // Trạng thái: unknown → 'Chưa rõ' (youtube/tiktok/facebook đều unknown trong fixture)
+    await waitFor(() => expect(screen.getAllByText(/Chưa rõ/)).toHaveLength(3));
+    fireEvent.click(screen.getByTestId('social-login-status-cluster_a-youtube').closest('.social-login-entry')!.querySelector('button')!);
+    await waitFor(() => {
+      const login = calls.find(call => call.method === 'POST' && call.path === '/social/clusters/cluster_a/login/youtube');
+      expect(login).toBeDefined();
+    });
+    expect(await screen.findByText(/Đã mở trang đăng nhập/)).toBeInTheDocument();
+  });
+});
+
+describe('SocialWorkspace — composer nguồn "Video đã dịch"', () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  function fakeCreatorService(jobs: unknown[], calls: Array<string | undefined> = []) {
+    return {
+      listJobsCalls: calls,
+      listJobs: async (projectId?: string) => {
+        calls.push(projectId);
+        return { jobs };
+      }
+    } as never;
+  }
+
+  it('tab "Video đã dịch" là mặc định, chọn video điền path; fallback không creatorService chỉ còn tải về', async () => {
+    const { client } = fakeClient();
+    render(
+      <LanguageProvider initialPreference="vi-VN">
+        <SocialWorkspace
+          service={createSocialService(client)}
+          creatorService={fakeCreatorService([
+            {
+              id: 'job_trans_1', templateId: 'video-translation', status: 'completed',
+              artifacts: [{ id: 'art_1', kind: 'horizontal_video', version: 1, status: 'completed', path: 'D:/dich/tap-1.mp4', createdAt: '2026-10-19T08:00:00.000Z' }]
+            }
+          ])}
+          projectId="proj_1"
+          onBack={vi.fn()}
+        />
+      </LanguageProvider>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo bài đăng' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Soạn bài đăng đa kênh' });
+    // Tab mặc định là "Video đã dịch"
+    const translatedTab = within(dialog).getByRole('tab', { name: 'Video đã dịch' });
+    expect(translatedTab).toHaveAttribute('aria-selected', 'true');
+    // Job dịch hoàn tất xuất hiện trong picker (từ creatorService.listJobs)
+    fireEvent.click(within(dialog).getByRole('button', { name: /tap-1\.mp4/ }));
+    const pathInput = within(dialog).getByLabelText('Vị trí video (MP4)') as HTMLInputElement;
+    expect(pathInput.value).toBe('D:/dich/tap-1.mp4');
+    expect(await screen.findByText('Soạn bài đăng đa kênh')).toBeInTheDocument();
+  });
+
+  it('composer khi không có creatorService chỉ còn nút "Video tải về" (không crash)', async () => {
+    const { client } = fakeClient();
+    render(
+      <LanguageProvider initialPreference="vi-VN">
+        <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
+      </LanguageProvider>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo bài đăng' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Soạn bài đăng đa kênh' });
+    expect(within(dialog).queryByRole('tab', { name: 'Video đã dịch' })).not.toBeInTheDocument();
+    expect(within(dialog).getByText('Tập 5')).toBeInTheDocument();
   });
 });

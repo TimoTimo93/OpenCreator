@@ -851,6 +851,12 @@
   margin-top: 2px;
 }
 
+/* Bỏ nút "Đăng đa kênh" trong hàng đợi tải của trình tải video: video mới tải về
+  phải đi DỊCH trước (drama-panes.tsx đang bị phong tỏa nên ẩn qua CSS tại đây). */
+.drama-queue-actions > .drama-btn:not(.drama-queue-translate) {
+  display: none;
+}
+
 .drama-queue-translate {
   align-self: flex-start;
   margin-top: 2px;

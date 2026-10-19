@@ -109,3 +109,106 @@ export function downloadSeriesKey(series: { seriesId?: string; seriesName?: stri
   const name = series?.seriesName?.trim();
   return name !== undefined && name !== '' ? `name:${name.toLocaleLowerCase()}` : undefined;
 }
+
+/** Tên thư mục cha của một đường dẫn file; bỏ qua thư mục gốc ổ đĩa (D:, /). */
+export function parentFolderName(path: string | undefined): string | undefined {
+  const normalized = path?.replace(/\\/g, '/').trim() ?? '';
+  if (normalized === '') return undefined;
+  const parent = normalized
+    .slice(0, normalized.lastIndexOf('/'))
+    .replace(/\/+$/, '');
+  if (parent === '' || /^[a-z]:$/i.test(parent) || parent === '/') return undefined;
+  const name = parent.slice(parent.lastIndexOf('/') + 1).trim();
+  return name === '' ? undefined : name;
+}
+
+export type DownloadSeriesSignalInput = {
+  /** (1) seriesId do daemon trả về (probe metadata) hoặc được hand-off ghi vào job state. */
+  seriesId?: string;
+  /** (2) Tên bộ phim khai báo (probe metadata, job state hoặc series của hand-off). */
+  seriesName?: string;
+  /** (3a) Tiêu đề nguồn để suy tên phim theo số tập. */
+  sourceTitle?: string;
+  /** (3b) Tên file đã tải để suy tên phim khi tiêu đề không đủ tín hiệu. */
+  fileName?: string;
+  /** (4) Đường dẫn file đã tải; các tập nằm chung thư mục con sẽ gom theo tên thư mục. */
+  filePath?: string;
+};
+
+export type DownloadSeriesSignal = {
+  seriesKey: string;
+  seriesTitle: string;
+  /** Tín hiệu đến từ thư mục cha (mức ưu tiên thấp nhất, cần xác thực thêm). */
+  folder?: boolean;
+};
+
+/**
+ * Ghép các tín hiệu nhận biết bộ phim theo mức ưu tiên:
+ * (1) seriesId từ daemon, (2) seriesName khai báo (kể cả series của hand-off
+ * được ghi vào job state), (3) suy từ tiêu đề/tên file theo số tập,
+ * (4) tên thư mục cha khi các tập nằm chung thư mục con.
+ */
+export function downloadSeriesSignal(
+  input: DownloadSeriesSignalInput
+): DownloadSeriesSignal | undefined {
+  const seriesId = textOf(input.seriesId);
+  if (seriesId !== undefined) {
+    return {
+      seriesKey: `id:${seriesId}`,
+      seriesTitle: textOf(input.seriesName) ?? seriesId
+    };
+  }
+  const seriesName = textOf(input.seriesName);
+  if (seriesName !== undefined) {
+    return { seriesKey: `name:${seriesName.toLocaleLowerCase()}`, seriesTitle: seriesName };
+  }
+  const fromTitle = seriesTitleFromName(input.sourceTitle);
+  if (fromTitle !== undefined) {
+    return { seriesKey: `name:${fromTitle.toLocaleLowerCase()}`, seriesTitle: fromTitle };
+  }
+  const fromFile = seriesTitleFromName(input.fileName);
+  if (fromFile !== undefined) {
+    return { seriesKey: `name:${fromFile.toLocaleLowerCase()}`, seriesTitle: fromFile };
+  }
+  const folder = parentFolderName(input.filePath);
+  if (folder !== undefined) {
+    return { seriesKey: `folder:${folder.toLocaleLowerCase()}`, seriesTitle: folder, folder: true };
+  }
+  return undefined;
+}
+
+/**
+ * Chỉ gom theo thư mục khi thư mục đó chứa sản phẩm từ ít nhất 2 link (job)
+ * khác nhau — file rời của một link đơn lẻ không đủ căn cứ gom theo thư mục.
+ */
+export function keepSharedFolderSignals<T extends {
+  seriesKey?: string;
+  seriesTitle?: string;
+  ownerJobId?: string;
+}>(items: T[]): T[] {
+  const jobsPerFolder = new Map<string, Set<string>>();
+  for (const item of items) {
+    if (item.seriesKey === undefined || !item.seriesKey.startsWith('folder:')) continue;
+    const jobs = jobsPerFolder.get(item.seriesKey) ?? new Set<string>();
+    jobs.add(item.ownerJobId ?? '');
+    jobsPerFolder.set(item.seriesKey, jobs);
+  }
+  return items.map(item => {
+    if (item.seriesKey === undefined || !item.seriesKey.startsWith('folder:')) return item;
+    return jobsPerFolder.get(item.seriesKey)!.size < 2
+      ? { ...item, seriesKey: undefined, seriesTitle: undefined }
+      : item;
+  });
+}
+
+function textOf(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed !== undefined && trimmed !== '' ? trimmed : undefined;
+}
+
+/** Bỏ phần mở rộng để suy tên phim từ tên file nguồn (Phim A - Tập 02.mp4 → Phim A). */
+export function fileBaseName(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || trimmed === '') return undefined;
+  return trimmed.replace(/\.[a-z0-9]+$/i, '');
+}

@@ -20,9 +20,24 @@ afterEach(async () => {
   teardown = undefined;
 });
 
-async function setup(options: { scopes: string[] } = { scopes: ['social:read', 'social:manage'] }) {
+async function setup(options: { scopes?: string[]; browserLauncher?: boolean } = {}) {
+  const grantedScopes = options.scopes ?? ['social:read', 'social:manage'];
   const dir = await mkdtemp(join(tmpdir(), 'social-agent-'));
-  const worker = createSocialWorker({ tickIntervalMs: 0 });
+  const openedUrls: string[] = [];
+  const worker = createSocialWorker({
+    tickIntervalMs: 0,
+    ...(options.browserLauncher === true
+      ? {
+          browserLauncher: async () => ({
+            newPage: async (url?: string) => {
+              openedUrls.push(url ?? '');
+              return { url };
+            },
+            close: async () => undefined
+          })
+        }
+      : {})
+  });
   const service = createSocialService({ dataDir: dir, worker, checkProxyFn: async () => ({ status: 'online', detail: '3ms' }) });
   const capabilities = createAgentCapabilityTokenStore();
   server = Fastify();
@@ -35,7 +50,7 @@ async function setup(options: { scopes: string[] } = { scopes: ['social:read', '
     runId: 'run_social_1',
     threadId: 'thread_1',
     createdBy: 'api',
-    scopes: options.scopes as never
+    scopes: grantedScopes as never
   }).token;
   teardown = async () => {
     await server?.close();
@@ -60,7 +75,7 @@ async function setup(options: { scopes: string[] } = { scopes: ['social:read', '
       return response.json() as unknown;
     }
   };
-  return { server, token, service, capabilities, definitions: createSocialToolDefinitions({ request: injectClient.request }) };
+  return { server, token, service, capabilities, openedUrls, definitions: createSocialToolDefinitions({ request: injectClient.request }) };
 }
 
 function request(server: FastifyInstance, token: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: unknown) {
@@ -108,6 +123,27 @@ describe('social agent tools — internal routes', () => {
     expect(removed.statusCode).toBe(200);
     const deleted = await request(fixture.server!, fixture.token, 'DELETE', `/internal/agent-tools/social/clusters/${clusterId}`);
     expect(deleted.json().clusters).toHaveLength(0);
+  });
+
+  it('social_open_login: mở trang đăng nhập nền tảng trong trình duyệt cụm (scope manage)', async () => {
+    const fixture = await setup({ scopes: ['social:read', 'social:manage'], browserLauncher: true });
+    await fixture.definitions.social_create_cluster.execute({ name: 'Cụm Đăng Nhập' });
+    const overview = (await request(fixture.server!, fixture.token, 'GET', '/internal/agent-tools/social/overview')).json();
+    const clusterId = overview.clusters[0].id;
+
+    const toolResult = await fixture.definitions.social_open_login.execute({ clusterId, platform: 'youtube' });
+    expect((toolResult as { ok: boolean }).ok).toBe(true);
+    expect(fixture.openedUrls).toEqual(['https://accounts.youtube.com/']);
+
+    // Scope chỉ đọc bị chặn; nền tảng bất hợp lệ → 400 (trước cả authorize).
+    const readOnlyToken = fixture.capabilities.issue({
+      runId: 'run_login_ro', threadId: 'thread_ro_login', createdBy: 'api', scopes: ['social:read']
+    }).token;
+    const blocked = await request(fixture.server!, readOnlyToken, 'POST', `/internal/agent-tools/social/clusters/${clusterId}/login/youtube`);
+    expect(blocked.statusCode).toBe(403);
+    expect(fixture.openedUrls).toEqual(['https://accounts.youtube.com/']);
+    const badPlatform = await request(fixture.server!, fixture.token, 'POST', `/internal/agent-tools/social/clusters/${clusterId}/login/threads`);
+    expect(badPlatform.statusCode).toBe(400);
   });
 
   it('body bất hợp lệ → 400 VALIDATION_FAILED; cụm không tồn tại → 404', async () => {

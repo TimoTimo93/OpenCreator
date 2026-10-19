@@ -7545,6 +7545,28 @@
   white-space: nowrap;
 }
 
+/* Nút chung "Mở thư mục tải về" đặt ở header của trình tải video. */
+.video-download-folder-reveal {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.video-download-folder-reveal:hover {
+  background: var(--surface-2);
+}
+
 .video-download-add-button,
 .video-download-add-form button,
 .video-download-batch-error button {
@@ -7974,8 +7996,36 @@
   gap: 8px;
 }
 
-.video-download-progress-row {
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+/* Hàng kết quả tải dùng flex: khối tiêu đề co giãn, thanh tiến độ ~50% bề ngang
+  HÀNG, cột nút hành động chiếm phần còn lại và căn phải trên cùng một hàng. */
+.video-result-file-row.video-download-progress-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.video-download-progress-row > span:first-child {
+  flex: 0 0 auto;
+}
+
+.video-download-progress-row > .video-download-file-info {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.video-download-progress-row > .video-download-row-progress {
+  flex: 0 0 50%;
+}
+
+.video-download-progress-row > .video-download-file-actions {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.video-download-progress-row > .video-download-media-preview {
+  flex: 1 1 100%;
 }
 
 .video-result-file-row > .video-download-file-actions {

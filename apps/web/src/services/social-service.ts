@@ -147,6 +147,95 @@ export type SocialProxyCheckResult = {
   detail: string | null;
 };
 
+/** Nền tảng tài khoản trong cụm kênh. */
+export type SocialPlatformName = 'youtube' | 'tiktok' | 'facebook';
+
+export const SOCIAL_PLATFORM_NAMES: readonly SocialPlatformName[] = ['youtube', 'tiktok', 'facebook'];
+
+// ---------------------------------------------------------------------------
+// Video đã dịch xong — nguồn chọn media dành cho hàng đợi đăng đa kênh
+// ---------------------------------------------------------------------------
+
+/** Loại artifact là video hoàn chỉnh của job dịch video. */
+export const TRANSLATED_VIDEO_KINDS: readonly string[] = ['horizontal_video', 'vertical_video', 'dubbed_video'];
+/** templateId của luồng dịch video trên daemon. */
+export const TRANSLATED_VIDEO_TEMPLATE_ID = 'video-translation';
+
+export type SocialTranslatedVideo = {
+  jobId: string;
+  artifactId: string;
+  /** Đường dẫn file trên đĩa (video hoàn chỉnh hoặc export). */
+  path: string;
+  title: string;
+  kind: string;
+  version: number;
+  /** Thời điểm artifact hoàn tất (ISO). */
+  completedAt: string;
+};
+
+export type SocialTranslatedVideosResult = { items: SocialTranslatedVideo[] };
+
+/** Nguồn danh sách creator job trên web (đề phòng vòng import, dùng kiểu cấu trúc). */
+export type SocialCreatorJobsProvider = {
+  listJobs(projectId?: string): Promise<{ jobs: ReadonlyArray<{
+    id: string;
+    templateId: string;
+    status: string;
+    artifacts: ReadonlyArray<{
+      id: string;
+      kind: string;
+      version: number;
+      status: string;
+      path: string | null;
+      createdAt: string;
+    }>;
+  }> }>;
+};
+
+/** Lọc creator jobs đã hoàn tất của luồng dịch video → các video hoàn chỉnh sẵn sàng đăng đa kênh. */
+export function translatedVideosFromCreatorJobs(
+  jobs: ReadonlyArray<Awaited<ReturnType<SocialCreatorJobsProvider['listJobs']>>['jobs'][number]>
+): SocialTranslatedVideo[] {
+  const items: SocialTranslatedVideo[] = [];
+  for (const job of jobs) {
+    if (job.templateId !== TRANSLATED_VIDEO_TEMPLATE_ID) continue;
+    if (job.status !== 'completed') continue;
+    for (const artifact of job.artifacts) {
+      // 'stale' vẫn là bản dịch hoàn thành đã từng có file trên đĩa — dùng
+      // được để đăng; artifact chưa hoàn tất thì bỏ.
+      if (artifact.status !== 'completed' && artifact.status !== 'stale') continue;
+      if (!TRANSLATED_VIDEO_KINDS.includes(artifact.kind)) continue;
+      const path = artifact.path;
+      if (typeof path !== 'string' || path.trim() === '') continue;
+      items.push({
+        jobId: job.id,
+        artifactId: artifact.id,
+        path,
+        title: fileNameOfPath(path),
+        kind: artifact.kind,
+        version: artifact.version,
+        completedAt: artifact.createdAt
+      });
+    }
+  }
+  // Mới nhất trước, bỏ trùng đúng một đường dẫn (bản dịch xuất sau cùng).
+  const dedupe = new Map<string, SocialTranslatedVideo>();
+  for (const item of [...items].sort((left, right) => right.completedAt.localeCompare(left.completedAt))) {
+    if (!dedupe.has(item.path)) dedupe.set(item.path, item);
+  }
+  return [...dedupe.values()];
+}
+
+/** Nạp danh sách video đã dịch xong qua creator service của web (bỏ qua khi không có). */
+export async function listTranslatedVideos(
+  creatorService: SocialCreatorJobsProvider,
+  projectId?: string
+): Promise<SocialTranslatedVideosResult> {
+  const scoped = projectId === undefined || projectId.trim() === '' ? undefined : projectId;
+  const response = await creatorService.listJobs(scoped);
+  return { items: translatedVideosFromCreatorJobs(response.jobs) };
+}
+
 // ---------------------------------------------------------------------------
 // Media picker — video đã tải trong thư mục downloads của daemon
 // ---------------------------------------------------------------------------
@@ -253,6 +342,13 @@ export function createSocialService(client: RuntimeClient) {
     openClusterBrowser(id: string): Promise<SocialOverview> {
       return client.post(`/social/clusters/${encodeURIComponent(id)}/open-browser`);
     },
+    /** Mở trang đăng nhập của nền tảng trong trình duyệt persistent của cụm (người dùng tự đăng nhập). */
+    openClusterLogin(id: string, platform: SocialPlatformName): Promise<{ ok: boolean }> {
+      if (!SOCIAL_PLATFORM_NAMES.includes(platform)) {
+        return Promise.reject(new Error(`Nền tảng không hỗ trợ đăng nhập: ${platform}`));
+      }
+      return client.post(`/social/clusters/${encodeURIComponent(id)}/login/${platform}`) as Promise<{ ok: boolean }>;
+    },
     closeClusterBrowser(id: string): Promise<SocialOverview> {
       return client.post(`/social/clusters/${encodeURIComponent(id)}/close-browser`);
     },
@@ -301,3 +397,8 @@ export function createSocialService(client: RuntimeClient) {
 }
 
 export type SocialService = ReturnType<typeof createSocialService>;
+
+function fileNameOfPath(path: string): string {
+  const normalized = path.trim().replace(/\\/g, '/');
+  return normalized.slice(normalized.lastIndexOf('/') + 1) || path.trim();
+}

@@ -669,6 +669,21 @@
 .social-login-ok { background: color-mix(in srgb, var(--social-ok) 15%, transparent); color: var(--social-ok); }
 .social-login-expired { background: color-mix(in srgb, var(--social-err) 14%, transparent); color: var(--social-err); }
 
+/* Trạng thái đăng nhập + nút đăng nhập tay từng nền tảng trong card cụm. */
+.social-login-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Nguồn chọn media trong composer: tab "Video đã dịch" / "Video tải về". */
+.social-media-sources {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .social-cluster-meta {
   margin: 0;
   font-size: 12px;

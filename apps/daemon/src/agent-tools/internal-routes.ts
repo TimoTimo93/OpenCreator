@@ -385,6 +385,15 @@ export async function registerAgentToolRoutes(
       flexSocial(request, reply, 'social:manage', () => social.openClusterBrowser(request.params.id)));
     server.post<{ Params: { id: string } }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/clusters/:id/close-browser`, async (request, reply) =>
       flexSocial(request, reply, 'social:manage', () => social.closeClusterBrowser(request.params.id)));
+    server.post<{ Params: { id: string; platform: string } }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/clusters/:id/login/:platform`, async (request, reply) => {
+      const value = request.params.platform;
+      const platform = value === 'youtube' || value === 'tiktok' || value === 'facebook' ? value : undefined;
+      if (platform === undefined) {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'param.platform must be youtube|tiktok|facebook'));
+      }
+      return flexSocial(request, reply, 'social:manage', () =>
+        social.openClusterLoginPage(request.params.id, platform));
+    });
     server.post<{ Body: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/jobs`, async (request, reply) => {
       const body = parseBody(request.body, reply);
       if (body === undefined) return;

@@ -116,9 +116,9 @@ describe('OpenCreatorSidebar', () => {
     expect(screen.queryByRole('button', { name: 'Agent动态' })).not.toBeInTheDocument();
     const primaryActions = screen.getByRole('button', { name: '工作台' }).parentElement;
     expect(primaryActions?.children[0]).toBe(screen.getByRole('button', { name: '工作台' }));
-    expect(primaryActions?.children[1]).toBe(screen.getByRole('button', { name: '视频下载器' }));
-    expect(primaryActions?.children[2]).toBe(screen.getByRole('button', { name: '视频翻译' }));
-    expect(primaryActions?.children[3]).toBe(screen.getByRole('button', { name: '多渠道管理' }));
+    expect(primaryActions?.children[1]).toBe(screen.getByRole('button', { name: '视频翻译' }));
+    expect(primaryActions?.children[2]).toBe(screen.getByRole('button', { name: '多渠道管理' }));
+    expect(primaryActions?.children[3]).toBe(screen.getByRole('button', { name: '视频下载器' }));
     expect(primaryActions?.children[4]).toBe(screen.getByRole('button', { name: '模版' }));
     expect(primaryActions?.children[5]).toBe(screen.getByRole('button', { name: '我的项目' }));
     expect(screen.queryByRole('separator')).not.toBeInTheDocument();
@@ -651,6 +651,18 @@ describe('OpenCreatorSidebar', () => {
     view.unmount();
     renderSidebar({ activeWorkspace: 'social-channels', activeView: 'dashboard' }, 'vi-VN');
     expect(screen.getByRole('button', { name: 'Quản Lý Đa Kênh' })).toHaveAttribute('aria-current');
+  });
+
+  it('orders the workspace shortcuts translation before downloader', () => {
+    renderSidebar({ activeView: 'dashboard' }, 'vi-VN');
+
+    const rows = [...document.querySelectorAll('.sidebar-primary .sidebar-row')];
+    const labelIndex = (name: string) => rows.findIndex(row => row.textContent === name);
+    expect(labelIndex('Bảng điều khiển')).toBeGreaterThanOrEqual(0);
+    expect(labelIndex('Dịch video')).toBeGreaterThan(labelIndex('Bảng điều khiển'));
+    expect(labelIndex('Quản Lý Đa Kênh')).toBeGreaterThan(labelIndex('Dịch video'));
+    expect(labelIndex('Trình tải video')).toBeGreaterThan(labelIndex('Quản Lý Đa Kênh'));
+    expect(labelIndex('Trình tải video')).toBeLessThan(labelIndex('Mẫu sáng tạo'));
   });
 
   it('hides the header search action', () => {

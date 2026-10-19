@@ -320,6 +320,76 @@ describe('video download link batches', () => {
     expect(screen.getByText('child-2.mp4')).toBeInTheDocument();
   });
 
+  it('groups episodes by the series id and name reported by the daemon', async () => {
+    const ep1 = readyJob('child-1', firstUrl, 'root');
+    ep1.artifacts[0]!.metadata.seriesId = 'hg-1001';
+    ep1.artifacts[0]!.metadata.seriesName = 'Phim B';
+    ep1.artifacts.push(fileArtifact(ep1));
+    const ep2 = readyJob('child-2', secondUrl, 'root');
+    ep2.artifacts[0]!.metadata.seriesId = 'hg-1001';
+    ep2.artifacts[0]!.metadata.seriesName = 'Phim B';
+    ep2.artifacts.push(fileArtifact(ep2));
+    setup(readyJob('root', thirdUrl), [ep1, ep2]);
+
+    fireEvent.click(screen.getByRole('tab', { name: '作品' }));
+    const toggle = await screen.findByText('Phim B', { selector: '.video-download-series-toggle > strong' });
+    expect(toggle).toBeInTheDocument();
+    expect(toggle.closest('button')).toHaveTextContent('共 2 集');
+  });
+
+  it('groups episodes when the hand-off keeps the series on the job state', async () => {
+    const ep1 = readyJob('child-1', firstUrl, 'root');
+    ep1.state.seriesId = 'hg-2002';
+    ep1.state.seriesName = 'Phim C';
+    ep1.artifacts.push(fileArtifact(ep1));
+    const ep2 = readyJob('child-2', secondUrl, 'root');
+    ep2.state.seriesId = 'hg-2002';
+    ep2.state.seriesName = 'Phim C';
+    ep2.artifacts.push(fileArtifact(ep2));
+    setup(readyJob('root', thirdUrl), [ep1, ep2]);
+
+    fireEvent.click(screen.getByRole('tab', { name: '作品' }));
+    expect(await screen.findByText('Phim C', { selector: '.video-download-series-toggle > strong' })).toBeInTheDocument();
+  });
+
+  it('falls back to the downloaded file name when titles carry no episode marker', async () => {
+    const ep1 = readyJob('child-1', firstUrl, 'root');
+    ep1.artifacts[0]!.metadata.title = 'Video 1';
+    ep1.artifacts.push(fileArtifact(ep1));
+    ep1.artifacts[1]!.metadata.fileName = 'Phim C - Tap 03.mp4';
+    const ep2 = readyJob('child-2', secondUrl, 'root');
+    ep2.artifacts[0]!.metadata.title = 'Video 2';
+    ep2.artifacts.push(fileArtifact(ep2));
+    ep2.artifacts[1]!.metadata.fileName = 'Phim C - Tap 04.mp4';
+    setup(readyJob('root', thirdUrl), [ep1, ep2]);
+
+    fireEvent.click(screen.getByRole('tab', { name: '作品' }));
+    expect(await screen.findByText('Phim C', { selector: '.video-download-series-toggle > strong' })).toBeInTheDocument();
+  });
+
+  it('groups downloads that share a parent folder, not single-job folders', async () => {
+    const ep1 = readyJob('child-1', firstUrl, 'root');
+    ep1.artifacts[0]!.metadata.title = 'Video 1';
+    ep1.artifacts.push(fileArtifact(ep1));
+    ep1.artifacts[1]!.path = 'D:/Downloads/PhimA/tap1.mp4';
+    ep1.artifacts[1]!.metadata.savedTo = 'D:/Downloads/PhimA/tap1.mp4';
+    const ep2 = readyJob('child-2', secondUrl, 'root');
+    ep2.artifacts[0]!.metadata.title = 'Video 2';
+    ep2.artifacts.push(fileArtifact(ep2));
+    ep2.artifacts[1]!.path = 'D:/Downloads/PhimA/tap2.mp4';
+    ep2.artifacts[1]!.metadata.savedTo = 'D:/Downloads/PhimA/tap2.mp4';
+    const unrelated = readyJob('child-3', thirdUrl, 'root');
+    unrelated.artifacts[0]!.metadata.title = 'Video 3';
+    unrelated.artifacts.push(fileArtifact(unrelated));
+    unrelated.artifacts[1]!.path = 'D:/Downloads/Lonely/only.mp4';
+    setup(readyJob('root', firstUrl), [ep1, ep2, unrelated]);
+
+    fireEvent.click(screen.getByRole('tab', { name: '作品' }));
+    expect(await screen.findByText('PhimA', { selector: '.video-download-series-toggle > strong' })).toBeInTheDocument();
+    // Thư mục chỉ chứa sản phẩm của một link đơn lẻ không gom thành nhóm phim.
+    expect(screen.getByRole('heading', { name: 'Video 3' })).toBeInTheDocument();
+  });
+
   it('hands a completed download to the translation workspace from the works row', async () => {
     takePendingTranslationSource();
     const child = readyJob('child', secondUrl, 'root');

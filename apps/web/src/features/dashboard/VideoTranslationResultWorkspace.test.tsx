@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import VideoTranslationResultWorkspace from './VideoTranslationResultWorkspace.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import VideoTranslationResultWorkspace, { resetAutoSocialHandoffGuard } from './VideoTranslationResultWorkspace.js';
+import { takePendingSocialHandoffSource, peekPendingSocialHandoffSource } from './pending-social-handoff.js';
 import { LanguageProvider } from '../../i18n/LanguageProvider.js';
 import { LanguageSwitchControls } from '../../test/LanguageSwitchControls.js';
 
@@ -634,5 +635,84 @@ describe('VideoTranslationResultWorkspace', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /项目 V2/ }));
     expect(onVersionChange).toHaveBeenCalledWith(2);
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+});
+
+describe('VideoTranslationResultWorkspace — dịch xong → hàng đợi đăng đa kênh', () => {
+  const videoWithPath = [{
+    artifactId: 'horizontal-video-v1',
+    variant: 'horizontal' as const,
+    artifactVersion: 1,
+    fileName: 'translated-horizontal.mp4',
+    path: 'D:/projects/dich/translated-horizontal.mp4',
+    src: 'blob:http://localhost/translated-video'
+  }];
+
+  const completedProps = {
+    ...baseProps,
+    activeTab: 'video' as const,
+    versions: [{ value: 1, description: '初次生成' }],
+    videoOutputs: videoWithPath
+  };
+
+  const renderView = (overrides: Record<string, unknown> = {}) =>
+    <VideoTranslationResultWorkspace {...completedProps} {...overrides} />;
+
+  afterEach(() => {
+    resetAutoSocialHandoffGuard();
+    takePendingSocialHandoffSource();
+    window.location.hash = '';
+  });
+
+  it('hiện nút nổi bật "Đưa vào hàng đợi đăng đa kênh" cho bản dịch hoàn tất, bấm → handoff + mở social', () => {
+    render(<LanguageProvider initialPreference="vi-VN">{renderView()}</LanguageProvider>);
+    const button = screen.getByRole('button', { name: 'Đưa vào hàng đợi đăng đa kênh' });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(peekPendingSocialHandoffSource()).toEqual({
+      path: 'D:/projects/dich/translated-horizontal.mp4',
+      title: 'translated-horizontal.mp4'
+    });
+    expect(window.location.hash).toBe('#/workbench?tool=social-channels');
+  });
+
+  it('tự động đưa vào hàng đợi 1 lần khi render bản dịch hoàn tất + hiện banner "Mở ngay"', () => {
+    render(<LanguageProvider initialPreference="vi-VN">{renderView()}</LanguageProvider>);
+    // Handoff tự động đã đặt đúng path bản dịch (không cần bấm gì)
+    expect(peekPendingSocialHandoffSource()).toMatchObject({ path: 'D:/projects/dich/translated-horizontal.mp4' });
+    expect(document.querySelector('[data-social-handoff-banner="true"]')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Mở ngay' }));
+    expect(window.location.hash).toBe('#/workbench?tool=social-channels');
+    // Nút đóng banner ẩn thông báo
+    fireEvent.click(screen.getByRole('button', { name: 'Đóng thông báo' }));
+    expect(document.querySelector('[data-social-handoff-banner="true"]')).toBeNull();
+  });
+
+  it('tự handoff đúng 1 lần mỗi artifact: banner hiện lại sau remount nhưng handoff không bị đè', () => {
+    const view = render(<LanguageProvider initialPreference="vi-VN">{renderView()}</LanguageProvider>);
+    expect(peekPendingSocialHandoffSource()).toMatchObject({ path: 'D:/projects/dich/translated-horizontal.mp4' });
+    takePendingSocialHandoffSource(); // người dùng tiêu thụ handoff
+    view.unmount();
+    render(<LanguageProvider initialPreference="vi-VN">{renderView()}</LanguageProvider>); // remount
+    // Banner vẫn hiện cho người dùng, nhưng handoff không tự đặt lại (guard đã-set)
+    expect(document.querySelector('[data-social-handoff-banner="true"]')).not.toBeNull();
+    expect(peekPendingSocialHandoffSource()).toBeUndefined();
+    // Bấm nút thủ công thì vẫn handoff lại
+    fireEvent.click(screen.getByRole('button', { name: 'Đưa vào hàng đợi đăng đa kênh' }));
+    expect(peekPendingSocialHandoffSource()).toMatchObject({ path: 'D:/projects/dich/translated-horizontal.mp4' });
+  });
+
+  it('không tự handoff khi đang dịch (execution) và không có nút handoff', () => {
+    render(<LanguageProvider initialPreference="vi-VN">{renderView({ execution: { status: 'running', stageLabel: 'Dubbing' } })}</LanguageProvider>);
+    expect(screen.queryByRole('button', { name: 'Đưa vào hàng đợi đăng đa kênh' })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-social-handoff-banner="true"]')).toBeNull();
+    expect(peekPendingSocialHandoffSource()).toBeUndefined();
+  });
+
+  it('không có nút handoff khi bản dịch chưa có file trên đĩa (chỉ Mở thư mục bị tắt sẵn có)', () => {
+    render(<LanguageProvider initialPreference="vi-VN">{renderView({ videoOutputs: [{ ...videoWithPath[0], path: undefined }] })}</LanguageProvider>);
+    expect(screen.queryByRole('button', { name: 'Đưa vào hàng đợi đăng đa kênh' })).not.toBeInTheDocument();
+    expect(peekPendingSocialHandoffSource()).toBeUndefined();
+    expect(document.querySelector('[data-social-handoff-banner="true"]')).toBeNull();
   });
 });

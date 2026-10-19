@@ -56,6 +56,7 @@ export async function registerSocialMcpRoute(
       'social_delete_cluster',
       'social_check_proxy',
       'social_open_browser',
+      'social_open_login',
       'social_close_browser',
       'social_enqueue_videos',
       'social_remove_job',

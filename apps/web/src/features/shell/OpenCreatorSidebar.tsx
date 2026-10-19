@@ -147,12 +147,6 @@ export function OpenCreatorSidebar(props: {
       onClick: () => props.onOpenView('dashboard')
     },
     {
-      label: t('nav.videoDownloader'),
-      icon: Download,
-      current: props.activeWorkspace === 'video-download',
-      onClick: () => props.onOpenWorkspace?.('video-download')
-    },
-    {
       label: t('nav.videoTranslation'),
       icon: Languages,
       current: props.activeWorkspace === 'video-translation',
@@ -163,6 +157,12 @@ export function OpenCreatorSidebar(props: {
       icon: Users,
       current: props.activeWorkspace === 'social-channels',
       onClick: () => props.onOpenWorkspace?.('social-channels')
+    },
+    {
+      label: t('nav.videoDownloader'),
+      icon: Download,
+      current: props.activeWorkspace === 'video-download',
+      onClick: () => props.onOpenWorkspace?.('video-download')
     },
     {
       label: t('nav.home'),

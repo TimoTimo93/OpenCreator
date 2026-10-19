@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Facebook,
   FileVideo,
+  KeyRound,
   ListVideo,
   LoaderCircle,
   MessageSquareReply,
@@ -32,8 +33,12 @@ import type {
   SocialJobPlatformSettings,
   SocialJobSummary,
   SocialOverview,
-  SocialService
+  SocialService,
+  SocialTranslatedVideo,
+  SocialPlatformName
 } from '../../services/social-service.js';
+import { listTranslatedVideos } from '../../services/social-service.js';
+import type { CreatorWebService } from '../../services/creator-service.js';
 import {
   composeEnqueueItems,
   dayKey,
@@ -114,7 +119,13 @@ function platformIcon(platform: PlatformName, size = 11) {
   return <Icon size={size} aria-hidden="true" />;
 }
 
-export default function SocialWorkspace(props: { service: SocialService; onBack(): void }) {
+export default function SocialWorkspace(props: {
+  service: SocialService;
+  /** Dịch vụ creator phía web — cho phép chọn "Video đã dịch" trong composer. */
+  creatorService?: CreatorWebService | null;
+  projectId?: string;
+  onBack(): void;
+}) {
   const { t } = useAppLanguage();
   const service = props.service;
   const [overview, setOverview] = useState<SocialOverview | null>(null);
@@ -126,6 +137,7 @@ export default function SocialWorkspace(props: { service: SocialService; onBack(
   const [composerOpen, setComposerOpen] = useState(false);
   const [handoffPath, setHandoffPath] = useState('');
   const [insightsKey, setInsightsKey] = useState(0);
+  const [loginPending, setLoginPending] = useState<string | null>(null);
 
   const load = useCallback(async (showSpinner: boolean): Promise<void> => {
     if (showSpinner) setLoading(true);
@@ -201,6 +213,19 @@ export default function SocialWorkspace(props: { service: SocialService; onBack(
       setError(t('dashboard.social.actionFailed', { message: messageOf(cause) }));
     }
   }
+
+  const openClusterLogin = useCallback(async (cluster: SocialClusterSummary, platform: SocialPlatformName): Promise<void> => {
+    const key = `${cluster.id}:${platform}`;
+    setLoginPending(key);
+    try {
+      await service.openClusterLogin(cluster.id, platform);
+      setToast(t('dashboard.social.loginOpened'));
+    } catch (cause) {
+      setError(t('dashboard.social.actionFailed', { message: messageOf(cause) }));
+    } finally {
+      setLoginPending(null);
+    }
+  }, [service, t]);
 
   return (
     <div className="social-workspace" aria-label={t('dashboard.social.tabTitle')}>
@@ -297,6 +322,8 @@ export default function SocialWorkspace(props: { service: SocialService; onBack(
               onCheckProxy={cluster => void action(t('dashboard.social.checkedProxy'), () => service.checkClusterProxy(cluster.id))}
               onOpenBrowser={cluster => void action(t('dashboard.social.browserOpened'), () => service.openClusterBrowser(cluster.id))}
               onCloseBrowser={cluster => void action(t('dashboard.social.browserClosed'), () => service.closeClusterBrowser(cluster.id))}
+              onOpenLogin={openClusterLogin}
+              onLoginPending={loginPending}
               onEdit={cluster => setEditing(cluster)}
               onDelete={cluster => {
                 if (window.confirm(t('dashboard.social.confirmDelete', { name: cluster.name }))) {
@@ -318,6 +345,8 @@ export default function SocialWorkspace(props: { service: SocialService; onBack(
         open={composerOpen}
         service={service}
         clusters={clusters}
+        creatorService={props.creatorService}
+        projectId={props.projectId}
         initialPath={handoffPath}
         t={t}
         onClose={() => { setComposerOpen(false); setHandoffPath(''); }}
@@ -663,6 +692,7 @@ function QueuePanel(props: {
           </button>
         </div>
       </div>
+      <p className="social-enqueue-hint">{t('dashboard.social.queueTranslatedHint')}</p>
       <EnqueueSheet
         clusters={props.clusters}
         t={t}
@@ -692,9 +722,11 @@ function QueuePanel(props: {
 function ClusterCard(props: {
   cluster: SocialClusterSummary;
   t: Translate;
+  loginPendingKey: string;
   onCheckProxy(): void;
   onOpenBrowser(): void;
   onCloseBrowser(): void;
+  onOpenLogin(platform: SocialPlatformName): void;
   onEdit(): void;
   onDelete(): void;
 }) {
@@ -705,6 +737,11 @@ function ClusterCard(props: {
     unchecked: t('dashboard.social.proxyUnchecked'),
     checking: t('dashboard.social.proxyChecking'),
     no_proxy: t('dashboard.social.proxyNone')
+  };
+  const loginLabel: Record<string, string> = {
+    ok: t('dashboard.social.loginOk'),
+    expired: t('dashboard.social.loginExpired'),
+    unknown: t('dashboard.social.loginUnknown')
   };
   return (
     <li className="social-cluster-card">
@@ -717,11 +754,30 @@ function ClusterCard(props: {
         </span>
       </div>
       <div className="social-cluster-logins">
-        {PLATFORMS.map(platform => (
-          <span key={platform} className={`social-login social-login-${cluster.loginStatus[platform]}`}>
-            {platformIcon(platform, 10)} {platform}
-          </span>
-        ))}
+        {PLATFORMS.map(platform => {
+          const status = cluster.loginStatus[platform];
+          const key = `${cluster.id}:${platform}`;
+          return (
+            <span key={platform} className="social-login-entry">
+              <span
+                className={`social-login social-login-${status}`}
+                title={loginLabel[status] ?? status}
+                data-testid={`social-login-status-${cluster.id}-${platform}`}
+              >
+                {platformIcon(platform, 10)} {platform} · {loginLabel[status] ?? t('dashboard.social.loginUnknown')}
+              </span>
+              <button
+                type="button"
+                className="social-btn social-btn-sm"
+                disabled={props.loginPendingKey === key}
+                onClick={() => props.onOpenLogin(platform)}
+              >
+                {props.loginPendingKey === key ? <LoaderCircle size={12} className="social-spin" /> : <KeyRound size={12} aria-hidden="true" />}
+                {t('dashboard.social.loginAction')}
+              </button>
+            </span>
+          );
+        })}
       </div>
       <p className="social-cluster-meta">
         {t('dashboard.social.scheduleTimes', { times: cluster.defaultScheduleTimes.join(', ') })}
@@ -747,6 +803,8 @@ function ChannelsPanel(props: {
   onCheckProxy(cluster: SocialClusterSummary): void;
   onOpenBrowser(cluster: SocialClusterSummary): void;
   onCloseBrowser(cluster: SocialClusterSummary): void;
+  onOpenLogin(cluster: SocialClusterSummary, platform: SocialPlatformName): Promise<void>;
+  onLoginPending: string | null;
   onEdit(cluster: SocialClusterSummary): void;
   onDelete(cluster: SocialClusterSummary): void;
 }) {
@@ -761,6 +819,7 @@ function ChannelsPanel(props: {
           </button>
         </div>
       </div>
+      <p className="social-enqueue-hint">{t('dashboard.social.loginHint')}</p>
       {props.clusters.length === 0 ? (
         <p className="social-empty">{t('dashboard.social.noClusters')}</p>
       ) : (
@@ -770,9 +829,11 @@ function ChannelsPanel(props: {
               key={cluster.id}
               cluster={cluster}
               t={props.t}
+              loginPendingKey={props.onLoginPending ?? ''}
               onCheckProxy={() => props.onCheckProxy(cluster)}
               onOpenBrowser={() => props.onOpenBrowser(cluster)}
               onCloseBrowser={() => props.onCloseBrowser(cluster)}
+              onOpenLogin={platform => void props.onOpenLogin(cluster, platform)}
               onEdit={() => props.onEdit(cluster)}
               onDelete={() => props.onDelete(cluster)}
             />
@@ -915,10 +976,15 @@ function JobRow(props: {
 // Composer đa kênh — media picker + cụm + cài đặt từng nền tảng + preview
 // ---------------------------------------------------------------------------
 
+type MediaSourceTab = 'translated' | 'downloads';
+
 function ComposerModal(props: {
   open: boolean;
   service: SocialService;
   clusters: SocialClusterSummary[];
+  /** Dịch vụ creator phía web — có thể undefined (chỉ còn nguồn "Video tải về"). */
+  creatorService?: CreatorWebService | null;
+  projectId?: string;
   initialPath: string;
   t: Translate;
   onClose(): void;
@@ -932,6 +998,13 @@ function ComposerModal(props: {
   const [schedule, setSchedule] = useState('');
   const [downloads, setDownloads] = useState<SocialDownloadItem[] | null>(null);
   const [downloadsError, setDownloadsError] = useState('');
+  const [translatedVideos, setTranslatedVideos] = useState<SocialTranslatedVideo[] | null>(null);
+  const [translatedError, setTranslatedError] = useState('');
+  // 2 nguồn chọn media: "Video đã dịch" (luồng dịch → đăng) là mặc định khi
+  // có creator service; không có creator service → chỉ còn nguồn tải về.
+  const [sourceTab, setSourceTab] = useState<MediaSourceTab>(
+    () => props.creatorService == null ? 'downloads' : 'translated'
+  );
   const [search, setSearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [yt, setYt] = useState({ privacy: 'public', tags: '', madeForKids: false });
@@ -948,19 +1021,30 @@ function ComposerModal(props: {
     props.service.listDownloads(500)
       .then(result => { if (alive) { setDownloads(result.items); setDownloadsError(''); } })
       .catch(cause => { if (alive) setDownloadsError(messageOf(cause)); });
+    // Nguồn "Video đã dịch": creator service có thể không tồn tại (chỉ còn tải về).
+    if (props.creatorService !== undefined && props.creatorService !== null) {
+      listTranslatedVideos(props.creatorService, props.projectId)
+        .then(result => { if (alive) { setTranslatedVideos(result.items); setTranslatedError(''); } })
+        .catch(cause => { if (alive) { setTranslatedVideos([]); setTranslatedError(messageOf(cause)); } });
+    }
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.open, props.initialPath]);
 
   if (!props.open) return null;
 
+  const hasTranslatedSource = props.creatorService != null;
   const needle = search.trim().toLowerCase();
-  const filtered = (downloads ?? []).filter(item => {
+  const translateFilter = (titleText: string, subtitle: string, pathText: string): boolean => {
     if (needle === '') return true;
-    return item.title.toLowerCase().includes(needle)
-      || item.seriesName.toLowerCase().includes(needle)
-      || item.path.toLowerCase().includes(needle);
-  });
+    return titleText.toLowerCase().includes(needle)
+      || subtitle.toLowerCase().includes(needle)
+      || pathText.toLowerCase().includes(needle);
+  };
+  const filteredDownloads = (downloads ?? []).filter(item =>
+    translateFilter(item.title, item.seriesName, item.path)
+  );
+  const filteredTranslated = (translatedVideos ?? []).filter(item => translateFilter(item.title, item.jobId, item.path));
   const selectedClusters = props.clusters.filter(cluster => selectedIds.has(cluster.id));
   const pathOk = path.trim() !== '';
   const clustersOk = selectedClusters.length > 0;
@@ -987,6 +1071,11 @@ function ComposerModal(props: {
   function pickDownload(item: SocialDownloadItem): void {
     setPath(item.path);
     if (title.trim() === '') setTitle(item.title !== '' ? item.title : fileNameOf(item.path));
+  }
+
+  function pickTranslated(item: SocialTranslatedVideo): void {
+    setPath(item.path);
+    if (title.trim() === '') setTitle(item.title);
   }
 
   function submit(): void {
@@ -1033,6 +1122,32 @@ function ComposerModal(props: {
           <div className="social-composer-col">
             <section className="social-composer-section" aria-label={t('dashboard.social.composerPickVideo')}>
               <h3><FileVideo size={14} aria-hidden="true" /> {t('dashboard.social.composerPickVideo')}</h3>
+              {hasTranslatedSource ? (
+                <div
+                  className="social-media-sources"
+                  role="tablist"
+                  aria-label={t('dashboard.social.composerPickVideo')}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={sourceTab === 'translated'}
+                    className={`social-btn social-btn-sm${sourceTab === 'translated' ? ' social-btn-primary' : ''}`}
+                    onClick={() => setSourceTab('translated')}
+                  >
+                    {t('dashboard.social.composerSourceTranslated')}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={sourceTab === 'downloads'}
+                    className={`social-btn social-btn-sm${sourceTab === 'downloads' ? ' social-btn-primary' : ''}`}
+                    onClick={() => setSourceTab('downloads')}
+                  >
+                    {t('dashboard.social.composerSourceDownloads')}
+                  </button>
+                </div>
+              ) : null}
               <input
                 type="search"
                 className="social-media-search"
@@ -1040,10 +1155,32 @@ function ComposerModal(props: {
                 value={search}
                 onChange={event => setSearch(event.target.value)}
               />
-              {downloadsError !== '' ? <p className="social-warn-text">{downloadsError}</p> : null}
-              {downloads !== null && filtered.length === 0 ? <p className="social-empty">{t('dashboard.social.composerNoVideos')}</p> : null}
+              {sourceTab === 'downloads' && downloadsError !== '' ? <p className="social-warn-text">{downloadsError}</p> : null}
+              {sourceTab === 'translated' && translatedError !== '' ? <p className="social-warn-text">{translatedError}</p> : null}
+              {sourceTab === 'translated' && filteredTranslated.length === 0 ? (
+                <p className="social-empty">{t('dashboard.social.composerNoTranslated')}</p>
+              ) : null}
+              {sourceTab === 'downloads' && downloads !== null && filteredDownloads.length === 0 ? (
+                <p className="social-empty">{t('dashboard.social.composerNoVideos')}</p>
+              ) : null}
               <div className="social-media-grid">
-                {filtered.map(item => {
+                {sourceTab === 'translated' ? filteredTranslated.map(item => {
+                  const selected = path.trim() !== '' && item.path === path.trim();
+                  return (
+                    <button
+                      key={item.artifactId}
+                      type="button"
+                      className={`social-media-card${selected ? ' social-media-card-selected' : ''}`}
+                      aria-pressed={selected}
+                      onClick={() => pickTranslated(item)}
+                    >
+                      <span className="social-media-thumb"><FileVideo size={20} aria-hidden="true" /></span>
+                      <span className="social-media-name" title={item.title}>{item.title}</span>
+                      <span className="social-media-series">{t('dashboard.social.composerSourceTranslated')} · V{item.version}</span>
+                      <span className="social-media-meta">{t('dashboard.social.translatedMeta', { time: formatSchedule(item.completedAt) })}</span>
+                    </button>
+                  );
+                }) : filteredDownloads.map(item => {
                   const selected = path.trim() !== '' && item.path === path.trim();
                   return (
                     <button
@@ -1157,6 +1294,7 @@ function ComposerModal(props: {
                 </div>
               </div>
               <p className="social-enqueue-hint">{t('dashboard.social.enqueueHint')}</p>
+              <p className="social-enqueue-hint">{t('dashboard.social.queueTranslatedHint')}</p>
               <div className="social-enqueue-actions">
                 <button type="button" className="social-btn social-btn-sm" onClick={() => downloadTemplate()}>
                   {t('dashboard.social.excelTemplate')}

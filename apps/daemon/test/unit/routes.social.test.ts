@@ -26,9 +26,12 @@ describe('registerSocialRoutes — service chưa cắm', () => {
   });
 });
 
-async function setupServer(options: { downloadsRoot?: string } = {}) {
+async function setupServer(options: { downloadsRoot?: string; browserLauncher?: Parameters<typeof createSocialWorker>[0]['browserLauncher'] } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'social-routes-'));
-  const worker = createSocialWorker({ tickIntervalMs: 0 });
+  const worker = createSocialWorker({
+    tickIntervalMs: 0,
+    ...(options.browserLauncher === undefined ? {} : { browserLauncher: options.browserLauncher })
+  });
   const service = createSocialService({
     dataDir: dir,
     worker,
@@ -210,6 +213,35 @@ describe('registerSocialRoutes — PATCH /social/jobs/:id (đổi giờ)', () =>
     } finally {
       (await import('../../src/social/db.js')).closeSocialDatabase(raw);
     }
+  });
+});
+
+describe('registerSocialRoutes — POST /social/clusters/:id/login/:platform (đăng nhập tay)', () => {
+  it('nền tảng hợp lệ → { ok: true }; sai nền tảng → 400; cụm lạ → 404', async () => {
+    const openedUrls: string[] = [];
+    await setupServer({
+      browserLauncher: async () => ({
+        newPage: async (url?: string) => {
+          openedUrls.push(url ?? '');
+          return { url };
+        },
+        close: async () => undefined
+      })
+    });
+    const created = await server!.inject({ method: 'POST', url: '/social/clusters', payload: { name: 'Cụm Đăng Nhập' } });
+    const clusterId = created.json().clusters[0].id;
+    const ok = await server!.inject({ method: 'POST', url: `/social/clusters/${clusterId}/login/tiktok` });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ ok: true });
+    expect(openedUrls).toEqual(['https://www.tiktok.com/login']);
+
+    const badPlatform = await server!.inject({ method: 'POST', url: `/social/clusters/${clusterId}/login/threads` });
+    expect(badPlatform.statusCode).toBe(400);
+    expect(badPlatform.json().error.code).toBe('VALIDATION_FAILED');
+
+    const ghost = await server!.inject({ method: 'POST', url: '/social/clusters/cluster_nope/login/youtube' });
+    expect(ghost.statusCode).toBe(404);
+    expect(ghost.json().error.code).toBe('social_cluster_not_found');
   });
 });
 

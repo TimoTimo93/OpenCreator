@@ -9,6 +9,16 @@
 
 export type SocialPlatform = 'youtube' | 'tiktok' | 'facebook';
 
+/**
+ * Trang đăng nhập từng nền tảng — chỉ MỞ TRANG cho người dùng tự điền thông tin
+ * đăng nhập trong trình duyệt persistent của cụm (không tự động điền mật khẩu).
+ */
+export const SOCIAL_PLATFORM_LOGIN_URLS: Record<SocialPlatform, string> = {
+  youtube: 'https://accounts.youtube.com/',
+  tiktok: 'https://www.tiktok.com/login',
+  facebook: 'https://www.facebook.com/login'
+};
+
 export type SocialPlatformStatus =
   | 'pending'
   | 'running'

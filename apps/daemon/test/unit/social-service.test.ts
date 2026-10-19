@@ -265,6 +265,47 @@ describe('social service — rescheduleJob (đổi giờ đăng)', () => {
   });
 });
 
+describe('social service — openClusterLoginPage (đăng nhập tay)', () => {
+  it('mở trang đăng nhập của nền tảng trong trình duyệt cụm; cụm lạ → SocialError', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'social-service-login-'));
+    const openedUrls: string[] = [];
+    const worker = createSocialWorker({
+      tickIntervalMs: 0,
+      browserLauncher: async () => ({
+        newPage: async (url?: string) => {
+          openedUrls.push(url ?? '');
+          return { url };
+        },
+        close: async () => undefined
+      })
+    });
+    const service = createSocialService({
+      dataDir: dir,
+      worker,
+      checkProxyFn: async () => ({ status: 'online', detail: '9ms' })
+    });
+    cleanup = async () => {
+      await service.close();
+      await rm(dir, { recursive: true, force: true });
+    };
+    service.createCluster({ name: 'C', proxyServer: 'http://1.1.1.1:8080' });
+    const clusterId = service.getOverview().clusters[0]!.id;
+    expect(await service.openClusterLoginPage(clusterId, 'tiktok')).toEqual({ ok: true });
+    expect(openedUrls).toEqual(['https://www.tiktok.com/login']);
+    await expect(service.openClusterLoginPage('cluster_nope', 'youtube')).rejects.toThrow(SocialError);
+    // YouTube và Facebook cũng có trang đăng nhập riêng.
+    expect(await service.openClusterLoginPage(clusterId, 'youtube')).toEqual({ ok: true });
+    expect(openedUrls[1]).toBe('https://accounts.youtube.com/');
+  });
+
+  it('worker không trình duyệt launcher → lỗi chung không crash, chỉ SocialError khi cụm lạ', async () => {
+    const { service } = await makeService();
+    service.createCluster({ name: 'C' });
+    const clusterId = service.getOverview().clusters[0]!.id;
+    await expect(service.openClusterLoginPage(clusterId, 'facebook')).rejects.toThrow('Trình duyệt cụm không khả dụng');
+  });
+});
+
 describe('social service — listDownloads (media picker)', () => {
   it('liệt kê mp4/mkv/webm của thư mục downloads, mới nhất trước, bỏ file khác', async () => {
     const downloadsRoot = await mkdtemp(join(tmpdir(), 'social-downloads-'));

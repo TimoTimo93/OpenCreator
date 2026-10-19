@@ -35,6 +35,7 @@ import { createSocialComments, type SocialLlmConfig } from './comments.js';
 import { listDownloadedVideos, type SocialDownloadItem } from './downloads.js';
 import type { SocialWorker } from './worker.js';
 import {
+  SOCIAL_PLATFORM_LOGIN_URLS,
   sanitizePlatformSettings,
   type SocialCluster,
   type SocialClusterView,
@@ -90,6 +91,8 @@ export type SocialService = {
   checkClusterProxy(clusterId: string): Promise<SocialOverview>;
   openClusterBrowser(clusterId: string): Promise<SocialOverview>;
   closeClusterBrowser(clusterId: string): Promise<SocialOverview>;
+  /** Mở tab trang đăng nhập của nền tảng trong trình duyệt persistent cụm (người dùng tự đăng nhập). */
+  openClusterLoginPage(clusterId: string, platform: SocialPlatform): Promise<{ ok: true }>;
   /** Nạp video vào hàng đợi; trả summary + số nạp + danh sách path bị bỏ qua. */
   enqueue(requests: readonly SocialEnqueueRequest[]): { summary: SocialOverview; accepted: number; duplicates: string[] };
   pause(): SocialOverview;
@@ -283,6 +286,21 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       if (row === undefined) throw new SocialError('social_cluster_not_found', 'Không tìm thấy cụm kênh');
       await worker.closeClusterBrowser(clusterId);
       return overview();
+    },
+
+    async openClusterLoginPage(clusterId: string, platform: SocialPlatform): Promise<{ ok: true }> {
+      const row = getClusterRow(db, clusterId);
+      if (row === undefined) throw new SocialError('social_cluster_not_found', 'Không tìm thấy cụm kênh');
+      const loginUrl = SOCIAL_PLATFORM_LOGIN_URLS[platform];
+      if (typeof loginUrl !== 'string') {
+        throw new SocialError('social_platform_invalid', `Nền tảng không hỗ trợ đăng nhập: ${platform}`);
+      }
+      // withClusterBrowser tự mở trình duyệt persistent của cụm nếu chưa mở —
+      // chỉ điều hướng tới trang đăng nhập, người dùng tự thao tác (không tự điền).
+      await worker.withClusterBrowser(clusterId, async handle => {
+        await handle.newPage(loginUrl);
+      });
+      return { ok: true };
     },
 
     enqueue(requests: readonly SocialEnqueueRequest[]): { summary: SocialOverview; accepted: number; duplicates: string[] } {

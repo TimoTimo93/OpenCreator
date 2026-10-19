@@ -18,6 +18,7 @@ export const SOCIAL_TOOL_NAMES = [
   'social_delete_cluster',
   'social_check_proxy',
   'social_open_browser',
+  'social_open_login',
   'social_close_browser',
   'social_enqueue_videos',
   'social_remove_job',
@@ -114,6 +115,12 @@ const enqueueSchema = z.object({
 
 const jobIdSchema = z.object({
   jobId: z.string().min(1).describe('id job trong hàng đợi (từ social_overview)')
+}).strict();
+
+const loginSchema = z.object({
+  clusterId: z.string().min(1).describe('id cụm từ social_overview'),
+  platform: z.enum(['youtube', 'tiktok', 'facebook'])
+    .describe('Nền tảng cần mở trang đăng nhập')
 }).strict();
 
 const rescheduleSchema = z.object({
@@ -215,6 +222,20 @@ export function createSocialToolDefinitions(input: {
         return input.request({
           method: 'POST',
           path: `/internal/agent-tools/social/clusters/${encodeURIComponent(parsed.clusterId)}/open-browser`
+        });
+      }
+    },
+    social_open_login: {
+      description: [
+        'Mở trang đăng nhập của một nền tảng (youtube | tiktok | facebook) trong trình duyệt persistent của cụm.',
+        'Không điền thông tin đăng nhập — người dùng tự đăng nhập tay, cookie phiên được giữ lại trong profile cụm.'
+      ].join(' '),
+      inputSchema: loginSchema,
+      execute: async (value: unknown) => {
+        const parsed = loginSchema.parse(value);
+        return input.request({
+          method: 'POST',
+          path: `/internal/agent-tools/social/clusters/${encodeURIComponent(parsed.clusterId)}/login/${parsed.platform}`
         });
       }
     },

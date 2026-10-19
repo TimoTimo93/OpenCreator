@@ -573,8 +573,35 @@ describe('VideoDownloadWorkspace', () => {
 
     expect(screen.getByText('准备中')).toBeInTheDocument();
     expect(screen.queryByText('2%')).not.toBeInTheDocument();
-    expect(screen.getByRole('progressbar', { name: '正在准备下载' }))
-      .not.toHaveAttribute('aria-valuenow');
+    const progress = screen.getByRole('progressbar', { name: '正在准备下载' });
+    expect(progress).not.toHaveAttribute('aria-valuenow');
+    // Thanh tiến độ là cột riêng của hàng (sibling của cột tiêu đề và cột nút hành động).
+    const row = progress.closest('.video-download-progress-row')!;
+    expect(row).not.toBeNull();
+    expect(progress.parentElement).toBe(row);
+    expect(row.querySelector('.video-download-file-info .video-download-row-progress')).toBeNull();
+    expect(row.querySelector('.video-download-file-actions')).not.toBeNull();
+  });
+
+  it('groups works downloaded in this session by the series inferred from the file name', async () => {
+    const probe = probeArtifact();
+    probe.metadata.title = 'Creator Demo';
+    const first = videoArtifact();
+    first.metadata.fileName = 'Phim A - Tap 05.mp4';
+    const audio = audioArtifact();
+    audio.metadata.fileName = 'Phim A - Tap 05.mp3';
+    renderWorkspace(job({
+      state: {
+        sourceUrl: 'https://www.youtube.com/watch?v=demo',
+        mediaType: 'video',
+        selectedOptionId: 'video-1080-1'
+      },
+      artifacts: [probe, first, audio]
+    }), { applyAction: vi.fn() });
+
+    fireEvent.click(await screen.findByRole('tab', { name: '作品' }));
+    const toggle = await screen.findByText('Phim A', { selector: '.video-download-series-toggle > strong' });
+    expect(toggle.closest('button')).toHaveTextContent('共 2 集');
   });
 
   it('accepts supported platform video URLs and Reddit share links for analysis', async () => {
