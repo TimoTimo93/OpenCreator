@@ -122,6 +122,15 @@ await signRemotionComponent(outputRoot);
 verifyStickmanRuntime(outputRoot, targetPlatform, targetArch);
 const appVersion = JSON.parse(readFileSync(join(desktopDir, 'package.json'), 'utf8')).version;
 const component = createRemotionComponentArtifact({ runtimeRoot: outputRoot, outputRoot: join(desktopDir, '.pack', 'components'), version: appVersion, platform: targetPlatform, arch: targetArch });
+// Dọn archive Remotion các bản cũ trong .pack/components — electron-builder copy
+// cả thư mục này vào gói (filter "Remotion-*.tar.gz"), tích lũy mỗi lần bump
+// version làm phình gói ~137 MB/bản (595 MB → 882 MB chỉ sau vài đợt).
+const componentsRoot = join(desktopDir, '.pack', 'components');
+for (const entry of readdirSync(componentsRoot)) {
+  if (entry !== component.fileName && entry !== 'remotion-component.json') {
+    rmSync(join(componentsRoot, entry), { recursive: true, force: true });
+  }
+}
 console.log(JSON.stringify({
   ok: true,
   outputRoot,

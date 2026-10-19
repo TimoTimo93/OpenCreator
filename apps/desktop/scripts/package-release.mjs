@@ -148,6 +148,14 @@ const packageWithSigningEnvironment = async builderEnv => {
     resolve(desktopDir, '.pack', 'components', 'remotion-component.json'),
     resolve(desktopDir, '.pack', 'daemon', 'runtime', 'remotion-component.json')
   );
+  // electron-builder không dọn appOutDir giữa các lần pack — extraResources của
+  // build cũ (vd archive Remotion bản trước, mỗi bản ~137 MB) tích lũy làm
+  // phình gói. Dọn sạch trước khi pack để package luôn khớp source hiện có.
+  const appOutDir = resolve(desktopDir, 'release', 'win-unpacked');
+  if (existsSync(appOutDir)) {
+    rmSync(appOutDir, { recursive: true, force: true });
+  }
+  mkdirSync(appOutDir, { recursive: true });
   await runStage(
     mode === 'dir' ? '生成可运行目录' : '生成桌面安装包',
     'electron-builder',
