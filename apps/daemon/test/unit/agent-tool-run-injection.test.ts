@@ -4,9 +4,11 @@ import {
   AGENT_CREATOR_MCP_SERVER_NAME,
   AGENT_DRAMA_MCP_SERVER_NAME,
   AGENT_SCHEDULE_MCP_SERVER_NAME,
+  AGENT_SOCIAL_MCP_SERVER_NAME,
   createAgentScheduleProcessInjector,
   createAgentScheduleRunInjector
 } from '../../src/agent-tools/run-injection.js';
+import { SOCIAL_TOOL_NAMES } from '../../src/agent-tools/social-tools.js';
 import type { RuntimeThread } from '../../src/threads/types.js';
 
 describe('agent tool run injection', () => {
@@ -42,6 +44,12 @@ describe('agent tool run injection', () => {
         ]
       }),
       expect.objectContaining({
+        name: AGENT_SOCIAL_MCP_SERVER_NAME,
+        url: 'http://127.0.0.1:43123/internal/agent-tools/mcp/social',
+        bearerTokenEnvVar: 'OPENCREATOR_AGENT_CAPABILITY_TOKEN',
+        enabledTools: [...SOCIAL_TOOL_NAMES]
+      }),
+      expect.objectContaining({
         name: AGENT_SCHEDULE_MCP_SERVER_NAME,
         url: 'http://127.0.0.1:43123/internal/agent-tools/mcp',
         bearerTokenEnvVar: 'OPENCREATOR_AGENT_CAPABILITY_TOKEN',
@@ -66,6 +74,9 @@ describe('agent tool run injection', () => {
       threadId: 'thread-1'
     });
     expect(tokens.authorize(token, { scope: 'drama:read' })).toMatchObject({
+      runId: 'run-user'
+    });
+    expect(tokens.authorize(token, { scope: 'social:manage' })).toMatchObject({
       runId: 'run-user'
     });
     tokens.close();
@@ -138,6 +149,11 @@ describe('agent tool run injection', () => {
       expect.objectContaining({
         name: AGENT_DRAMA_MCP_SERVER_NAME,
         url: 'http://127.0.0.1:43123/internal/agent-tools/mcp/drama',
+        bearerTokenEnvVar: 'OPENCREATOR_AGENT_CAPABILITY_TOKEN'
+      }),
+      expect.objectContaining({
+        name: AGENT_SOCIAL_MCP_SERVER_NAME,
+        url: 'http://127.0.0.1:43123/internal/agent-tools/mcp/social',
         bearerTokenEnvVar: 'OPENCREATOR_AGENT_CAPABILITY_TOKEN'
       }),
       expect.objectContaining({
@@ -222,10 +238,12 @@ describe('agent tool run injection', () => {
 
     expect(schedule?.mcpServers.map(server => server.name)).toEqual([
       AGENT_SCHEDULE_MCP_SERVER_NAME,
-      AGENT_DRAMA_MCP_SERVER_NAME
+      AGENT_DRAMA_MCP_SERVER_NAME,
+      AGENT_SOCIAL_MCP_SERVER_NAME
     ]);
     expect(creator?.mcpServers.map(server => server.name)).toEqual([
       AGENT_DRAMA_MCP_SERVER_NAME,
+      AGENT_SOCIAL_MCP_SERVER_NAME,
       AGENT_CREATOR_MCP_SERVER_NAME
     ]);
 

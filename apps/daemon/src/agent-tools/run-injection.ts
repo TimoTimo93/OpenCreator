@@ -9,12 +9,14 @@ import {
   type AgentScheduleToolName
 } from './schedule-tools.js';
 import { DRAMA_TOOL_NAMES } from './drama-tools.js';
+import { SOCIAL_TOOL_NAMES } from './social-tools.js';
 import { AGENT_SCHEDULE_MCP_ROUTE } from './internal-routes.js';
-import { AGENT_DRAMA_MCP_ROUTE } from './mcp-routes.js';
+import { AGENT_DRAMA_MCP_ROUTE, AGENT_SOCIAL_MCP_ROUTE } from './mcp-routes.js';
 
 export const AGENT_SCHEDULE_MCP_SERVER_NAME = 'opencreator_schedule';
 export const AGENT_CREATOR_MCP_SERVER_NAME = 'opencreator_tools';
 export const AGENT_DRAMA_MCP_SERVER_NAME = 'opencreator_drama';
+export const AGENT_SOCIAL_MCP_SERVER_NAME = 'opencreator_social';
 export const AGENT_CREATOR_MCP_ROUTE = '/internal/agent-tools/mcp/creator';
 export const AGENT_TOOL_BASE_URL_ENV = 'OPENCREATOR_AGENT_TOOL_URL';
 export const AGENT_TOOL_CAPABILITY_TOKEN_ENV = 'OPENCREATOR_AGENT_CAPABILITY_TOKEN';
@@ -79,6 +81,23 @@ const TOOL_SCOPES: Array<{
   { name: 'opencreator_schedule_get', scope: 'schedule:get' }
 ];
 
+export type AgentRunCapabilityScopes = {
+  drama: AgentCapabilityScope[];
+  social: AgentCapabilityScope[];
+};
+
+/** Scope công cụ ngoài vòng đời job — chỉ thread hội thoại api (không phải schedule). */
+export function externalToolScopes(
+  createdBy: 'api' | 'schedule',
+  thread: RuntimeThread
+): AgentRunCapabilityScopes {
+  const active = createdBy === 'api' && thread.purpose !== 'schedule_task';
+  return {
+    drama: active ? ['drama:read', 'drama:download'] as AgentCapabilityScope[] : [],
+    social: active ? ['social:read', 'social:manage'] as AgentCapabilityScope[] : []
+  };
+}
+
 export function createAgentScheduleRunInjector(input: {
   capabilities: AgentCapabilityTokenStore;
   getBaseUrl(): string | undefined;
@@ -86,6 +105,8 @@ export function createAgentScheduleRunInjector(input: {
   scheduleToolsEnabled?: boolean;
   /** Gáº¯n cÃ´ng cá»¥ Há»“ng Quáº£ cho thread há»™i thoáº¡i thÆ°á»ng (máº·c Ä‘á»‹nh báº­t, cháº¡y lá»‹ch chá»‰ Ä‘á»c lá»‹ch). */
   includeDrama?: boolean;
+  /** Gắn công cụ Đăng đa kênh cho thread hội thoại api (mặc định bật). */
+  includeSocial?: boolean;
 }): AgentScheduleRunInjector {
   return {
     prepare(run) {
@@ -99,10 +120,13 @@ export function createAgentScheduleRunInjector(input: {
       const includeDrama = (input.includeDrama ?? true)
         && run.createdBy === 'api'
         && run.thread.purpose !== 'schedule_task';
-      const dramaScopes: AgentCapabilityScope[] = includeDrama
-        ? ['drama:read', 'drama:download']
-        : [];
-      const scopes = [...scheduleScopes, ...dramaScopes];
+      const external = externalToolScopes(run.createdBy, run.thread);
+      const dramaScopes = includeDrama ? external.drama : [];
+      const includeSocial = (input.includeSocial ?? true)
+        && run.createdBy === 'api'
+        && run.thread.purpose !== 'schedule_task';
+      const socialScopes = includeSocial ? external.social : [];
+      const scopes = [...scheduleScopes, ...dramaScopes, ...socialScopes];
       const issued = input.capabilities.issue({
         runId: run.runId,
         threadId: run.thread.id,
@@ -117,6 +141,15 @@ export function createAgentScheduleRunInjector(input: {
             url: `${baseUrl}${AGENT_DRAMA_MCP_ROUTE}`,
             bearerTokenEnvVar: AGENT_TOOL_CAPABILITY_TOKEN_ENV,
             enabledTools: [...DRAMA_TOOL_NAMES],
+            required: true,
+            startupTimeoutSec: 10,
+            toolTimeoutSec: 180
+          }] : []),
+          ...(includeSocial ? [{
+            name: AGENT_SOCIAL_MCP_SERVER_NAME,
+            url: `${baseUrl}${AGENT_SOCIAL_MCP_ROUTE}`,
+            bearerTokenEnvVar: AGENT_TOOL_CAPABILITY_TOKEN_ENV,
+            enabledTools: [...SOCIAL_TOOL_NAMES],
             required: true,
             startupTimeoutSec: 10,
             toolTimeoutSec: 180
@@ -148,6 +181,8 @@ export function createAgentScheduleProcessInjector(input: {
   includeCreator?: boolean;
   /** Gáº¯n MCP Há»“ng Quáº£ vÃ o process (máº·c Ä‘á»‹nh báº­t cho runs creator). */
   includeDrama?: boolean;
+  /** Gắn MCP Mạng Lưới Đăng Đa Kênh vào process (mặc định bật cho thread api). */
+  includeSocial?: boolean;
 }): AgentScheduleProcessInjector {
   return {
     create() {
@@ -156,6 +191,7 @@ export function createAgentScheduleProcessInjector(input: {
       const includeSchedule = input.includeSchedule ?? true;
       const includeCreator = input.includeCreator ?? true;
       const includeDrama = input.includeDrama ?? true;
+      const includeSocial = input.includeSocial ?? true;
       const maxScopes: AgentCapabilityScope[] = [
         ...(includeSchedule ? TOOL_SCOPES.map(tool => tool.scope) : []),
         ...(includeCreator
@@ -163,6 +199,9 @@ export function createAgentScheduleProcessInjector(input: {
           : []),
         ...(includeDrama
           ? ['drama:read', 'drama:download'] as AgentCapabilityScope[]
+          : []),
+        ...(includeSocial
+          ? ['social:read', 'social:manage'] as AgentCapabilityScope[]
           : [])
       ];
       if (maxScopes.length === 0) return undefined;
@@ -190,6 +229,15 @@ export function createAgentScheduleProcessInjector(input: {
             startupTimeoutSec: 10,
             toolTimeoutSec: 180
           }] : []),
+          ...(includeSocial ? [{
+            name: AGENT_SOCIAL_MCP_SERVER_NAME,
+            url: `${baseUrl}${AGENT_SOCIAL_MCP_ROUTE}`,
+            bearerTokenEnvVar: AGENT_TOOL_CAPABILITY_TOKEN_ENV,
+            enabledTools: [...SOCIAL_TOOL_NAMES],
+            required: true,
+            startupTimeoutSec: 10,
+            toolTimeoutSec: 180
+          }] : []),
           ...(includeCreator ? [{
             name: AGENT_CREATOR_MCP_SERVER_NAME,
             url: `${baseUrl}${AGENT_CREATOR_MCP_ROUTE}`,
@@ -206,12 +254,12 @@ export function createAgentScheduleProcessInjector(input: {
         },
         activate(run) {
           const allowed = allowedTools(run.createdBy, run.thread);
-          const dramaScopes: AgentCapabilityScope[] =
-            run.createdBy === 'api' && run.thread.purpose !== 'schedule_task'
-              ? ['drama:read', 'drama:download']
-              : [];
-          const scopes = run.scopes
-            ?? [...allowed.map(tool => tool.scope), ...dramaScopes];
+          const external = externalToolScopes(run.createdBy, run.thread);
+          const scopes = run.scopes ?? [
+            ...allowed.map(tool => tool.scope),
+            ...external.drama,
+            ...external.social
+          ];
           lease.activate({
             runId: run.runId,
             threadId: run.thread.id,

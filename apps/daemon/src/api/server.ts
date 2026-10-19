@@ -265,6 +265,7 @@ import { launchClusterBrowser } from '../social/browser-launcher.js';
 import { createSocialService, type SocialService } from '../social/service.js';
 import { createSocialWorker } from '../social/worker.js';
 import { defaultSocialExecutors } from '../social/executors.js';
+import { registerSocialMcpRoute } from '../agent-tools/mcp-routes.js';
 import {
   createTranslationPipelineService,
   type TranslationPipelineService
@@ -1622,6 +1623,10 @@ export async function buildServer(input: BuildServerInput) {
     capabilities: agentCapabilityTokens,
     getBaseUrl: () => resolveListeningOrigin(server.server.address())
   });
+  await registerSocialMcpRoute(server, {
+    capabilities: agentCapabilityTokens,
+    getBaseUrl: () => resolveListeningOrigin(server.server.address())
+  });
   await registerCleanupRoutes(server, cleanupService);
   await registerSettingsRoutes(server, openCreatorSettingsStore);
   await registerCreatorServicesRoutes(
@@ -1724,6 +1729,7 @@ export async function buildServer(input: BuildServerInput) {
       dispatcher: creatorCommandDispatcher,
       contextBuilder: creatorAgentContextBuilder
     }),
+    social: socialAutomation,
     drama: creatorHongguoComponentManager === undefined
       ? undefined
       : {

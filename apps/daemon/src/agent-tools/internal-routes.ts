@@ -14,6 +14,8 @@ import { SchedulerError, type SchedulerService } from '../scheduler/service.js';
 import { scheduleOperationActors } from '../scheduler/types.js';
 import type { RuntimeThread, ThreadManager } from '../threads/types.js';
 import { apiError } from '../api/errors.js';
+import { SocialError, type SocialService, type SocialClusterPatch } from '../social/service.js';
+import type { SocialEnqueueRequest } from '../social/types.js';
 import {
   AgentCapabilityTokenError,
   type AgentCapabilityGrant,
@@ -120,6 +122,7 @@ export async function registerAgentToolRoutes(
     schedules: AgentScheduleOperations;
     creator?: CreatorToolOperations;
     drama?: AgentDramaOperations;
+    social?: SocialService;
   }
 ): Promise<void> {
   if (input.creator !== undefined) {
@@ -332,6 +335,76 @@ export async function registerAgentToolRoutes(
         }
       }));
     });
+  }
+  if (input.social !== undefined) {
+    const social = input.social;
+
+    async function flexSocial(
+      request: FastifyRequest,
+      reply: FastifyReply,
+      scope: AgentCapabilityScope,
+      run: () => unknown | Promise<unknown>
+    ): Promise<unknown> {
+      const grant = authorizeRequest(request, reply, input.capabilities, scope);
+      if (grant === undefined) return reply;
+      try {
+        return await run();
+      } catch (error) {
+        if (error instanceof SocialError) {
+          const notFound = error.code === 'social_cluster_not_found' || error.code === 'social_job_not_found';
+          return reply.code(notFound ? 404 : 400).send(internalApiError(error.code, error.message));
+        }
+        console.warn(`Social agent tool failed: ${error instanceof Error ? error.message : String(error)}`);
+        return reply.code(500).send(internalApiError('INTERNAL_ERROR', 'Social operation failed'));
+      }
+    }
+
+    server.get(`${AGENT_TOOL_ROUTE_PREFIX}/social/overview`, async (request, reply) =>
+      flexSocial(request, reply, 'social:read', () => social.getOverview()));
+    server.post<{ Body: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/clusters`, async (request, reply) => {
+      const body = parseBody(request.body, reply);
+      if (body === undefined) return;
+      const name = typeof body.name === 'string' ? body.name.trim() : '';
+      if (name === '') {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.name must be a non-empty string'));
+      }
+      return flexSocial(request, reply, 'social:manage', () =>
+        social.createCluster({ name, ...clusterPatchFromBody(body) }));
+    });
+    server.patch<{ Params: { id: string }; Body: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/clusters/:id`, async (request, reply) => {
+      const body = parseBody(request.body, reply);
+      if (body === undefined) return;
+      return flexSocial(request, reply, 'social:manage', () =>
+        social.updateCluster(request.params.id, clusterPatchFromBody(body)));
+    });
+    server.delete<{ Params: { id: string } }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/clusters/:id`, async (request, reply) =>
+      flexSocial(request, reply, 'social:manage', () => social.deleteCluster(request.params.id)));
+    server.post<{ Params: { id: string } }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/clusters/:id/check-proxy`, async (request, reply) =>
+      flexSocial(request, reply, 'social:manage', () => social.checkClusterProxy(request.params.id)));
+    server.post<{ Params: { id: string } }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/clusters/:id/open-browser`, async (request, reply) =>
+      flexSocial(request, reply, 'social:manage', () => social.openClusterBrowser(request.params.id)));
+    server.post<{ Params: { id: string } }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/clusters/:id/close-browser`, async (request, reply) =>
+      flexSocial(request, reply, 'social:manage', () => social.closeClusterBrowser(request.params.id)));
+    server.post<{ Body: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/jobs`, async (request, reply) => {
+      const body = parseBody(request.body, reply);
+      if (body === undefined) return;
+      const items = parseAgentEnqueueBody(body);
+      if (items === undefined) {
+        return reply.code(400).send(apiError(
+          'VALIDATION_FAILED',
+          'body.items phải là danh sách { clusterId, path, title?, description?, scheduledAt? } không rỗng'
+        ));
+      }
+      return flexSocial(request, reply, 'social:manage', () => social.enqueue(items));
+    });
+    server.delete<{ Params: { id: string } }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/jobs/:id`, async (request, reply) =>
+      flexSocial(request, reply, 'social:manage', () => social.removeJob(request.params.id)));
+    server.post<{ Params: { id: string } }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/jobs/:id/retry-failed`, async (request, reply) =>
+      flexSocial(request, reply, 'social:manage', () => social.retryFailedPlatforms(request.params.id)));
+    server.post(`${AGENT_TOOL_ROUTE_PREFIX}/social/queue/pause`, async (request, reply) =>
+      flexSocial(request, reply, 'social:manage', () => social.pause()));
+    server.post(`${AGENT_TOOL_ROUTE_PREFIX}/social/queue/resume`, async (request, reply) =>
+      flexSocial(request, reply, 'social:manage', () => social.resume()));
   }
   server.get<{ Params: { id: string } }>(
     `${AGENT_TOOL_ROUTE_PREFIX}/schedules/:id`,
@@ -696,4 +769,53 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function internalApiError(code: string, message: string) {
   return { error: { code, message } };
+}
+
+/** Chỉ giữ các patch hợp lệ cho cụm — phần còn lại bị bỏ qua. */
+function clusterPatchFromBody(body: Record<string, unknown>): SocialClusterPatch {
+  const patch: SocialClusterPatch = {};
+  if (typeof body.name === 'string' && body.name.trim() !== '') patch.name = body.name;
+  if (typeof body.seriesName === 'string') patch.seriesName = body.seriesName;
+  if (typeof body.proxyServer === 'string') patch.proxyServer = body.proxyServer;
+  if (body.fbMode === 'graph_api' || body.fbMode === 'browser') patch.fbMode = body.fbMode;
+  if (typeof body.fbPageId === 'string') patch.fbPageId = body.fbPageId;
+  if (typeof body.fbPageToken === 'string' && body.fbPageToken.trim() !== '' || body.fbPageToken === null) {
+    patch.fbPageToken = body.fbPageToken as string | null;
+  }
+  if (Array.isArray(body.defaultScheduleTimes)) {
+    const times = (body.defaultScheduleTimes as unknown[])
+      .filter((time): time is string => typeof time === 'string' && /^\d{1,2}:\d{2}$/.test(time));
+    if (times.length > 0) patch.defaultScheduleTimes = times;
+  }
+  if (typeof body.defaultDescription === 'string') patch.defaultDescription = body.defaultDescription;
+  return patch;
+}
+
+type AgentEnqueueItem = {
+  clusterId: string;
+  path: string;
+  title?: string;
+  description?: string;
+  thumbnailPath?: string | null;
+  scheduledAt?: string | null;
+};
+
+/** Dựng danh sách SocialEnqueueRequest từ body của công cụ trợ lý; bất hợp lệ → undefined. */
+function parseAgentEnqueueBody(body: Record<string, unknown>): SocialEnqueueRequest[] | undefined {
+  if (!Array.isArray(body.items) || body.items.length === 0) return undefined;
+  const items: SocialEnqueueRequest[] = [];
+  for (const raw of body.items) {
+    if (!isPlainObject(raw)) return undefined;
+    if (typeof raw.clusterId !== 'string' || raw.clusterId.trim() === '') return undefined;
+    if (typeof raw.path !== 'string' || raw.path.trim() === '') return undefined;
+    items.push({
+      clusterId: raw.clusterId,
+      path: raw.path,
+      ...(typeof raw.title === 'string' && raw.title.trim() !== '' ? { title: raw.title.trim() } : {}),
+      ...(typeof raw.description === 'string' && raw.description.trim() !== '' ? { description: raw.description.trim() } : {}),
+      ...(typeof raw.scheduledAt === 'string' && raw.scheduledAt.trim() !== '' ? { scheduledAt: raw.scheduledAt.trim() } : {}),
+      ...(raw.thumbnailPath === null ? { thumbnailPath: null } : {})
+    });
+  }
+  return items;
 }

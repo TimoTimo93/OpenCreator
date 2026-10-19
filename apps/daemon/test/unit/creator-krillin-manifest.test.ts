@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,6 +35,10 @@ describe('Krillin Runtime 清单校验', () => {
     })).toEqual({ cacheHit: true });
 
     writeFileSync(fixture.executable, 'tampered-runtime');
+    // Ép mtime lệch khỏi giá trị đã ghi cache: nếu không, khi máy tải nặng
+    // NTFS có thể trả về cùng mtimeMs/ctimeMs (fileSizes vẫn bằng nhau) và
+    // cache tick sai là "chưa đổi" → test chập chờnh.
+    utimesSync(fixture.executable, new Date(Date.now() + 60_000), new Date(Date.now() + 60_000));
     expect(() => verifyKrillinRuntimeManifest(fixture.root, manifest, {
       cachePath: fixture.cachePath
     })).toThrow('dependency_hash_mismatch: bin/krillinai-cli');

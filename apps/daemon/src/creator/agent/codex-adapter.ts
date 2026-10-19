@@ -41,7 +41,9 @@ export function createCodexCreatorAdapter(input: {
         'creator:artifact:read',
         'creator:action',
         'drama:read',
-        'drama:download'
+        'drama:download',
+        'social:read',
+        'social:manage'
       ],
       cwd: thread.cwd,
       profile: thread.profile,
@@ -160,6 +162,9 @@ function developerInstructions(guideVersion: number): string {
     '用户请求查找或下载影片时，必须首先用 drama_search 在 OpenCreator 的影片库（Hong Quả / 红果）里搜索；结果带 translatedTitles 时优先向用户展示越南语译名。',
     '需要下载剧集时：drama_series_episodes 列出各集 { vid, vid_index, title }，再用 drama_download_episodes 原样提交（vid 与 vid_index 逐字复制，不得自造）；下载进度用 drama_download_status 跟踪。',
     '搜索无结果时如实告知并请用户换关键词；不要编造片名、不要假装已创建下载任务。',
+    '请求把视频发布到 YouTube/TikTok/Facebook 时，先用 social_overview 查看频道组（cluster）与时间表；只使用 social_overview 返回的真实 clusterId 与磁盘上真实存在的 mp4 文件路径。',
+    '用 social_enqueue_videos 排队上传后，必须用 social_overview 检查各平台状态并跟踪进度；平台上失败时可用 social_retry_failed 重试，必要时 social_open_browser 请用户手动登录后重试，禁止假称已发布。',
+    '集成时间表（defaultScheduleTimes）与 scheduledAt 由系统自动校核；不要编造发布时间，用户未指定时让系统自动占用下一个空闲时段。',
     '开始处理前调用 creator_get_context。需要大文本时按需调用 creator_get_artifact。',
     '所有修改只能调用 creator_apply_action，并携带最新 expectedRevision 和唯一 idempotencyKey。',
     '调用 update-settings 或 undo-action 时，必须使用 input: { patch: { ... }, objectId?: string }；patch 必须非空，设置字段必须写在 patch 内。',

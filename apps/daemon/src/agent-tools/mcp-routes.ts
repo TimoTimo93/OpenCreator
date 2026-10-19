@@ -25,9 +25,106 @@ import {
   createDramaToolHttpClient,
   type DramaToolName
 } from './drama-tools.js';
+import {
+  createSocialToolDefinitions,
+  createSocialToolHttpClient,
+  type SocialToolName
+} from './social-tools.js';
 
 export const AGENT_CREATOR_MCP_ROUTE = `${AGENT_TOOL_ROUTE_PREFIX}/mcp/creator`;
 export const AGENT_DRAMA_MCP_ROUTE = `${AGENT_TOOL_ROUTE_PREFIX}/mcp/drama`;
+export const AGENT_SOCIAL_MCP_ROUTE = `${AGENT_TOOL_ROUTE_PREFIX}/mcp/social`;
+
+/**
+ * Công cụ Mạng Lưới Đăng Đa Kênh gắn theo scope trong capability token
+ * (social:read chỉ đọc; social:manage cho phép xếp hàng/chỉnh cụm).
+ */
+export async function registerSocialMcpRoute(
+  fastify: FastifyInstance,
+  input: { capabilities: AgentCapabilityTokenStore; getBaseUrl(): string | undefined }
+): Promise<void> {
+  fastify.post<{ Body: unknown }>(AGENT_SOCIAL_MCP_ROUTE, async (request, reply) => {
+    const authorization = authorizeMcpRequest(request, reply, input.capabilities);
+    if (authorization === undefined) return;
+    const baseUrl = input.getBaseUrl();
+    if (baseUrl === undefined) return reply.code(503).send(jsonRpcError('OpenCreator runtime is not listening'));
+    const allowed = new Set(authorization.grant.scopes);
+    const readTools: SocialToolName[] = ['social_overview'];
+    const manageTools: SocialToolName[] = [
+      'social_create_cluster',
+      'social_update_cluster',
+      'social_delete_cluster',
+      'social_check_proxy',
+      'social_open_browser',
+      'social_close_browser',
+      'social_enqueue_videos',
+      'social_remove_job',
+      'social_retry_failed',
+      'social_pause_queue',
+      'social_resume_queue'
+    ];
+    const enabledTools: SocialToolName[] = [
+      ...(allowed.has('social:read') ? readTools : []),
+      ...(allowed.has('social:manage') ? manageTools : [])
+    ];
+    if (enabledTools.length === 0) {
+      return reply.code(403).send(jsonRpcError('Capability scope is not allowed'));
+    }
+    const client = createSocialToolHttpClient({ baseUrl, token: authorization.token });
+    const definitions = createSocialToolDefinitions({ request: client.request });
+    const [{ McpServer }, { StreamableHTTPServerTransport }] = await Promise.all([
+      import('@modelcontextprotocol/sdk/server/mcp.js'),
+      import('@modelcontextprotocol/sdk/server/streamableHttp.js')
+    ]);
+    const mcpServer = new McpServer({ name: 'opencreator-social-tools', version: '0.1.0' });
+    for (const name of enabledTools) {
+      const tool = definitions[name];
+      mcpServer.registerTool(name, {
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: name === 'social_overview'
+          ? {
+              readOnlyHint: true,
+              destructiveHint: false,
+              idempotentHint: true,
+              openWorldHint: false
+            }
+          : { readOnlyHint: false }
+      } as never, (async (args: unknown) => {
+        try {
+          const result = await (tool as { execute(args: unknown): Promise<unknown> }).execute(args);
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+            structuredContent: result as Record<string, unknown>
+          };
+        } catch (error) {
+          return {
+            isError: true,
+            content: [{ type: 'text' as const, text: error instanceof Error ? error.message : 'Social tool failed' }]
+          };
+        }
+      }) as never);
+    }
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    let cleanupWork: Promise<void> | undefined;
+    const cleanup = () => cleanupWork ??= Promise.allSettled([transport.close(), mcpServer.close()]).then(() => undefined);
+    reply.raw.once('finish', () => void cleanup());
+    reply.raw.once('close', () => void cleanup());
+    reply.hijack();
+    try {
+      await mcpServer.connect(transport);
+      await transport.handleRequest(request.raw, reply.raw, request.body);
+    } catch {
+      if (!reply.raw.headersSent) {
+        reply.raw.writeHead(500, { 'content-type': 'application/json' });
+        reply.raw.end(JSON.stringify(jsonRpcError('Internal Social MCP server error')));
+      } else if (!reply.raw.writableEnded) reply.raw.end();
+      await cleanup();
+    }
+  });
+  fastify.get(AGENT_SOCIAL_MCP_ROUTE, async (_request, reply) => reply.code(405).send(jsonRpcError('Method not allowed')));
+  fastify.delete(AGENT_SOCIAL_MCP_ROUTE, async (_request, reply) => reply.code(405).send(jsonRpcError('Method not allowed')));
+}
 
 export async function registerCreatorMcpRoute(
   fastify: FastifyInstance,

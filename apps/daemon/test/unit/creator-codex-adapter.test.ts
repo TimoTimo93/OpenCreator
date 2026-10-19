@@ -92,7 +92,9 @@ describe('creator codex adapter', () => {
         'creator:artifact:read',
         'creator:action',
         'drama:read',
-        'drama:download'
+        'drama:download',
+        'social:read',
+        'social:manage'
       ],
       requiredSkillNames: ['opencreator-runtime'],
       readThreadBeforeResume: false,
