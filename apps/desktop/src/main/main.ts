@@ -37,7 +37,7 @@ import {
   type DesktopTelemetryController
 } from './telemetry.js';
 import { TrayManager } from './tray-manager.js';
-import { startUpdater } from './updater.js';
+import { startUpdater, type DesktopUpdaterController } from './updater.js';
 import { WindowManager } from './window-manager.js';
 import { desktopIpc } from '../shared/ipc.js';
 import type {
@@ -236,6 +236,36 @@ async function launchDesktop(): Promise<void> {
     onTransportFailure: connection => bootstrap?.reportProxyFailure(connection),
     logger
   });
+  const updater = startUpdater({
+    logger,
+    isCustomBuild: app.isPackaged
+      ? !readOfficialBuildMarker(process.resourcesPath)
+      : false,
+    async prepareInstall() {
+      windowManager?.flushState();
+      settings.flush();
+      protocolController.suspendRuntime();
+      notifications.stop();
+      await telemetry.stop();
+      await bootstrap?.stop();
+      await logger.flush();
+    },
+    async recoverAfterInstallFailure() {
+      await bootstrap?.restartRuntime();
+      protocolController.resumeRuntime();
+      telemetry.resume();
+      notifications.start();
+    },
+    beforeQuitForInstall() {
+      windowManager?.beginQuit();
+    },
+    setAllowQuit(value) {
+      allowQuit = value;
+    }
+  });
+  updater.onStateChange(snapshot => {
+    windowManager?.send(desktopIpc.updaterStateChanged, snapshot);
+  });
   registerIpcHandlers({
     development,
     bootstrap,
@@ -246,6 +276,7 @@ async function launchDesktop(): Promise<void> {
     telemetry,
     dataDir,
     logDir,
+    updater,
     quit: () => app.quit(),
     reloadWorkspace: loadWorkspace
   });
@@ -289,30 +320,6 @@ async function launchDesktop(): Promise<void> {
     quit: () => app.quit()
   });
   registerApplicationProtocol(development, appRoot, logger);
-  const updater = startUpdater({
-    logger,
-    async prepareInstall() {
-      windowManager?.flushState();
-      settings.flush();
-      protocolController.suspendRuntime();
-      notifications.stop();
-      await telemetry.stop();
-      await bootstrap?.stop();
-      await logger.flush();
-    },
-    async recoverAfterInstallFailure() {
-      await bootstrap?.restartRuntime();
-      protocolController.resumeRuntime();
-      telemetry.resume();
-      notifications.start();
-    },
-    beforeQuitForInstall() {
-      windowManager?.beginQuit();
-    },
-    setAllowQuit(value) {
-      allowQuit = value;
-    }
-  });
   queueDeepLink(findDeepLink(process.argv));
   app.on('activate', () => windowManager?.show());
   app.on('window-all-closed', () => {
@@ -372,6 +379,7 @@ function registerIpcHandlers(input: {
   telemetry: DesktopTelemetryController;
   dataDir: string;
   logDir: string;
+  updater: DesktopUpdaterController;
   quit(): void;
   reloadWorkspace(): Promise<void>;
 }): void {
@@ -503,6 +511,15 @@ function registerIpcHandlers(input: {
       daemonPid: input.daemon.pid
     }));
   handle(desktopIpc.quit, input.development, () => input.quit());
+  handle(desktopIpc.readUpdaterState, input.development, () => input.updater.getSnapshot());
+  handle(desktopIpc.updaterCheckNow, input.development, async () => {
+    await input.updater.checkNow();
+    return input.updater.getSnapshot();
+  });
+  handle(desktopIpc.updaterInstallNow, input.development, () => {
+    input.updater.userInstallNow();
+    return ok();
+  });
 }
 
 function registerWorkspaceReadyListener(input: {

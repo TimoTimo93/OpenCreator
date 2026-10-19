@@ -29,6 +29,24 @@ export type HostWindowChrome = {
   trafficLightInset: number;
 };
 
+export type HostUpdaterState =
+  | 'unavailable'
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'preparing_install'
+  | 'installing'
+  | 'error';
+
+export type HostUpdaterSnapshot = {
+  state: HostUpdaterState;
+  lastCheckAt?: string;
+  availableVersion?: string;
+  errorMessage?: string;
+};
+
 export type HostBridge = {
   kind: 'browser' | 'desktop';
   windowChrome?: HostWindowChrome;
@@ -57,4 +75,8 @@ export type HostBridge = {
   controlWindow?(action: 'close' | 'minimize' | 'zoom'): Promise<void>;
   selectProjectDirectory?(purpose?: DirectorySelectionPurpose): Promise<string | null>;
   resolveDroppedFilePath?(file: File): string | null;
+  readUpdaterState?(): Promise<HostUpdaterSnapshot>;
+  requestUpdaterCheck?(): Promise<HostUpdaterSnapshot>;
+  requestUpdaterInstall?(): Promise<void>;
+  subscribeUpdaterState?(listener: (snapshot: HostUpdaterSnapshot) => void): () => void;
 };

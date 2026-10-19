@@ -32,6 +32,7 @@ import type { RuntimeDependenciesController } from '../../app/use-runtime-depend
 import { RuntimeComponentsSettingsView } from './RuntimeComponentsSettingsView.js';
 import './settings-management.css';
 import type { OpenCreatorSettingsService } from '../../services/opencreator-settings-service.js';
+import type { AppUpdaterService, AppUpdaterSnapshot } from '../../services/desktop-updater-service.js';
 import { IssueList } from '../issues/IssuePresenter.js';
 import { usePageIssueState } from '../issues/page-issue-state.js';
 import './gateway-account-settings.css';
@@ -67,6 +68,7 @@ export type DefaultPermissionPreference = 'follow-project' | ProjectPermission;
 
 export type OpenCreatorSettingsViewProps = {
   runtimeStatus: RuntimeStatus;
+  updaterService?: AppUpdaterService | null;
   defaultPermission?: DefaultPermissionPreference;
   defaultPermissionError?: string;
   onDefaultPermissionChange?(permission: DefaultPermissionPreference): void;
@@ -349,7 +351,9 @@ export function OpenCreatorSettingsView(props: OpenCreatorSettingsViewProps) {
             codexStatus={props.codexStatus}
           />
         ) : null}
-        {activeTab === 'about' ? <AboutSettings runtimeStatus={props.runtimeStatus} /> : null}
+        {activeTab === 'about' ? (
+          <AboutSettings runtimeStatus={props.runtimeStatus} updaterService={props.updaterService} />
+        ) : null}
       </main>
     </div>
   );
@@ -865,7 +869,10 @@ function PluginSettings(props: { runtimeStatus: RuntimeStatus }) {
   );
 }
 
-function AboutSettings(props: { runtimeStatus: RuntimeStatus }) {
+function AboutSettings(props: {
+  runtimeStatus: RuntimeStatus;
+  updaterService?: AppUpdaterService | null;
+}) {
   const { t } = useAppLanguage();
   const runtimeStatusText = props.runtimeStatus.connected
     ? t('settings.status.normal')
@@ -890,7 +897,7 @@ function AboutSettings(props: { runtimeStatus: RuntimeStatus }) {
           label={t('settings.about.dataDirectory')}
           value={props.runtimeStatus.codexHome ?? t('settings.notSet')}
         />
-        <SettingsRow label={t('settings.about.checkUpdates')} value={t('settings.about.updateLater')} />
+        <AboutUpdaterStatus service={props.updaterService ?? undefined} />
       </div>
       <section className="settings-card settings-advanced" aria-label={t('settings.about.advanced')}>
         <h2>{t('settings.about.advanced')}</h2>
@@ -920,6 +927,115 @@ function SettingsRow(props: { label: string; value: string }) {
       <strong>{props.value}</strong>
     </div>
   );
+}
+
+const UPDATER_STATE_KEYS: Record<string, string> = {
+  unavailable: 'settings.about.updateLater',
+  idle: 'settings.about.updater.stateCurrent',
+  checking: 'settings.about.updater.stateChecking',
+  available: 'settings.about.updater.stateAvailable',
+  downloading: 'settings.about.updater.stateDownloading',
+  downloaded: 'settings.about.updater.stateDownloaded',
+  preparing_install: 'settings.about.updater.stateInstalling',
+  installing: 'settings.about.updater.stateInstalling',
+  error: 'settings.about.updater.stateError'
+};
+
+function AboutUpdaterStatus(props: { service?: AppUpdaterService }) {
+  const { t } = useAppLanguage();
+  const service = props.service;
+  const [snapshot, setSnapshot] = useState<AppUpdaterSnapshot>();
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (service === undefined) return undefined;
+    let alive = true;
+    const apply = (next: AppUpdaterSnapshot) => {
+      if (alive) setSnapshot(next);
+    };
+    service.read().then(apply).catch(() => undefined);
+    const unsubscribe = service.subscribe(apply);
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
+  }, [service]);
+
+  if (service === undefined) {
+    return (
+      <SettingsRow label={t('settings.about.checkUpdates')} value={t('settings.about.updateLater')} />
+    );
+  }
+
+  const state = snapshot?.state ?? 'idle';
+  const stateKey = UPDATER_STATE_KEYS[state] ?? 'settings.unknown';  const lastCheck = snapshot?.lastCheckAt === undefined
+    ? '—'
+    : formatUpdaterTimestamp(snapshot.lastCheckAt);
+  const canInstall = state === 'available' || state === 'downloaded';
+
+  const requestCheck = () => {
+    if (busy) return;
+    setBusy(true);
+    service.checkNow()
+      .then(next => setSnapshot(next))
+      .catch(() => undefined)
+      .finally(() => setBusy(false));
+  };
+  const requestInstall = () => {
+    if (busy || !canInstall) return;
+    setBusy(true);
+    service.installNow()
+      .catch(() => undefined)
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <>
+      <div className="settings-row">
+        <span>{t('settings.about.updater.state')}</span>
+        <strong>{t(stateKey as Parameters<typeof t>[0])}</strong>
+      </div>
+      <div className="settings-row">
+        <span>{t('settings.about.updater.latestVersion')}</span>
+        <strong>{snapshot?.availableVersion ?? '—'}</strong>
+      </div>
+      <div className="settings-row">
+        <span>{t('settings.about.updater.lastCheck')}</span>
+        <strong>{lastCheck}</strong>
+      </div>
+      {state === 'error' && snapshot?.errorMessage !== undefined ? (
+        <div className="settings-row">
+          <span>{t('settings.about.updater.errorDetail')}</span>
+          <strong>{snapshot.errorMessage}</strong>
+        </div>
+      ) : null}
+      <div className="settings-updater-actions">
+        <button
+          type="button"
+          className="settings-secondary-button"
+          disabled={busy || state === 'checking'}
+          onClick={requestCheck}
+        >
+          {t('settings.about.checkUpdates')}
+        </button>
+        {canInstall ? (
+          <button
+            type="button"
+            className="settings-primary-button"
+            disabled={busy}
+            onClick={requestInstall}
+          >
+            {t('settings.about.updater.installNow')}
+          </button>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+function formatUpdaterTimestamp(iso: string): string {
+  const parsed = new Date(iso);
+  return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleString();
 }
 
 function SettingsSelectRow<Value extends string>(props: {

@@ -135,6 +135,7 @@ import { createApprovalService } from '../services/approval-service.js';
 import { createConnectionService, type ConnectionState } from '../services/connection-service.js';
 import { createCreatorServicesService } from '../services/creator-services-service.js';
 import { createGatewayAccountService } from '../services/gateway-account-service.js';
+import { createAppUpdaterService } from '../services/desktop-updater-service.js';
 import { createPlatformConnectionsService } from '../services/platform-connections-service.js';
 import type { GatewayAccountState } from '@opencreator/protocol';
 import { createCreatorService } from '../services/creator-service.js';
@@ -626,6 +627,7 @@ export function AppController(props: AppControllerProps) {
     [runtimeClient]
   );
   const gatewayAccountService = useMemo(() => runtimeClient === null ? null : createGatewayAccountService(runtimeClient, { authorizationReturnUrl: hostBridge.authorizationReturnUrl, billingReturnUrl: hostBridge.billingReturnUrl }), [runtimeClient, hostBridge]);
+  const updaterService = useMemo(() => createAppUpdaterService(hostBridge), [hostBridge]);
   useEffect(() => hostBridge.subscribeBillingReturn?.(billingOrderId => {
     // Trang tài khoản đã bị bỏ khỏi giao diện, nên kết quả thanh toán quay về
     // mục “Cấu hình API” trong Cài đặt (nơi quản lý khoá dịch vụ).
@@ -4771,6 +4773,7 @@ export function AppController(props: AppControllerProps) {
   ) : state.activeView === 'settings' ? (
     <SettingsPage
       runtimeStatus={runtimeStatus}
+      updaterService={updaterService}
       defaultPermission={defaultPermission}
       defaultPermissionError={defaultPermissionSyncError}
       onDefaultPermissionChange={handleDefaultPermissionChange}

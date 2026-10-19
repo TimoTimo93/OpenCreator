@@ -160,6 +160,23 @@ const packageWithSigningEnvironment = async builderEnv => {
   );
 
   const packageRoot = findFreshPackageRoot(candidates);
+  // Update feed configuration: official NSIS installs carry app-update.yml in
+  // the resources directory. Unpacked/dir builds must ship the same file so
+  // electron-updater can resolve the staged-download cache directory and the
+  // update source stays identical to the official release.
+  if (platform === 'win32' && mode === 'dir') {
+    writeFileSync(
+      resolve(packageRoot, 'resources', 'app-update.yml'),
+      [
+        'provider: github',
+        'owner: krillinai',
+        'repo: OpenCreator',
+        'updaterCacheDirName: opencreator-updater',
+        ''
+      ].join('\n')
+    );
+    console.log('[desktop-package] wrote resources/app-update.yml (GitHub feed)');
+  }
   const artifacts = findFreshArtifacts(packageStartedAt, mode, platform);
   const remotionComponent = JSON.parse(readFileSync(resolve(desktopDir, '.pack', 'components', 'remotion-component.json'), 'utf8'));
   const componentArchive = resolve(desktopDir, '.pack', 'components', remotionComponent.fileName);

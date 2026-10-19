@@ -20,5 +20,9 @@ export const desktopIpc = {
   configureNotifications: 'opencreator:notification:configure',
   navigate: 'opencreator:navigation',
   exportDiagnostics: 'opencreator:diagnostics:export',
-  quit: 'opencreator:app:quit'
+  quit: 'opencreator:app:quit',
+  readUpdaterState: 'opencreator:updater:read-state',
+  updaterCheckNow: 'opencreator:updater:check-now',
+  updaterInstallNow: 'opencreator:updater:install-now',
+  updaterStateChanged: 'opencreator:updater:state-changed'
 } as const;

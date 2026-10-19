@@ -59,6 +59,12 @@ const api: DesktopApi = {
   subscribeNavigation(listener) {
     return subscribe(desktopIpc.navigate, listener);
   },
+  readUpdaterState: () => ipcRenderer.invoke(desktopIpc.readUpdaterState),
+  requestUpdaterCheck: () => ipcRenderer.invoke(desktopIpc.updaterCheckNow),
+  requestUpdaterInstall: () => ipcRenderer.invoke(desktopIpc.updaterInstallNow),
+  subscribeUpdaterState(listener) {
+    return subscribe(desktopIpc.updaterStateChanged, listener);
+  },
   exportDiagnostics: () => ipcRenderer.invoke(desktopIpc.exportDiagnostics),
   quit: () => ipcRenderer.invoke(desktopIpc.quit)
 };

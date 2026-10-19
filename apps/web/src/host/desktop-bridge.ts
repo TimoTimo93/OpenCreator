@@ -3,7 +3,8 @@ import type {
   DirectorySelectionPurpose,
   HostBridge,
   HostBridgeResult,
-  HostNotification
+  HostNotification,
+  HostUpdaterSnapshot
 } from './bridge.js';
 
 type DesktopApi = {
@@ -44,6 +45,10 @@ type DesktopApi = {
     configuration: { enabled: boolean }
   ): Promise<HostBridgeResult>;
   subscribeNavigation(listener: (route: string) => void): () => void;
+  readUpdaterState(): Promise<HostUpdaterSnapshot>;
+  requestUpdaterCheck(): Promise<HostUpdaterSnapshot>;
+  requestUpdaterInstall(): Promise<void>;
+  subscribeUpdaterState(listener: (snapshot: HostUpdaterSnapshot) => void): () => void;
 };
 
 declare global {
@@ -97,7 +102,11 @@ export function readDesktopHostBridge(): DesktopHostBridge | undefined {
     revealPath: path => api.revealPath(path),
     notify: message => api.notify(message),
     configureBackgroundNotifications: configuration =>
-      api.configureBackgroundNotifications(configuration)
+      api.configureBackgroundNotifications(configuration),
+    readUpdaterState: () => api.readUpdaterState(),
+    requestUpdaterCheck: () => api.requestUpdaterCheck(),
+    requestUpdaterInstall: () => api.requestUpdaterInstall(),
+    subscribeUpdaterState: listener => api.subscribeUpdaterState(listener)
   };
 }
 

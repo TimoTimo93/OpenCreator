@@ -101,6 +101,23 @@ export type DesktopHostNotification = {
 
 export type DirectorySelectionPurpose = 'project' | 'default-project-root' | 'output-root';
 
+export type DesktopUpdaterState =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'preparing_install'
+  | 'installing'
+  | 'error';
+
+export type DesktopUpdaterSnapshot = {
+  state: DesktopUpdaterState;
+  lastCheckAt?: string;
+  availableVersion?: string;
+  errorMessage?: string;
+};
+
 export type DesktopApi = {
   kind: 'desktop';
   windowChrome?: DesktopWindowChrome;
@@ -129,6 +146,10 @@ export type DesktopApi = {
   notify(message: DesktopHostNotification): Promise<void>;
   configureBackgroundNotifications(configuration: { enabled: boolean }): Promise<DesktopHostResult>;
   subscribeNavigation(listener: (route: string) => void): () => void;
+  readUpdaterState(): Promise<DesktopUpdaterSnapshot>;
+  requestUpdaterCheck(): Promise<DesktopUpdaterSnapshot>;
+  requestUpdaterInstall(): Promise<void>;
+  subscribeUpdaterState(listener: (snapshot: DesktopUpdaterSnapshot) => void): () => void;
   exportDiagnostics(): Promise<DesktopHostResult>;
   quit(): Promise<void>;
 };
