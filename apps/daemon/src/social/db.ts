@@ -23,7 +23,7 @@ const CLUSTER_COLUMNS = [
   'yt_login', 'tk_login', 'fb_login', 'fb_mode', 'fb_page_id', 'fb_page_token_encrypted',
   'default_schedule_times', 'default_description', 'created_at', 'updated_at',
   'yt_channel_url', 'tk_profile_url', 'auto_reply_enabled', 'auto_reply_prompt',
-  'auto_publish_after_translate'
+  'auto_publish_after_translate', 'yt_account_name', 'yt_account_id'
 ] as const;
 
 const JOB_COLUMNS = [
@@ -57,7 +57,9 @@ export function openSocialDatabase(path: string): SocialDB {
       default_schedule_times TEXT NOT NULL DEFAULT '["19:30"]',
       default_description TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      yt_account_name TEXT NOT NULL DEFAULT '',
+      yt_account_id TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS social_jobs (
@@ -164,6 +166,9 @@ function migrateColumns(db: SocialDB): void {
   };
   addColumn('social_clusters', 'yt_channel_url', "yt_channel_url TEXT NOT NULL DEFAULT ''");
   addColumn('social_clusters', 'tk_profile_url', "tk_profile_url TEXT NOT NULL DEFAULT ''");
+  // Tài khoản đã liên kết (đọc từ cookie/Studio sau khi đăng nhập tay).
+  addColumn('social_clusters', 'yt_account_name', "yt_account_name TEXT NOT NULL DEFAULT ''");
+  addColumn('social_clusters', 'yt_account_id', "yt_account_id TEXT NOT NULL DEFAULT ''");
   addColumn('social_clusters', 'auto_reply_enabled', 'auto_reply_enabled INTEGER NOT NULL DEFAULT 0');
   addColumn('social_clusters', 'auto_reply_prompt', "auto_reply_prompt TEXT NOT NULL DEFAULT ''");
   // GĐ4: công tắc tự nạp đăng sau khi dịch xong (điều khiển từ daemon).
@@ -216,6 +221,8 @@ export type SocialClusterRow = {
   updated_at: string;
   yt_channel_url: string | null;
   tk_profile_url: string | null;
+  yt_account_name: string | null;
+  yt_account_id: string | null;
   auto_reply_enabled: number | null;
   auto_reply_prompt: string | null;
   auto_publish_after_translate: number | null;
@@ -285,6 +292,9 @@ export function mapCluster(row: SocialClusterRow): SocialCluster {
     defaultDescription: row.default_description,
     ytChannelUrl: row.yt_channel_url ?? '',
     tkProfileUrl: row.tk_profile_url ?? '',
+    ytAccountName: row.yt_account_name ?? '',
+    ytAccountId: row.yt_account_id ?? '',
+    needsChannel: (row.yt_login === 'ok') && (row.yt_account_id ?? '') === '',
     autoReplyEnabled: row.auto_reply_enabled === 1,
     autoReplyPrompt: row.auto_reply_prompt ?? '',
     autoPublishAfterTranslate: row.auto_publish_after_translate === 1,
@@ -384,6 +394,8 @@ export function createClusterRow(
     yt_login: 'unknown',
     tk_login: 'unknown',
     fb_login: 'unknown',
+    yt_account_name: '',
+    yt_account_id: '',
     fb_mode: data.fbMode,
     fb_page_id: data.fbPageId,
     fb_page_token_encrypted: data.fbPageTokenEncrypted,
@@ -443,6 +455,8 @@ export function updateClusterRow(
     updated_at: string;
     yt_channel_url: string;
     tk_profile_url: string;
+    yt_account_name: string;
+    yt_account_id: string;
     auto_reply_enabled: number;
     auto_reply_prompt: string;
     auto_publish_after_translate: number;

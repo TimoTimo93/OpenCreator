@@ -115,6 +115,20 @@ export async function registerSocialRoutes(
     }
   });
 
+  server.post<{ Params: { id: string }; Body: unknown }>('/social/clusters/:id/youtube/create-channel', async (request, reply) => {
+    const body = typeof request.body === 'object' && request.body !== null ? request.body as Record<string, unknown> : {};
+    const name = typeof body.name === 'string' ? body.name : '';
+    if (name.trim() === '') {
+      return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.name (tên kênh) là bắt buộc'));
+    }
+    try {
+      // Tạo Brand Account qua web UI Studio rồi lưu channel id/tên vào cụm.
+      return await social.createClusterYoutubeChannel(request.params.id, name);
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
   server.post<{ Body: unknown }>('/social/jobs', async (request, reply) => {
     try {
       const body = request.body;
@@ -306,7 +320,10 @@ function socialFailure(error: unknown, reply: FastifyReply): unknown {
       'social_job_schedule_invalid',
       'social_screenshot_missing',
       'social_selectors_invalid',
-      'social_ai_input_invalid'
+      'social_ai_input_invalid',
+      'social_channel_name_required',
+      'social_channel_create_failed',
+      'social_browser_unavailable'
     ]);
     const status = error.code === 'social_cluster_not_found' || error.code === 'social_job_not_found'
       ? 404

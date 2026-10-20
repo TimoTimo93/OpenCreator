@@ -146,6 +146,7 @@ export default function SocialWorkspace(props: {
   const [insightsKey, setInsightsKey] = useState(0);
   const [loginModal, setLoginModal] = useState<{ cluster: SocialClusterSummary; platform: SocialPlatformName } | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [creatingChannel, setCreatingChannel] = useState('');
   const [consoleOpen, setConsoleOpen] = useState(true);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [selectedJobId, setSelectedJobId] = useState('');
@@ -356,6 +357,26 @@ export default function SocialWorkspace(props: {
                 t('dashboard.social.removedCluster'),
                 () => service.deleteCluster(cluster.id)
               )}
+              onCreateChannel={cluster => {
+                const suggested = cluster.seriesName !== '' ? cluster.seriesName : cluster.name;
+                const name = window.prompt('Nhập tên kênh YouTube muốn tạo (Brand Account):', suggested);
+                if (name === null || name.trim() === '') return;
+                setCreatingChannel(cluster.id);
+                service.createYoutubeChannel(cluster.id, name.trim())
+                  .then(result => {
+                    if (result.ok) {
+                      pushLog(`✅ [${cluster.name}] Đã tạo kênh YouTube "${result.channelName ?? name}" (${result.channelId ?? ''}) — sẵn sàng đăng video.`, 'action');
+                      setToast(`Đã tạo kênh YouTube: ${result.channelName ?? name}`);
+                    } else {
+                      setToast(result.error ?? 'Không tạo được kênh YouTube');
+                    }
+                  })
+                  .catch(cause => setToast(`Không tạo được kênh YouTube: ${messageOf(cause)}`))
+                  .finally(() => {
+                    setCreatingChannel('');
+                    void load(false);
+                  });
+              }}
               onCheckAllProxy={() => {
                 pushLog('⚡ [Proxy Checker] Đang kiểm tra đồng loạt Proxy của tất cả nhóm...', 'action');
                 void action(t('dashboard.social.checkedProxy'), async () => {
@@ -459,12 +480,15 @@ export default function SocialWorkspace(props: {
             service.verifyClusterLogin(target.cluster.id, target.platform)
               .then(result => {
                 if (result.ok) {
-                  const who = result.accountName === undefined || result.accountName === '' ? '' : ` (${result.accountName})`;
+                  const who = result.accountName === undefined || result.accountName === '' ? '' : ` — Kênh: ${result.accountName}${result.channelId === undefined ? '' : ` (${result.channelId})`}`;
                   pushLog(`✅ [${target.cluster.name}] Đã xác nhận đăng nhập ${platformName}${who} — phiên đã lưu cho cụm này.`, 'action');
-                  setToast(`Đã đăng nhập ${platformName}${who} — phiên đã lưu cho cụm.`);
+                  setToast(`Đăng nhập ${platformName} thành công${who} — phiên đã lưu cho cụm.`);
+                } else if (result.needsChannel === true) {
+                  pushLog(`⚠️ [${target.cluster.name}] Đã đăng nhập ${platformName} nhưng tài khoản chưa có kênh — cần tạo kênh.`, 'action');
+                  setToast(`Đã đăng nhập ${platformName} nhưng tài khoản chưa có kênh — bấm "➕ Tạo kênh" ở cột ${platformName}.`);
                 } else {
-                  pushLog(`⚠️ [${target.cluster.name}] Chưa thấy cookie đăng nhập ${platformName} trong profile cụm — hãy đăng nhập lại nếu cửa sổ vừa mở.`, 'action');
-                  setToast('Chưa thấy phiên đăng nhập — hãy đăng nhập lại trong cửa sổ trình duyệt của cụm.');
+                  pushLog(`⚠️ [${target.cluster.name}] Phiên đăng nhập ${platformName} chưa hoàn tất — hãy đăng nhập lại trong cửa sổ trình duyệt của cụm.`, 'action');
+                  setToast(`Phiên đăng nhập ${platformName} chưa hoàn tất — hãy đăng nhập lại trong cửa sổ trình duyệt của cụm rồi bấm "Lưu Phiên".`);
                 }
               })
               .catch(cause => {
@@ -643,6 +667,7 @@ function ChannelsPanel(props: {
   onNewCluster(): void;
   onCheckAllProxy(): void;
   onDeleteCluster(cluster: SocialClusterSummary): void;
+  onCreateChannel(cluster: SocialClusterSummary): void;
 }) {
   const { t } = props;
   return (
@@ -687,24 +712,52 @@ function ChannelsPanel(props: {
                     {PLATFORMS.map(platform => {
                       const status = cluster.loginStatus[platform];
                       const key = `${cluster.id}:${platform}`;
+                      const accountName = platform === 'youtube' ? cluster.ytAccountName ?? '' : '';
+                      const accountId = platform === 'youtube' ? cluster.ytAccountId ?? '' : '';
+                      const linked = status === 'ok';
                       return (
                         <td key={platform}>
                           <span className={`social-platform-entry social-login-${platform}`}>
-                            <span className={`social-login social-login-${status}`}>
-                              {LICENSE_MARK[status]} <b>{LOGIN_STATUS_LABEL[status] ?? t('dashboard.social.loginUnknown')}</b>
-                            </span>
-                            <button
-                              type="button"
-                              data-testid={`social-login-${cluster.id}-${platform}`}
-                              className={`social-btn social-btn-sm ${status === 'expired' ? 'social-btn-amber' : ''}`}
-                              title={`${t('dashboard.social.loginAction')} ${platform}`}
-                              onClick={() => props.onOpenLogin(cluster, platform)}
-                            >
-                              {props.loginPendingPlatform === key
-                                ? <LoaderCircle size={12} className="social-spin" aria-hidden="true" />
-                                : <KeyRound size={12} aria-hidden="true" />}
-                              {t('dashboard.social.loginAction')}
-                            </button>
+                            {linked ? (
+                              <span className={`social-login social-login-${status}`} title={accountId !== '' ? accountId : undefined}>
+                                <span className="social-login-dot" aria-hidden="true" />
+                                {accountName !== '' ? (
+                                  <span className="social-login-account">
+                                    {accountName}
+                                    {accountId !== '' ? <em> · {accountId}</em> : null}
+                                  </span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              <span className={`social-login social-login-${status}`}>
+                                {LICENSE_MARK[status]} <b>{LOGIN_STATUS_LABEL[status] ?? t('dashboard.social.loginUnknown')}</b>
+                              </span>
+                            )}
+                            {linked ? null : (
+                              <button
+                                type="button"
+                                data-testid={`social-login-${cluster.id}-${platform}`}
+                                className={`social-btn social-btn-sm ${status === 'expired' ? 'social-btn-amber' : ''}`}
+                                title={`${t('dashboard.social.loginAction')} ${platform}`}
+                                onClick={() => props.onOpenLogin(cluster, platform)}
+                              >
+                                {props.loginPendingPlatform === key
+                                  ? <LoaderCircle size={12} className="social-spin" aria-hidden="true" />
+                                  : <KeyRound size={12} aria-hidden="true" />}
+                                {t('dashboard.social.loginAction')}
+                              </button>
+                            )}
+                            {platform === 'youtube' && cluster.needsChannel === true ? (
+                              <button
+                                type="button"
+                                className="social-btn social-btn-sm social-btn-green"
+                                data-testid={`social-create-channel-${cluster.id}`}
+                                title="Tạo kênh YouTube cho tài khoản vừa đăng nhập"
+                                onClick={() => props.onCreateChannel(cluster)}
+                              >
+                                ➕ Tạo kênh
+                              </button>
+                            ) : null}
                           </span>
                         </td>
                       );

@@ -59,6 +59,12 @@ export type SocialCluster = {
   defaultDescription: string;
   /** GĐ3: URL kênh YouTube (dùng để quét thống kê). */
   ytChannelUrl: string;
+  /** Tên kênh YouTube đã liên kết (đọc từ Studio sau khi đăng nhập tay). */
+  ytAccountName: string;
+  /** ID kênh YouTube đã liên kết (UC...). */
+  ytAccountId: string;
+  /** Đã đăng nhập nhưng tài khoản chưa có kênh YouTube (cần tạo kênh). */
+  needsChannel: boolean;
   /** GĐ3: URL profile TikTok (dùng để quét thống kê). */
   tkProfileUrl: string;
   /** GĐ3: bật tự động trả lời bình luận bằng AI. */

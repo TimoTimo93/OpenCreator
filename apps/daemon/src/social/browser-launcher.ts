@@ -40,6 +40,9 @@ export async function launchClusterBrowser(input: LaunchClusterBrowserInput): Pr
         ...(channel === undefined ? {} : { channel }),
         headless: false,
         ...fingerprintPatch,
+        // Đồng bộ giao diện tối với phần mềm: trang + UI trình duyệt đều tối.
+        colorScheme: 'dark',
+        args: ['--force-dark-mode'],
         proxy,
         timeout: 60_000
       });

@@ -37,6 +37,7 @@ import type { YtDlpRuntime } from '../creator/yt-dlp/runtime.js';
 import { createSocialComments, type SocialLlmConfig } from './comments.js';
 import { aiComposeVideoMeta, aiTestReply, type SocialAiCompose, type SocialAiReplyTestInput } from './ai.js';
 import { listDownloadedVideos, type SocialDownloadItem } from './downloads.js';
+import { createYoutubeChannel } from './platforms/youtube-channel.js';
 import type { SocialWorker } from './worker.js';
 import {
   SOCIAL_PLATFORM_LOGIN_URLS,
@@ -107,7 +108,9 @@ export type SocialService = {
   /** Mở tab trang đăng nhập của nền tảng trong trình duyệt persistent cụm (người dùng tự đăng nhập). */
   openClusterLoginPage(clusterId: string, platform: SocialPlatform): Promise<{ ok: true }>;
   /** Xác minh phiên đăng nhập (đọc cookie profile cụm) + cập nhật loginStatus. */
-  verifyClusterLogin(clusterId: string, platform: SocialPlatform): Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired' }>;
+  verifyClusterLogin(clusterId: string, platform: SocialPlatform): Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; needsChannel?: boolean; accountName?: string; channelId?: string; channelUrl?: string }>;
+  /** Tạo kênh YouTube (Brand Account) khi tài khoản đã đăng nhập nhưng chưa có kênh. */
+  createClusterYoutubeChannel(clusterId: string, channelName: string): Promise<{ ok: boolean; channelId?: string; channelName?: string; error?: string }>;
   /** Nạp video vào hàng đợi; trả summary + số nạp + danh sách path bị bỏ qua. */
   enqueue(requests: readonly SocialEnqueueRequest[]): { summary: SocialOverview; accepted: number; duplicates: string[] };
   pause(): SocialOverview;
@@ -191,6 +194,68 @@ export function hasLoginCookie(
   return cookies.some(cookie =>
     names.includes(cookie.name) && cookie.value.trim() !== ''
   );
+}
+
+/**
+ * Đọc thông tin kênh đã liên kết từ YouTube.
+ * Cách ổn định: mở `youtube.com/@me` — khi đã đăng nhập, YouTube chuyển hướng
+ * tới trang kênh của bạn (URL chứa `@handle` hoặc `/channel/UC…`) và tiêu đề
+ * trang = "<Tên kênh> - YouTube". Khi CHƯA đăng nhập ⇒ bị chuyển về
+ * accounts.google.com hoặc trả 404 ⇒ coi như chưa đăng nhập (không báo
+ * "✔ Đã đăng nhập" giả).
+ */
+export async function readYoutubeAccount(
+  handle: { newPage(url?: string): Promise<unknown> }
+): Promise<{ signedIn: boolean; needsChannel?: boolean; name?: string; channelId?: string; channelUrl?: string }> {
+  type Page = {
+    url(): string;
+    title(): Promise<string>;
+    waitForTimeout(ms: number): Promise<void>;
+    evaluate<T>(fn: () => T): Promise<T>;
+    goto(url: string, options?: { timeout?: number; waitUntil?: string }): Promise<unknown>;
+    close(): Promise<void>;
+  };
+  let page: Page | undefined;
+  try {
+    // Bước 1: web đã cấp phiên chưa? (menu tài khoản có email tức đã đăng nhập)
+    page = await handle.newPage('https://www.youtube.com/') as Page;
+    await page.waitForTimeout(4_000);
+    const email = await page
+      .evaluate(() => {
+        const el = document.querySelector('#email');
+        return el?.textContent?.trim() ?? '';
+      })
+      .catch(() => '');
+    if (email === '') return { signedIn: false };
+
+    // Bước 2: đã đăng nhập — thử mở trang kênh của chính mình.
+    await page.goto('https://www.youtube.com/@me').catch(() => undefined);
+    await page.waitForTimeout(4_000);
+    const url = page.url();
+    const rawTitle = await page.title().catch(() => '');
+    if (url.includes('accounts.google.com') || rawTitle.startsWith('404')) {
+      // Đã đăng nhập nhưng chưa có kênh ⇒ cần tạo kênh (Brand Account).
+      return { signedIn: true, needsChannel: true };
+    }
+    const channelMatch = /\/channel\/(UC[\w-]+)/.exec(url);
+    const handleMatch = /youtube\.com\/@([\w.\-]+)/.exec(url);
+    const name = rawTitle.replace(/\s*[-–—]\s*YouTube\s*$/i, '').trim();
+    const channelUrl = channelMatch?.[1] !== undefined
+      ? `https://www.youtube.com/channel/${channelMatch[1]}`
+      : handleMatch?.[1] !== undefined
+        ? `https://www.youtube.com/@${handleMatch[1]}`
+        : undefined;
+    return {
+      signedIn: true,
+      ...(name !== '' && name !== 'YouTube' ? { name } : {}),
+      ...(channelMatch?.[1] === undefined ? {} : { channelId: channelMatch[1] }),
+      ...(channelUrl === undefined ? {} : { channelUrl })
+    };
+  } catch {
+    return { signedIn: false };
+  } finally {
+    await page?.close().catch(() => undefined);
+  }
 }
 
 /**
@@ -280,6 +345,9 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       defaultDescription: cluster.defaultDescription,
       ytChannelUrl: cluster.ytChannelUrl,
       tkProfileUrl: cluster.tkProfileUrl,
+      ytAccountName: cluster.ytAccountName,
+      ytAccountId: cluster.ytAccountId,
+      needsChannel: cluster.needsChannel,
       autoReplyEnabled: cluster.autoReplyEnabled,
       autoReplyPrompt: cluster.autoReplyPrompt,
       autoPublishAfterTranslate: cluster.autoPublishAfterTranslate,
@@ -481,7 +549,7 @@ export function createSocialService(input: SocialServiceInput): SocialService {
      * (Google SID/SSID, TikTok sessionid, Facebook c_user/xs). Có cookie → ghi
      * loginStatus='ok' vào DB ⇒ UI hiện "✔ Đã đăng nhập" + tên kênh nếu có.
      */
-    async verifyClusterLogin(clusterId: string, platform: SocialPlatform): Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; accountName?: string }> {
+    async verifyClusterLogin(clusterId: string, platform: SocialPlatform): Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; needsChannel?: boolean; accountName?: string; channelId?: string; channelUrl?: string }> {
       const row = getClusterRow(db, clusterId);
       if (row === undefined) throw new SocialError('social_cluster_not_found', 'Không tìm thấy cụm kênh');
       if (!isSocialPlatform(platform)) {
@@ -503,13 +571,83 @@ export function createSocialService(input: SocialServiceInput): SocialService {
         );
       }
       const signedIn = hasLoginCookie(platform, cookies);
-      const status = signedIn ? 'ok' : 'unknown';
-      const accountName = signedIn ? readAccountName(platform, cookies) : undefined;
       const column = platform === 'youtube' ? 'yt_login' : platform === 'tiktok' ? 'tk_login' : 'fb_login';
-      updateClusterRow(db, clusterId, { [column]: status, updated_at: new Date().toISOString() });
-      return accountName === undefined
-        ? { ok: signedIn, status }
-        : { ok: signedIn, status, accountName };
+      const patch: Parameters<typeof updateClusterRow>[2] = { [column]: signedIn ? 'ok' : 'unknown', updated_at: new Date().toISOString() };
+      let accountName: string | undefined;
+      let channelId: string | undefined;
+      let channelUrl: string | undefined;
+      let needsChannel = false;
+      let webSignedIn = signedIn;
+      if (signedIn && platform === 'youtube') {
+        // Đọc thông tin kênh thật: đã đăng nhập + có kênh ⇒ lấy tên/ID;
+        // đã đăng nhập nhưng chưa có kênh ⇒ cần tạo kênh (needs_channel);
+        // web chưa cấp phiên (cookie có nhưng chưa hoàn tất) ⇒ coi như chưa đăng nhập.
+        const account = await worker.withClusterBrowser(clusterId, async browserHandle => readYoutubeAccount(browserHandle));
+        webSignedIn = account.signedIn;
+        if (account.signedIn) {
+          if (account.needsChannel === true) {
+            // Đã đăng nhập nhưng chưa có kênh → cần tạo kênh (Brand Account).
+            needsChannel = true;
+          }
+          if (account.name !== undefined) {
+            accountName = account.name;
+            patch.yt_account_name = account.name;
+          }
+          if (account.channelId !== undefined) {
+            channelId = account.channelId;
+            patch.yt_account_id = account.channelId;
+          }
+          if (account.channelUrl !== undefined) {
+            channelUrl = account.channelUrl;
+            if (row.yt_channel_url === null || row.yt_channel_url === undefined || row.yt_channel_url === '') {
+              patch.yt_channel_url = account.channelUrl;
+            }
+          }
+        } else {
+          // Cookie phiên có nhưng web chưa cấp phiên ⇒ chưa đăng nhập hoàn chỉnh.
+          patch.yt_login = 'unknown';
+          patch.yt_account_name = '';
+          patch.yt_account_id = '';
+        }
+      }
+      updateClusterRow(db, clusterId, patch);
+      return {
+        ok: webSignedIn && !needsChannel,
+        status: webSignedIn ? 'ok' : 'unknown',
+        needsChannel,
+        ...(accountName === undefined ? {} : { accountName }),
+        ...(channelId === undefined ? {} : { channelId }),
+        ...(channelUrl === undefined ? {} : { channelUrl })
+      };
+    },
+
+    /**
+     * Tạo kênh YouTube cho tài khoản đã đăng nhập nhưng chưa có kênh/Studio.
+     * Dùng web UI Studio (Brand Account) rồi lưu tên + channel id vào cụm.
+     */
+    async createClusterYoutubeChannel(clusterId: string, channelName: string): Promise<{ ok: boolean; channelId?: string; channelName?: string; error?: string }> {
+      const row = getClusterRow(db, clusterId);
+      if (row === undefined) throw new SocialError('social_cluster_not_found', 'Không tìm thấy cụm kênh');
+      const name = channelName.trim();
+      if (name === '') throw new SocialError('social_channel_name_required', 'Cần nhập tên kênh');
+      const result = await worker.withClusterBrowser(clusterId, async browserHandle =>
+        createYoutubeChannel(browserHandle, { name }));
+      if (!result.ok) {
+        throw new SocialError('social_channel_create_failed', result.error ?? 'Không tạo được kênh YouTube');
+      }
+      const patch: Parameters<typeof updateClusterRow>[2] = {
+        yt_login: 'ok',
+        updated_at: new Date().toISOString()
+      };
+      if (result.channelName !== undefined) patch.yt_account_name = result.channelName;
+      if (result.channelId !== undefined) patch.yt_account_id = result.channelId;
+      if (result.channelId !== undefined) patch.yt_channel_url = `https://www.youtube.com/channel/${result.channelId}`;
+      updateClusterRow(db, clusterId, patch);
+      return {
+        ok: true,
+        ...(result.channelId === undefined ? {} : { channelId: result.channelId }),
+        ...(result.channelName === undefined ? {} : { channelName: result.channelName })
+      };
     },
 
     enqueue(requests: readonly SocialEnqueueRequest[]): { summary: SocialOverview; accepted: number; duplicates: string[] } {

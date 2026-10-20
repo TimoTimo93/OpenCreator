@@ -28,6 +28,12 @@ export type SocialClusterSummary = {
   defaultDescription: string;
   ytChannelUrl: string;
   tkProfileUrl: string;
+  /** Tên kênh YouTube đã liên kết (đọc từ Studio sau khi đăng nhập tay). */
+  ytAccountName?: string;
+  /** ID kênh YouTube đã liên kết (UC...). */
+  ytAccountId?: string;
+  /** Đã đăng nhập nhưng tài khoản chưa có kênh YouTube (cần tạo kênh). */
+  needsChannel?: boolean;
   autoReplyEnabled: boolean;
   autoReplyPrompt: string;
   /** GĐ4: bật tự nạp đăng sau khi dịch xong (daemon hook, công tắc theo cụm). */
@@ -387,11 +393,15 @@ export function createSocialService(client: RuntimeClient) {
       return client.post(`/social/clusters/${encodeURIComponent(id)}/login/${platform}`) as Promise<{ ok: boolean }>;
     },
     /** Xác minh phiên đăng nhập (đọc cookie profile cụm) + cập nhật loginStatus. */
-    verifyClusterLogin(id: string, platform: SocialPlatformName): Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; accountName?: string }> {
+    verifyClusterLogin(id: string, platform: SocialPlatformName): Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; needsChannel?: boolean; accountName?: string; channelId?: string; channelUrl?: string }> {
       if (!SOCIAL_PLATFORM_NAMES.includes(platform)) {
         return Promise.reject(new Error(`Nền tảng không hỗ trợ đăng nhập: ${platform}`));
       }
-      return client.post(`/social/clusters/${encodeURIComponent(id)}/login/${platform}/verify`) as Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; accountName?: string }>;
+      return client.post(`/social/clusters/${encodeURIComponent(id)}/login/${platform}/verify`) as Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; needsChannel?: boolean; accountName?: string; channelId?: string; channelUrl?: string }>;
+    },
+    /** Tạo kênh YouTube (Brand Account) khi tài khoản đã đăng nhập nhưng chưa có kênh. */
+    createYoutubeChannel(id: string, name: string): Promise<{ ok: boolean; channelId?: string; channelName?: string; error?: string }> {
+      return client.post(`/social/clusters/${encodeURIComponent(id)}/youtube/create-channel`, { name });
     },
     closeClusterBrowser(id: string): Promise<SocialOverview> {
       return client.post(`/social/clusters/${encodeURIComponent(id)}/close-browser`);
