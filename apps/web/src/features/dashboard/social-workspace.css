@@ -229,7 +229,7 @@
 /* --------------------------------------------------------------------------
    TAB 2 — LỊCH ĐĂNG
    -------------------------------------------------------------------------- */
-.social-calendar { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.social-calendar { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow: hidden; }
 .social-cal-toolbar { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .social-cal-nav { display: flex; gap: 4px; }
 .social-cal-title { margin: 0; font-size: 12.5px; color: #94a3b8; font-weight: 600; }
@@ -240,8 +240,10 @@
   font-size: 11px; font-weight: 600; color: #64748b; flex-shrink: 0;
 }
 .social-cal-grid {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px;
-  height: 190px; overflow-y: auto; flex-shrink: 0;
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px;
+  /* Lịch co giãn theo chỗ trống (tối đa 190px như demo) — không đè xuống composer. */
+  flex: 1 1 auto; min-height: 80px; max-height: 190px; height: auto;
+  overflow-y: auto; flex-shrink: 1;
 }
 .social-cal-grid-month { height: auto; min-height: 240px; flex: 1; }
 .social-cal-cell {
@@ -276,7 +278,7 @@
 .social-cal-chip-state-sched { outline: 2px solid rgb(245 158 11 / 40%); }
 .social-cal-chip-state-failed { outline: 2px solid rgb(244 63 94 / 55%); }
 .social-cal-chip-state-done { opacity: .45; cursor: default; pointer-events: none; }
-.social-cal-hint { margin: 0; font-size: 11px; color: #64748b; }
+.social-cal-hint { margin: 0; font-size: 11px; color: #64748b; flex-shrink: 0; }
 .social-cal-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; overflow: auto; flex: 1; min-height: 0; }
 .social-cal-list-row {
   width: 100%; display: flex; gap: 10px; align-items: center;
@@ -294,12 +296,14 @@
    -------------------------------------------------------------------------- */
 .social-composer-cols {
   flex: 1; min-height: 0;
-  display: flex; gap: 12px; overflow: hidden;
+  /* Grid 1fr/1fr thay vì width:50% + gap (vượt 100% → cột phải bị tràn/cắt). */
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px;
+  overflow: hidden;
 }
-.composer-col { overflow-y: auto; min-height: 0; }
-.composer-col > * { flex-shrink: 0; }
+.composer-col { overflow-y: auto; min-height: 0; min-width: 0; }
+.composer-col > * { flex-shrink: 0; min-width: 0; }
 .social-composer-col {
-  width: 50%; min-height: 0;
+  width: auto; min-width: 0; min-height: 0;
   display: flex; flex-direction: column; gap: 10px;
   background: #14141f; border: 1px solid #334155; border-radius: 6px;
   padding: 12px;
@@ -308,13 +312,18 @@
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   font-size: 13px; font-weight: 700; color: #4d94ff;
 }
+.social-composer-sec-title > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.social-composer-sec-title > .social-btn { flex-shrink: 0; }
 .social-composer-sec-title.amber { color: #fbbf24; }
 .social-media-sources { display: flex; gap: 6px; }
 .social-media-search { width: 100%; }
 .social-media-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
   max-height: 118px; overflow: auto;
 }
+.social-label { overflow-wrap: anywhere; }
+.social-inline-row { min-width: 0; }
+.social-inline-row > input, .social-inline-row > select { min-width: 0; }
 .social-media-card {
   background: #1e1e2e; border: 1px solid #334155; border-radius: 6px;
   padding: 8px; text-align: left; cursor: pointer;
@@ -681,7 +690,10 @@
 .social-cluster-option-selected { background: rgb(59 130 246 / 15%); outline: 1px solid #3b82f6; }
 .social-cluster-option-name { font-weight: 600; }
 .social-cluster-option-badges { margin-left: auto; display: flex; gap: 4px; }
-.social-empty { color: #64748b; font-size: 12px; text-align: center; padding: 18px 0; }
+.social-empty {
+  color: #64748b; font-size: 12px; text-align: center; padding: 10px 0;
+  white-space: normal; overflow-wrap: anywhere; max-width: 100%;
+}
 .social-trend-strip { display: flex; gap: 10px; }
 .social-trend-card {
   background: #14141f; border: 1px solid #334155; border-radius: 6px;
