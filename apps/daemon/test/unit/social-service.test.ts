@@ -295,7 +295,7 @@ describe('social service — openClusterLoginPage (đăng nhập tay)', () => {
     await expect(service.openClusterLoginPage('cluster_nope', 'youtube')).rejects.toThrow(SocialError);
     // YouTube và Facebook cũng có trang đăng nhập riêng.
     expect(await service.openClusterLoginPage(clusterId, 'youtube')).toEqual({ ok: true });
-    expect(openedUrls[1]).toBe('https://accounts.youtube.com/');
+    expect(openedUrls[1]).toBe('https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fwww.youtube.com%2F');
   });
 
   it('worker không trình duyệt launcher → lỗi chung không crash, chỉ SocialError khi cụm lạ', async () => {

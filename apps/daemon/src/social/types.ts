@@ -14,7 +14,7 @@ export type SocialPlatform = 'youtube' | 'tiktok' | 'facebook';
  * đăng nhập trong trình duyệt persistent của cụm (không tự động điền mật khẩu).
  */
 export const SOCIAL_PLATFORM_LOGIN_URLS: Record<SocialPlatform, string> = {
-  youtube: 'https://accounts.youtube.com/',
+  youtube: 'https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fwww.youtube.com%2F',
   tiktok: 'https://www.tiktok.com/login',
   facebook: 'https://www.facebook.com/login'
 };
