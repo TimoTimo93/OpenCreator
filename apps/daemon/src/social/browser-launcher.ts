@@ -7,6 +7,8 @@
  *   deviceScaleFactor, locale, timezoneId — thay `viewport: null` cố định
  *   trước đây). Geo theo quốc gia proxy khi có nhãn cc, mặc định vi-VN.
  */
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { chromium } from 'patchright';
 import type { BrowserContext, Page } from 'patchright';
 import type { SocialBrowserHandle } from './worker.js';
@@ -41,11 +43,46 @@ export async function launchClusterBrowser(input: LaunchClusterBrowserInput): Pr
       return createHandle(context);
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+      // "Opening in existing browser session" = một chrome/edge còn ở lại từ lần
+      // trước (daemon khởi động lại nhưng cửa sổ cụm chưa đóng) đang giữ
+      // user-data-dir của cụm. Dọn orphan đúng profile đó rồi thử lại —
+      // KHÔNG đụng trình duyệt thường của người dùng (chỉ process có
+      // --user-data-dir trùng profile này mới bị dọn).
+      if (lastError.message.includes('Opening in existing browser session')) {
+        const cleaned = await closeOrphanBrowsersForProfile(input.profileDir);
+        if (cleaned === 0) break;
+      }
     }
   }
   throw new Error(
-    `Không khởi động được trình duyệt (Chrome/Edge đều lỗi). Hãy cài Google Chrome. Lỗi cuối: ${lastError?.message ?? 'không rõ'}`
+    `Không khởi động được trình duyệt (Chrome/Edge đều lỗi). Hãy đóng cửa sổ trình duyệt cũ của cụm rồi thử lại. Lỗi cuối: ${lastError?.message ?? 'không rõ'}`
   );
+}
+
+/** Số process chrome/edge orphan đang giữ đúng user-data-dir của cụm — trả 0 nếu không tra được. */
+async function closeOrphanBrowsersForProfile(profileDir: string): Promise<number> {
+  const execFileAsync = promisify(execFile);
+  try {
+    const query = 'Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq "chrome.exe" -or $_.Name -eq "msedge.exe") -and $_.CommandLine -match [regex]::Escape("'
+      + normalizeToSlash(profileDir) + '") } | ForEach-Object { $_.ProcessId }';
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', query], {
+      encoding: 'utf8',
+      timeout: 20_000
+    });
+    const pids = stdout.split(/\r?\n/).map(line => line.trim()).filter(line => /^\d+$/.test(line));
+    if (pids.length === 0) return 0;
+    for (const pid of pids) {
+      await execFileAsync('taskkill', ['/F', '/T', '/PID', pid]).catch(() => undefined);
+    }
+    return pids.length;
+  } catch {
+    return 0;
+  }
+}
+
+/** Escape regex cho toàn bộ path profile (match cả '\\' và '/' trong command line). */
+function normalizeToSlash(profileDir: string): string {
+  return profileDir.replace(/[\\/+()[\]{}$^.|*?]/g, ch => `\\${ch}`);
 }
 
 function createHandle(context: BrowserContext): SocialBrowserHandle {
