@@ -266,9 +266,9 @@ describe('SocialWorkspace — tab Hàng đợi', () => {
     );
     fireEvent.click(screen.getByRole('tab', { name: /Hàng Đợi/ }));
     await waitFor(() => expect(screen.getByText('Tập 1')).toBeInTheDocument());
-    // Chip trạng thái từng nền tảng (job_1: youtube failed, facebook published)
-    expect(screen.getByText('Thất bại')).toBeInTheDocument();
-    expect(screen.getByText('Đã đăng')).toBeInTheDocument();
+    // Chip trạng thái từng nền tảng theo demo (job_1: youtube failed, facebook published)
+    expect(screen.getByText('❌ FAILED (1/3)')).toBeInTheDocument();
+    expect(screen.getByText('✅ PUBLISHED')).toBeInTheDocument();
     // Nút Retry All hiện khi có job lỗi
     expect(screen.getByRole('button', { name: /Retry All/ })).toBeInTheDocument();
     // Trình Soi Lỗi tự chọn job lỗi đầu tiên

@@ -31,6 +31,7 @@ import type {
   SocialPlatformName
 } from '../../services/social-service.js';
 import { listTranslatedVideos } from '../../services/social-service.js';
+import { browserBridge } from '../../host/browser-bridge.js';
 import type { CreatorWebService } from '../../services/creator-service.js';
 import {
   composeEnqueueItems,
@@ -47,7 +48,7 @@ import {
   startOfWeek,
   toDatetimeLocalValue
 } from './social-calendar.js';
-import { ExcelImportButton, downloadTemplate } from './social-excel.js';
+import { ExcelImportButton } from './social-excel.js';
 import { SocialCommentsPanel, SocialStatsPanel } from './social-insights.js';
 import {
   takePendingSocialHandoffSource
@@ -477,6 +478,36 @@ export default function SocialWorkspace(props: {
 
 function shortJobId(id: string): string {
   return id.length <= 8 ? id : id.slice(0, 8);
+}
+
+/** Chip trạng thái nền tảng EN caps như demo (SCHEDULED / PENDING / UPLOADING…). */
+function queueChipClass(status: string): string {
+  switch (status) {
+    case 'published': return 'social-chip-ok';
+    case 'scheduled': return 'social-chip-scheduled';
+    case 'running': return 'social-chip-running';
+    case 'failed': return 'social-chip-failed';
+    case 'skipped': return 'social-chip-skipped';
+    default: return 'social-chip-pending';
+  }
+}
+
+function queueChipText(status: { status: string; attempts: number }): string {
+  switch (status.status) {
+    case 'published': return '✅ PUBLISHED';
+    case 'scheduled': return '📅 SCHEDULED';
+    case 'running': return '🔄 UPLOADING';
+    case 'failed': return `❌ FAILED (${status.attempts}/3)`;
+    case 'skipped': return '🚫 SKIPPED';
+    default: return '⏳ PENDING';
+  }
+}
+
+function formatScheduleFull(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const pad = (n: number): string => `${n}`.padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 /** Danh sách nền tảng chưa đăng nhập của cụm (lấy nền tảng ưu tiên). */
@@ -1002,6 +1033,41 @@ function QueuePanel(props: {
   const { t } = props;
   const selectedJob = props.jobs.find(job => job.id === props.selectedJobId) ?? null;
   const failedJobs = props.jobs.filter(job => jobKind(job) === 'failed');
+  const [clusterFilter, setClusterFilter] = useState('');
+  const [manualTitle, setManualTitle] = useState('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const visibleJobs = clusterFilter === '' ? props.jobs : props.jobs.filter(job => job.clusterId === clusterFilter);
+
+  function enqueueFiles(files: File[]): void {
+    const cluster = clusterFilter === ''
+      ? props.clusters[0]
+      : props.clusters.find(candidate => candidate.id === clusterFilter);
+    if (cluster === undefined) return;
+    const paths = files.map(file => {
+      const viaBridge = browserBridge.resolveDroppedFilePath?.(file) ?? null;
+      const viaProp = typeof (file as unknown as { path?: unknown }).path === 'string' ? (file as unknown as { path: string }).path : '';
+      return viaBridge ?? viaProp;
+    }).filter(path => path !== '');
+    if (paths.length === 0) {
+      props.onError('Không lấy được đường dẫn file (host không hỗ trợ). Hãy dán đường dẫn vào Composer tab 2.');
+      return;
+    }
+    for (const path of paths) {
+      const items = composeEnqueueItems({
+        clusters: [cluster],
+        path,
+        title: manualTitle,
+        settings: {
+          youtube: { privacy: 'public' },
+          tiktok: { privacy: 'public', allowDuet: true, allowStitch: true, allowComments: true, directPost: false },
+          facebook: { postType: 'post' }
+        }
+      });
+      props.onEnqueue(items[0] ?? { clusterId: cluster.id, path }, '');
+    }
+    setManualTitle('');
+  }
+
   function retryAllFailed(): void {
     for (const job of failedJobs) props.onRetry(job);
   }
@@ -1011,9 +1077,47 @@ function QueuePanel(props: {
         <span className={`social-queue-state social-queue-state-${props.queueRunning ? 'running' : 'paused'}`}>
           {props.queueRunning ? t('dashboard.social.queueRunning') : t('dashboard.social.queuePaused')}
         </span>
-        <button type="button" className="social-btn social-btn-primary" onClick={props.onNewPost}>
-          ➕ {t('dashboard.social.newPost')}
+        <span className="social-label" style={{ margin: 0, flexShrink: 0 }}>Nhóm:</span>
+        <select
+          className="social-queue-cluster"
+          value={clusterFilter}
+          aria-label="Lọc theo nhóm"
+          onChange={event => setClusterFilter(event.target.value)}
+        >
+          <option value="">Tất cả</option>
+          {props.clusters.map(cluster => (
+            <option key={cluster.id} value={cluster.id}>
+              {cluster.name}{cluster.seriesName !== '' ? ` (${cluster.seriesName})` : ''}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          className="social-queue-title"
+          placeholder="Nhập tiêu đề tập phim (để trống sẽ tự lấy tên file)..."
+          value={manualTitle}
+          onChange={event => setManualTitle(event.target.value)}
+        />
+        <button
+          type="button"
+          className="social-btn social-btn-primary"
+          disabled={props.clusters.length === 0}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          ➕ Chọn File & Xếp Lịch Tự Động
         </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="video/mp4,video/*"
+          multiple
+          hidden
+          onChange={event => {
+            const files = Array.from(event.target.files ?? []);
+            enqueueFiles(files);
+            event.target.value = '';
+          }}
+        />
         <ExcelImportButton
           clusters={props.clusters}
           t={t}
@@ -1028,7 +1132,7 @@ function QueuePanel(props: {
       </div>
       <div className="social-queue-cols">
         <div className="social-queue-table">
-          {props.jobs.length === 0 ? (
+          {visibleJobs.length === 0 ? (
             <p className="social-empty">{t('dashboard.social.noJobs')}</p>
           ) : (
             <div className="social-tablewrap">
@@ -1036,16 +1140,16 @@ function QueuePanel(props: {
                 <thead>
                   <tr>
                     <th>Job ID</th>
-                    <th>{t('dashboard.social.tabChannels')}</th>
-                    <th>{t('dashboard.social.jobTitle')}</th>
-                    <th>{t('dashboard.social.scheduleAt')}</th>
+                    <th>Nhóm</th>
+                    <th>Tên File Video</th>
+                    <th>Giờ Hẹn Đăng (Auto-Slot)</th>
                     <th>YouTube</th>
                     <th>TikTok</th>
                     <th>Facebook</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {props.jobs.map(job => {
+                  {visibleJobs.map(job => {
                     const selected = job.id === props.selectedJobId;
                     const failed = jobKind(job) === 'failed';
                     return (
@@ -1059,13 +1163,13 @@ function QueuePanel(props: {
                         <td className="social-cell-mono" title={job.videoPath}>
                           {job.title !== '' ? job.title : fileNameOf(job.videoPath)}
                         </td>
-                        <td className="social-cell-mono" style={{ color: '#fbbf24' }}>{formatSchedule(job.scheduledAt)}</td>
+                        <td className="social-cell-mono" style={{ color: '#fcd34d' }}>{formatScheduleFull(job.scheduledAt)}</td>
                         {PLATFORMS.map(platform => {
-                          const kind = platformKind(job.platforms[platform].status);
+                          const status = job.platforms[platform];
                           return (
                             <td key={platform}>
-                              <span className={`social-chip social-chip-${kind}`} title={job.platforms[platform].error ?? job.platforms[platform].videoId ?? undefined}>
-                                {t(`dashboard.social.status_${kind}` as never)}
+                              <span className={`social-chip ${queueChipClass(status.status)}`} title={status.error ?? status.videoId ?? undefined}>
+                                {queueChipText(status)}
                               </span>
                             </td>
                           );
@@ -1108,6 +1212,7 @@ function ErrorInspector(props: {
   const [selectors, setSelectors] = useState<string>('');
   const [selectorsLoaded, setSelectorsLoaded] = useState(false);
   const [selectorsSaving, setSelectorsSaving] = useState(false);
+  const [shotResolution, setShotResolution] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -1139,38 +1244,49 @@ function ErrorInspector(props: {
     <div className="social-err-panel">
       <div className="social-err-head">
         <span className="social-err-title">🔍 Trình Soi Lỗi & Ảnh Chụp (Job #{shortJobId(job.id)})</span>
-        {failedPlatforms.length > 0 ? (
-          <button type="button" className="social-btn social-btn-danger social-btn-sm" onClick={props.onRetry}>
-            🔄 {t('dashboard.social.retry')}
+        <div style={{ display: 'flex', gap: 6 }}>
+          {failedPlatforms.length > 0 ? (
+            <button type="button" className="social-btn social-btn-danger social-btn-sm" onClick={props.onRetry}>
+              {t('dashboard.social.retry')} Riêng {failedPlatforms.map(platform => platform === 'youtube' ? 'YouTube' : platform === 'tiktok' ? 'TikTok' : 'Facebook').join(' + ')}
+            </button>
+          ) : null}
+          <button type="button" className="social-btn social-btn-sm" onClick={props.onRemove} title={t('dashboard.social.remove')}>
+            🗑
           </button>
-        ) : null}
+        </div>
       </div>
       <div className="social-err-chips">
         {PLATFORMS.map(platform => {
-          const kind = platformKind(job.platforms[platform].status);
+          const status = job.platforms[platform].status;
+          const failed = status === 'failed';
           return (
-            <span key={platform} className={`social-chip social-chip-${kind}`}>
-              {platformEmoji(platform)} {platform}
+            <span key={platform} className={`social-chip ${failed ? 'social-chip-failed' : status === 'published' || status === 'scheduled' ? 'social-chip-ok' : 'social-chip-pending'}`}>
+              {failed ? '❌' : status === 'published' || status === 'scheduled' ? '✔' : '⏳'} {platformEmoji(platform)} {platform === 'youtube' ? 'YouTube' : platform === 'tiktok' ? 'TikTok' : 'Facebook'}
             </span>
           );
         })}
       </div>
       <div className="social-err-box">
         {failedPlatforms.length > 0
-          ? failedPlatforms.map(platform => `${platform}: ${job.platforms[platform].error ?? t('dashboard.social.status_failed')}`).join('\n')
-          : '✅ Không có lỗi — job đang bình thường.'}
+          ? `${failedPlatforms.map(platform => `${platform}: ${job.platforms[platform].error ?? t('dashboard.social.status_failed')}`).join('\n')}${shotUrl !== null && failedPlatforms[0] !== undefined ? `\nĐã tự động chụp màn hình lưu tại: ./error_screenshots/err_${SCREENSHOT_PLATFORM_CODES[failedPlatforms[0]]}_job${shortJobId(job.id)}.png` : ''}`
+          : `✅ Job #${shortJobId(job.id)} hoạt động hoàn toàn bình thường, không có lỗi phát sinh.`}
       </div>
       <span style={{ fontSize: 11, color: '#94a3b8' }}>
         📸 Ảnh chụp màn hình trong trình duyệt của nhóm vào lúc gặp lỗi:
       </span>
-      <div className="social-err-shot">
+      <div className="social-err-shot-frame">
+        <div className="social-err-shot-bar">
+          <span className="social-err-shot-domain">{firstFailedDomain(failedPlatforms)}</span>
+          <span className="social-err-shot-badge">DOM Changed / Popup Blocked</span>
+        </div>
         {shotUrl !== null
-          ? <img src={shotUrl} alt={`ảnh chụp lỗi job ${shortJobId(job.id)}`} />
+          ? <img src={shotUrl} alt={`ảnh chụp lỗi job ${shortJobId(job.id)}`} onLoad={event => { const el = event.currentTarget; const w = Math.max(1, Math.round(el.naturalWidth || el.clientWidth)); const h = Math.max(1, Math.round(el.naturalHeight || el.clientHeight)); setShotResolution(`${w}x${h}`); }} />
           : (
             <div className="social-err-shot-placeholder">
               {shotLoading ? <LoaderCircle size={14} className="social-spin" aria-hidden="true" /> : 'Không có ảnh chụp lỗi cho job này.'}
             </div>
           )}
+        {shotUrl !== null && shotResolution !== '' ? <div className="social-err-shot-foot">Resolution: {shotResolution} | {job.clusterName}</div> : null}
       </div>
       <details className="social-selectors-details">
         <summary onClick={() => setSelectorsLoaded(true)}>🛠️ Sửa Selector Nóng (khi nền tảng đổi giao diện)</summary>
@@ -1590,11 +1706,6 @@ function ComposerBlock(props: {
             📤 Xếp Lịch Đăng
           </button>
         </div>
-        <div className="social-inline-row" style={{ gap: 10 }}>
-          <button type="button" className="social-btn social-btn-sm" onClick={() => void downloadTemplate()}>
-            {t('dashboard.social.excelTemplate')}
-          </button>
-        </div>
       </div>
 
       <div className="social-composer-col composer-col">
@@ -1727,6 +1838,15 @@ function ComposerBlock(props: {
       </div>
     </div>
   );
+}
+
+/** Domain thật của nền tảng lỗi (dùn thanh trình duyệt giả trong khung soi lỗi). */
+function firstFailedDomain(failedPlatforms: SocialPlatformName[]): string {
+  const platform = failedPlatforms[0];
+  if (platform === undefined) return '🌐 app.nền-tảng.com/upload';
+  if (platform === 'youtube') return '🌐 studio.youtube.com/upload';
+  if (platform === 'tiktok') return '🌐 tiktok.com/tiktokstudio/upload';
+  return '🌐 facebook.com/web/upload';
 }
 
 function fileNameOf(path: string): string {

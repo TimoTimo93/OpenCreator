@@ -146,6 +146,13 @@
 .social-chip-failed { background: rgb(244 63 94 / 18%); color: #fda4af; }
 .social-chip-skipped { background: #3f3f54; color: #94a3b8; }
 
+/* Hàng đợi đúng demo: select nhóm + ô tiêu đề + nút chọn file */
+.social-queue-cluster {
+  background: #262639; border: 1px solid #4b5266; border-radius: 6px;
+  color: #fff; font-size: 12.5px; padding: 7px 10px; flex-shrink: 0; max-width: 240px;
+}
+.social-queue-title { flex: 1; min-width: 120px; }
+
 .social-dot {
   display: inline-flex; align-items: center; justify-content: center;
   width: 16px; height: 16px; border-radius: 50%;
@@ -468,6 +475,27 @@
 }
 .social-err-shot img { width: 100%; object-fit: contain; }
 .social-err-shot-placeholder { color: #64748b; font-size: 11px; text-align: center; padding: 12px; }
+/* Khung ảnh chụp như demo: thanh trình duyệt giả trên + thanh meta dưới */
+.social-err-shot-frame {
+  flex: 1; min-height: 120px;
+  border: 1px dashed #4b5266; border-radius: 6px; background: #181824;
+  display: flex; flex-direction: column; overflow: hidden; position: relative;
+}
+.social-err-shot-frame img { display: block; margin: 0 auto; max-height: 100%; width: auto; max-width: 100%; object-fit: contain; }
+.social-err-shot-frame .social-err-shot-placeholder { flex: 1; display: flex; align-items: center; justify-content: center; }
+.social-err-shot-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 8px; border-bottom: 1px solid #334155; gap: 6px; flex-shrink: 0;
+}
+.social-err-shot-domain { font-size: 10.5px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.social-err-shot-badge {
+  background: #e11d48; color: #fff; font-size: 9.5px; font-weight: 700;
+  border-radius: 4px; padding: 1px 6px; white-space: nowrap; flex-shrink: 0;
+}
+.social-err-shot-foot {
+  padding: 4px 8px; border-top: 1px solid #334155; flex-shrink: 0;
+  font-size: 10px; color: #64748b; font-family: Consolas, monospace;
+}
 .social-selectors details,
 .social-selectors-details {
   background: #14141f; border: 1px solid rgb(245 158 11 / 30%); border-radius: 6px; flex-shrink: 0;

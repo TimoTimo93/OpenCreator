@@ -25,7 +25,7 @@ function deltaLabel(point: { value: number; previous: number | null } | undefine
   if (point === undefined || point.previous === null) return '';
   const delta = point.value - point.previous;
   if (delta === 0) return '';
-  return `${delta > 0 ? '+' : ''}${delta.toLocaleString()}`;
+  return `${delta > 0 ? '+' : ''}${delta.toLocaleString()} ${delta > 0 ? '⬆️' : '⬇️'}`;
 }
 
 function formatScheduleShort(iso: string): string {
@@ -357,7 +357,7 @@ function deltaPoints(point: { value: number; previous: number | null } | undefin
   if (point === undefined || point.previous === null) return '';
   const delta = point.value - point.previous;
   if (delta === 0) return '';
-  return `${delta > 0 ? '+' : ''}${delta.toLocaleString()}`;
+  return `${delta > 0 ? '+' : ''}${delta.toLocaleString()} ${delta > 0 ? '⬆️' : '⬇️'}`;
 }
 
 export function SocialCommentsPanel(props: {
@@ -379,20 +379,30 @@ export function SocialCommentsPanel(props: {
   return (
     <div className="social-comments" aria-label={t('dashboard.social.insightsTitle')}>
       <div style={{ width: '66%', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div className="social-autoreply-clusters">
-          {props.clusters.map(cluster => (
-            <button
-              key={cluster.id}
-              type="button"
-              className={`social-btn social-btn-sm ${cluster.autoReplyEnabled ? 'social-btn-green' : ''}`}
-              onClick={() => void props.service.updateCluster(cluster.id, { autoReplyEnabled: !cluster.autoReplyEnabled }).then(
-                () => { void data.reload(false); },
-                cause => { data.setErrorText(messageOf(cause)); }
-              )}
-            >
-              {cluster.autoReplyEnabled ? '✅' : '⏸'} {t('dashboard.social.autoReplyToggle')}: {cluster.seriesName !== '' ? cluster.seriesName : cluster.name}
-            </button>
-          ))}
+        <div className="social-inline-row" style={{ flexShrink: 0 }}>
+          <button
+            type="button"
+            className="social-btn social-btn-primary"
+            disabled={data.scanning}
+            onClick={() => void data.scan()}
+          >
+            💬 Quét Bình Luận Ngay
+          </button>
+          <div className="social-autoreply-clusters">
+            {props.clusters.map(cluster => (
+              <button
+                key={cluster.id}
+                type="button"
+                className={`social-btn social-btn-sm ${cluster.autoReplyEnabled ? 'social-btn-green' : ''}`}
+                onClick={() => void props.service.updateCluster(cluster.id, { autoReplyEnabled: !cluster.autoReplyEnabled }).then(
+                  () => { void data.reload(false); },
+                  cause => { data.setErrorText(messageOf(cause)); }
+                )}
+              >
+                {cluster.autoReplyEnabled ? '✅' : '⏸'} {t('dashboard.social.autoReplyToggle')}: {cluster.seriesName !== '' ? cluster.seriesName : cluster.name}
+              </button>
+            ))}
+          </div>
         </div>
         {data.errorText !== '' ? (
           <div className="social-error" role="alert">
@@ -426,7 +436,7 @@ export function SocialCommentsPanel(props: {
                   <th>{t('dashboard.social.commentsColAuthor')}</th>
                   <th>{t('dashboard.social.commentsColText')}</th>
                   <th>{t('dashboard.social.commentsColStatus')}</th>
-                  <th>{t('dashboard.social.autoReplyToggle')}</th>
+                  <th>AI Tự Động Trả Lời</th>
                 </tr>
               </thead>
               <tbody>
@@ -461,7 +471,7 @@ export function SocialCommentsPanel(props: {
 
       <div className="social-playground">
         <p className="social-playground-title">🧪 Thử Giọng Điệu AI (AI Playground)</p>
-        <span className="social-playground-badge">🟢 Dùng AI tích hợp sẵn — không cần key</span>
+        <span className="social-playground-badge">🟢 Dùng AI tích hợp sẵn — localhost:20128/v1, không cần key</span>
         <div>
           <label className="social-label">Tính cách / hướng dẫn AI (System Prompt):</label>
           <input
@@ -488,7 +498,7 @@ export function SocialCommentsPanel(props: {
             setAiOutput('🤖 Đang sinh phản hồi...');
             props.service.aiReplyTest(persona.trim() === '' ? personaOfClusters : persona, testComment)
               .then(result => {
-                setAiOutput(`${result.reply}${result.fallbackUsed ? '\n\n(Đang dùng câu mẫu mặc định — AI chưa cấu hình.)' : ''}`);
+                setAiOutput(`Khách: "${testComment.trim()}"\n\n🤖 AI trả lời: "${result.reply}"${result.fallbackUsed ? '\n\n(Đang dùng câu mẫu mặc định — AI chưa cấu hình.)' : ''}`);
               })
               .catch(cause => setAiOutput(`❌ ${messageOf(cause)}`))
               .finally(() => setAiTesting(false));
