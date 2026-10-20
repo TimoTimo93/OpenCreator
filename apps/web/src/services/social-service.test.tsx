@@ -293,6 +293,8 @@ describe('SocialWorkspace — composer đa kênh', () => {
       </LanguageProvider>
     );
     fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
+    // Ô nhập đường dẫn nằm trong thư viện (khớp demo) → mở thư viện trước
+    fireEvent.click(await screen.findByRole('button', { name: /Tìm trong thư viện/ }));
     await waitFor(() => {
       const input = screen.getByLabelText('Vị trí video (MP4)') as HTMLInputElement;
       expect(input.value).toBe('D:/downloads/tap-5.mp4');
@@ -311,7 +313,9 @@ describe('SocialWorkspace — composer đa kênh', () => {
       </LanguageProvider>
     );
     fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
-    fireEvent.change(await screen.findByLabelText('Vị trí video (MP4)'), { target: { value: 'D:/downloads/tap-5.mp4' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Tìm trong thư viện/ }));
+    const pathInput = await screen.findByLabelText('Vị trí video (MP4)');
+    fireEvent.change(pathInput, { target: { value: 'D:/downloads/tap-5.mp4' } });
     fireEvent.click(await screen.findByRole('button', { name: /Chưa chọn nhóm nào/ }));
     const checkbox = await screen.findByRole('checkbox', { name: 'Long Hổ Riệu' });
     fireEvent.click(checkbox);
@@ -537,7 +541,9 @@ describe('SocialWorkspace — composer nguồn "Video đã dịch"', () => {
     expect(await screen.findByRole('button', { name: /Tìm trong thư viện/ })).toBeInTheDocument();
     expect(await screen.findByText('✨ Đã dịch — chờ đăng')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /tap-1\.mp4/ }));
-    const pathInput = screen.getByLabelText('Vị trí video (MP4)') as HTMLInputElement;
+    // Ô đường dẫn nằm trong thư viện (mở thư viện để kiểm tra)
+    fireEvent.click(screen.getByRole('button', { name: /Tìm trong thư viện/ }));
+    const pathInput = await screen.findByLabelText('Vị trí video (MP4)') as HTMLInputElement;
     expect(pathInput.value).toBe('D:/dich/tap-1.mp4');
   });
 

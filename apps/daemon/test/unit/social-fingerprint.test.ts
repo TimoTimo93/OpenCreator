@@ -117,12 +117,12 @@ describe('loadClusterFingerprint (generator + cache cố định)', () => {
 });
 
 describe('buildLaunchFingerprintPatch (áp vào launch khi mở persistent context)', () => {
-  it('patch chứa đúng userAgent/viewport/locale/timezone của vân tay', () => {
+  it('patch chứa đúng userAgent/locale/timezone; viewport = null (theo cửa sổ thật)', () => {
     const fp = fakeFingerprint('patched');
     const patch = buildLaunchFingerprintPatch(fp);
     expect(patch.userAgent).toBe(fp.userAgent);
-    expect(patch.viewport).toEqual({ width: 1920, height: 1080 });
-    expect(patch.deviceScaleFactor).toBe(fp.deviceScaleFactor);
+    // viewport null ⇒ Chrome dùng đúng kích thước cửa sổ (tránh lệch thẻ đăng nhập).
+    expect(patch.viewport).toBeNull();
     expect(patch.locale).toBe('vi-VN');
     expect(patch.timezoneId).toBe('Asia/Ho_Chi_Minh');
   });

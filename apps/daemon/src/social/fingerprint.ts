@@ -152,8 +152,13 @@ async function writeFingerprintFile(path: string, fingerprint: ClusterFingerprin
 
 export type LaunchOptionsPatch = {
   userAgent: string;
-  viewport: { width: number; height: number };
-  deviceScaleFactor: number;
+  /**
+   * KHÔNG ghim viewport: Chrome tự mở cửa sổ theo màn hình thật, nếu ghim
+   * viewport (vân tay 1842px) mà màn hình chỉ 1536 DIP thì Chrome clamp cửa sổ
+   * → CSS viewport nhỏ hơn cửa sổ → thẻ đăng nhập Google bị lệch. Để
+   * viewport = null ⇒ trang dùng đúng kích thước cửa sổ, luôn căn giữa.
+   */
+  viewport: null;
   locale: string;
   timezoneId: string;
 };
@@ -162,8 +167,7 @@ export type LaunchOptionsPatch = {
 export function buildLaunchFingerprintPatch(fingerprint: ClusterFingerprint): LaunchOptionsPatch {
   return {
     userAgent: fingerprint.userAgent,
-    viewport: { width: fingerprint.viewport.width, height: fingerprint.viewport.height },
-    deviceScaleFactor: fingerprint.deviceScaleFactor,
+    viewport: null,
     locale: fingerprint.locale,
     timezoneId: fingerprint.timezoneId
   };

@@ -102,7 +102,8 @@
   background: #1e1e2e; border: 1px solid #313244; border-radius: 8px;
   padding: 12px;
   display: flex; flex-direction: column; gap: 10px;
-  overflow: hidden;
+  /* Kéo lên / kéo xuống được khi cửa sổ thấp (lịch + composer dài hơn khung). */
+  overflow-y: auto; overflow-x: hidden;
 }
 .social-panel-head { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .social-panel-head h2 { margin: 0; font-size: 13.5px; color: #4d94ff; display: inline-flex; gap: 6px; align-items: center; }
@@ -248,7 +249,11 @@
   flex: 1 1 auto; min-height: 80px; max-height: 190px; height: auto;
   overflow-y: auto; flex-shrink: 1;
 }
-.social-cal-grid-month { height: auto; min-height: 240px; flex: 1; }
+.social-cal-grid-month {
+  /* Lịch tháng có nhiều hàng → chiếm hết chỗ và CUỘN được (không bị cắt). */
+  max-height: none; height: auto; min-height: 0; flex: 1 1 auto;
+  overflow-y: auto; overflow-x: hidden;
+}
 .social-cal-cell {
   background: #1b1b29; border: 1px solid #26263a; border-radius: 8px;
   min-height: 84px; padding: 6px; display: flex; flex-direction: column; gap: 5px;

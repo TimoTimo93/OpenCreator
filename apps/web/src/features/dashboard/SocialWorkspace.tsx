@@ -1558,7 +1558,7 @@ function ComposerBlock(props: {
     <div className="social-composer-cols">
       <div className="social-composer-col composer-col">
         <div className="social-composer-sec-title">
-          <span>🧾 Composer — Soạn Bài Đăng Đa Kênh</span>
+          <span>🧾 Composer</span>
           <button
             type="button"
             className="social-btn social-btn-primary social-btn-sm"
@@ -1585,6 +1585,19 @@ function ComposerBlock(props: {
           </div>
         ) : (
           <>
+            <div className="social-inline-row">
+              <label className="social-label" htmlFor="social-composer-path" style={{ margin: 0, flexShrink: 0 }}>
+                Vị trí video (MP4)
+              </label>
+              <input
+                id="social-composer-path"
+                type="text"
+                className="social-input-mono"
+                placeholder="D:/downloads/tap-5.mp4"
+                value={path}
+                onChange={event => setPath(event.target.value)}
+              />
+            </div>
             <input
               type="search"
               className="social-media-search"
@@ -1604,19 +1617,6 @@ function ComposerBlock(props: {
             </div>
           </>
         )}
-        <div className="social-inline-row">
-          <label className="social-label" htmlFor="social-composer-path" style={{ margin: 0, flexShrink: 0 }}>
-            Vị trí video (MP4)
-          </label>
-          <input
-            id="social-composer-path"
-            type="text"
-            className="social-input-mono"
-            placeholder="D:/downloads/tap-5.mp4"
-            value={path}
-            onChange={event => setPath(event.target.value)}
-          />
-        </div>
         <div>
           <label className="social-label" htmlFor="social-composer-title">Tiêu đề (AI sẽ tự viết chuẩn SEO, ≤100 ký tự):</label>
           <input

@@ -40,16 +40,7 @@ export async function launchClusterBrowser(input: LaunchClusterBrowserInput): Pr
         ...(channel === undefined ? {} : { channel }),
         headless: false,
         ...fingerprintPatch,
-        // screen khớp viewport để trang web tự căn giữa theo vùng hiển thị thật.
-        screen: { width: fingerprint.viewport.width, height: fingerprint.viewport.height },
         proxy,
-        args: [
-          // Cửa sổ = viewport của vân tay cụm × deviceScaleFactor. Bỏ qua hệ số
-          // này thì CSS viewport nhỏ hơn cửa sổ thật → thẻ đăng nhập Google bị
-          // căn lệch (đẩy sang phải / xuống dưới, cắt mất nửa màn hình).
-          '--window-position=0,0',
-          `--window-size=${Math.round(fingerprint.viewport.width * fingerprint.deviceScaleFactor)},${Math.round(fingerprint.viewport.height * fingerprint.deviceScaleFactor)}`
-        ],
         timeout: 60_000
       });
       return createHandle(context);
