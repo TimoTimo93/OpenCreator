@@ -31,6 +31,9 @@ export async function launchClusterBrowser(input: LaunchClusterBrowserInput): Pr
   const fingerprint = await loadClusterFingerprint(input.profileDir, input.proxyServer);
   const fingerprintPatch = buildLaunchFingerprintPatch(fingerprint);
   let lastError: Error | undefined;
+  // Dọn trình duyệt orphan còn giữ profile cụm (daemon khởi động lại nhưng cửa
+  // sổ cũ chưa đóng) — chỉ process có --user-data-dir trùng profile này.
+  await closeOrphanBrowsersForProfile(input.profileDir);
   for (const channel of CHANNEL_CANDIDATES) {
     try {
       const context = await chromium.launchPersistentContext(input.profileDir, {
@@ -38,19 +41,21 @@ export async function launchClusterBrowser(input: LaunchClusterBrowserInput): Pr
         headless: false,
         ...fingerprintPatch,
         proxy,
+        args: [
+          // Cửa sổ = kích thước viewport của vân tay cụm → trang đăng nhập
+          // luôn căn giữa đúng vung cửa sổ (hết lệch phải/nửa màn hình).
+          '--window-position=0,0',
+          `--window-size=${fingerprint.viewport.width},${fingerprint.viewport.height}`
+        ],
         timeout: 60_000
       });
       return createHandle(context);
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      // "Opening in existing browser session" = một chrome/edge còn ở lại từ lần
-      // trước (daemon khởi động lại nhưng cửa sổ cụm chưa đóng) đang giữ
-      // user-data-dir của cụm. Dọn orphan đúng profile đó rồi thử lại —
-      // KHÔNG đụng trình duyệt thường của người dùng (chỉ process có
-      // --user-data-dir trùng profile này mới bị dọn).
-      if (lastError.message.includes('Opening in existing browser session')) {
-        const cleaned = await closeOrphanBrowsersForProfile(input.profileDir);
-        if (cleaned === 0) break;
+      // Orphan còn sống sót qua lần dọn đầu? Dọn lại + chờ lock giải phóng.
+      if (lastError.message.includes('existing browser session')) {
+        await closeOrphanBrowsersForProfile(input.profileDir);
+        await new Promise(resolve => { setTimeout(resolve, 800); });
       }
     }
   }
@@ -63,11 +68,15 @@ export async function launchClusterBrowser(input: LaunchClusterBrowserInput): Pr
 async function closeOrphanBrowsersForProfile(profileDir: string): Promise<number> {
   const execFileAsync = promisify(execFile);
   try {
-    const query = 'Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq "chrome.exe" -or $_.Name -eq "msedge.exe") -and $_.CommandLine -match [regex]::Escape("'
-      + normalizeToSlash(profileDir) + '") } | ForEach-Object { $_.ProcessId }';
-    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', query], {
-      encoding: 'utf8',
-      timeout: 20_000
+    // Dùng -EncodedCommand (Base64 UTF-16) để tránh mọi vấn đề quote/escape trên Windows.
+    const script = [
+      '$ErrorActionPreference = "SilentlyContinue"',
+      `Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -like '*${escapeLike(profileDir)}*' } | ForEach-Object { $_.ProcessId }`
+    ].join('; ');
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
+      timeout: 20_000,
+      windowsHide: true
     });
     const pids = stdout.split(/\r?\n/).map(line => line.trim()).filter(line => /^\d+$/.test(line));
     if (pids.length === 0) return 0;
@@ -80,9 +89,9 @@ async function closeOrphanBrowsersForProfile(profileDir: string): Promise<number
   }
 }
 
-/** Escape regex cho toàn bộ path profile (match cả '\\' và '/' trong command line). */
-function normalizeToSlash(profileDir: string): string {
-  return profileDir.replace(/[\\/+()[\]{}$^.|*?]/g, ch => `\\${ch}`);
+/** Escape wildcard `-like` cho đường dẫn (dấu vuông là wildcard trong -like). */
+function escapeLike(text: string): string {
+  return text.replace(/\[/g, '[[]').replace(/]/g, '[]]').replace(/\\/g, '`\\');
 }
 
 function createHandle(context: BrowserContext): SocialBrowserHandle {
