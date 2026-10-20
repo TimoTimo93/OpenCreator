@@ -148,6 +148,12 @@ export default function SocialWorkspace(props: {
   const [verifying, setVerifying] = useState(false);
   const [creatingChannel, setCreatingChannel] = useState('');
   const [creatingAccount, setCreatingAccount] = useState('');
+  const [createDialog, setCreateDialog] = useState<{
+    cluster: SocialClusterSummary;
+    platform: SocialPlatformName;
+    mode: 'channel' | 'account';
+    name: string;
+  } | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(true);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [selectedJobId, setSelectedJobId] = useState('');
@@ -280,6 +286,46 @@ export default function SocialWorkspace(props: {
   const openSocialLogin = useCallback((cluster: SocialClusterSummary, platform: SocialPlatformName): Promise<void> =>
     service.openClusterLogin(cluster.id, platform).then(() => undefined), [service]);
 
+  async function submitCreate(
+    target: { cluster: SocialClusterSummary; platform: SocialPlatformName; mode: 'channel' | 'account' },
+    name: string
+  ): Promise<void> {
+    if (target.mode === 'channel') {
+      setCreatingChannel(target.cluster.id);
+      try {
+        const result = await service.createYoutubeChannel(target.cluster.id, name);
+        if (result.ok) {
+          pushLog(`✅ [${target.cluster.name}] Đã tạo kênh YouTube "${result.channelName ?? name}" — sẵn sàng đăng video.`, 'action');
+          setToast(`Đã tạo kênh YouTube: ${result.channelName ?? name}`);
+        } else {
+          setToast(result.error ?? 'Không tạo được kênh YouTube');
+        }
+      } catch (cause) {
+        setToast(`Không tạo được kênh YouTube: ${messageOf(cause)}`);
+      } finally {
+        setCreatingChannel('');
+        await load(false);
+      }
+      return;
+    }
+    const label = target.platform === 'tiktok' ? 'TikTok' : 'Facebook';
+    setCreatingAccount(`${target.cluster.id}:${target.platform}`);
+    try {
+      const result = await service.createSocialAccount(target.cluster.id, target.platform, name);
+      if (result.ok) {
+        pushLog(`✅ [${target.cluster.name}] Đã tạo tài khoản ${label}${result.accountName === undefined ? '' : ` "${result.accountName}"`} — sẵn sàng đăng video.`, 'action');
+        setToast(`Đã tạo tài khoản ${label}${result.accountName === undefined ? '' : `: ${result.accountName}`}`);
+      } else {
+        setToast(result.message ?? `Không tạo được tài khoản ${label}`);
+      }
+    } catch (cause) {
+      setToast(`Không tạo được tài khoản ${label}: ${messageOf(cause)}`);
+    } finally {
+      setCreatingAccount('');
+      await load(false);
+    }
+  }
+
   return (
     <div className={`social-workspace${consoleOpen ? '' : ' social-console-hidden'}`} aria-label={t('dashboard.social.tabTitle')}>
       <header className="social-header">
@@ -360,50 +406,13 @@ export default function SocialWorkspace(props: {
               )}
               onCreateChannel={cluster => {
                 const suggested = cluster.seriesName !== '' ? cluster.seriesName : cluster.name;
-                const name = window.prompt('Nhập tên kênh YouTube muốn tạo (Brand Account):', suggested);
-                if (name === null || name.trim() === '') return;
-                setCreatingChannel(cluster.id);
-                service.createYoutubeChannel(cluster.id, name.trim())
-                  .then(result => {
-                    if (result.ok) {
-                      pushLog(`✅ [${cluster.name}] Đã tạo kênh YouTube "${result.channelName ?? name}" (${result.channelId ?? ''}) — sẵn sàng đăng video.`, 'action');
-                      setToast(`Đã tạo kênh YouTube: ${result.channelName ?? name}`);
-                    } else {
-                      setToast(result.error ?? 'Không tạo được kênh YouTube');
-                    }
-                  })
-                  .catch(cause => setToast(`Không tạo được kênh YouTube: ${messageOf(cause)}`))
-                  .finally(() => {
-                    setCreatingChannel('');
-                    void load(false);
-                  });
+                setCreateDialog({ cluster, platform: 'youtube', mode: 'channel', name: suggested });
               }}
               onCreateAccount={(cluster, platform) => {
                 const suggested = cluster.seriesName !== '' ? cluster.seriesName : cluster.name;
-                const label = platform === 'tiktok' ? 'TikTok' : 'Facebook';
-                const name = window.prompt(
-                  platform === 'tiktok'
-                    ? `Tên tài khoản ${label} muốn tạo (đăng ký bằng tài khoản Google đã đăng nhập):`
-                    : `Tên Page ${label} muốn tạo:`,
-                  suggested
-                );
-                if (name === null || name.trim() === '') return;
-                setCreatingAccount(`${cluster.id}:${platform}`);
-                service.createSocialAccount(cluster.id, platform, name.trim())
-                  .then(result => {
-                    if (result.ok) {
-                      pushLog(`✅ [${cluster.name}] Đã tạo tài khoản ${label}${result.accountName === undefined ? '' : ` "${result.accountName}"`} — sẵn sàng đăng video.`, 'action');
-                      setToast(`Đã tạo tài khoản ${label}${result.accountName === undefined ? '' : `: ${result.accountName}`}`);
-                    } else {
-                      setToast(result.message ?? `Không tạo được tài khoản ${label}`);
-                    }
-                  })
-                  .catch(cause => setToast(`Không tạo được tài khoản ${label}: ${messageOf(cause)}`))
-                  .finally(() => {
-                    setCreatingAccount('');
-                    void load(false);
-                  });
+                setCreateDialog({ cluster, platform, mode: 'account', name: suggested });
               }}
+
               onCheckAllProxy={() => {
                 pushLog('⚡ [Proxy Checker] Đang kiểm tra đồng loạt Proxy của tất cả nhóm...', 'action');
                 void action(t('dashboard.social.checkedProxy'), async () => {
@@ -491,6 +500,20 @@ export default function SocialWorkspace(props: {
         onToggle={() => setConsoleOpen(open => !open)}
         onClear={() => { setLogs([]); }}
       />
+
+      {createDialog !== null ? (
+        <CreateAccountDialog
+          target={createDialog}
+          busy={creatingChannel !== '' || creatingAccount !== ''}
+          onChange={name => setCreateDialog(current => current === null ? null : { ...current, name })}
+          onClose={() => setCreateDialog(null)}
+          onSubmit={async name => {
+            const target = createDialog;
+            setCreateDialog(null);
+            await submitCreate(target, name);
+          }}
+        />
+      ) : null}
 
       {loginModal !== null ? (
         <LoginModal
@@ -682,6 +705,62 @@ function proxyChipText(proxyStatus: string, server: string): string {
     case 'no_proxy': return '— (mạng nhà)';
     default: return '⚪ Chưa kiểm tra';
   }
+}
+
+/**
+ * H?p tho?i t?o k?nh/t?i kho?n (thay cho window.prompt ? Electron kh?ng h? tr?
+ * prompt n?n b?m n?t s? kh?ng c? ph?n h?i g?).
+ */
+function CreateAccountDialog(props: {
+  target: { cluster: SocialClusterSummary; platform: SocialPlatformName; mode: 'channel' | 'account'; name: string };
+  busy: boolean;
+  onChange(name: string): void;
+  onClose(): void;
+  onSubmit(name: string): Promise<void>;
+}) {
+  const { target } = props;
+  const label = target.platform === 'youtube' ? 'YouTube' : target.platform === 'tiktok' ? 'TikTok' : 'Facebook';
+  const title = target.mode === 'channel'
+    ? `⚙️ Tạo Kênh YouTube — ${target.cluster.name}`
+    : `➕ Tạo Tài Khoản ${label} — ${target.cluster.name}`;
+  const hint = target.mode === 'channel'
+    ? 'TikTok/Facebook không dùng được dùng tài khoản Google đã đăng nhập; nên tạo kênh sẵ dùng dữ liệu đã đăng nhập.'
+    : target.platform === 'tiktok'
+      ? 'Đăng ký bằng tài khoản TikTok bằng tài khoản Google đã đăng nhập trong trình duyệt củm.'
+      : 'Tạo Page Facebook. Nếu tài khoản Facebook chưa đăng nhập, hãy đđng nhập trong cứa sổ trình duyệt củm trước trước.';
+  return (
+    <div className="social-modal-mask" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="social-modal">
+        <div className="social-modal-head">
+          <h2>{title}</h2>
+          <button type="button" className="social-modal-close" onClick={props.onClose} aria-label="??ng">✕</button>
+        </div>
+        <p className="social-modal-note">{hint}</p>
+        <div className="social-grid-3">
+          <label htmlFor="social-create-name" className="span-2">Tên {target.mode === 'channel' ? 'kênh' : 'tài khoản'}:</label>
+          <input
+            id="social-create-name"
+            className="span-2"
+            type="text"
+            value={target.name}
+            onChange={event => props.onChange(event.target.value)}
+            placeholder={target.mode === 'channel' ? 'Tên kênh YouTube' : 'Tên tài khoản'}
+          />
+        </div>
+        <div className="social-modal-actions">
+          <button type="button" className="social-btn" onClick={props.onClose} disabled={props.busy}>Hủy</button>
+          <button
+            type="button"
+            className="social-btn social-btn-green"
+            disabled={props.busy || target.name.trim() === ''}
+            onClick={() => { void props.onSubmit(target.name.trim()); }}
+          >
+            {props.busy ? 'Đang xừ là...' : target.mode === 'channel' ? '⚕ Tạo kênh' : '⚕ Tạo tài khoản'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ChannelsPanel(props: {
