@@ -96,6 +96,15 @@ function escapeLike(text: string): string {
 
 function createHandle(context: BrowserContext): SocialBrowserHandle {
   return {
+    /** Context chết khi người dùng đóng cửa sổ tay → callers relaunch. */
+    async alive(): Promise<boolean> {
+      try {
+        context.pages();
+        return true;
+      } catch {
+        return false;
+      }
+    },
     async newPage(url?: string): Promise<unknown> {
       const page = await context.newPage();
       if (url !== undefined && url !== '') {

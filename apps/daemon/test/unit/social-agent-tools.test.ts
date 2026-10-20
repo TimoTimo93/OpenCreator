@@ -139,7 +139,7 @@ describe('social agent tools — internal routes', () => {
 
     const toolResult = await fixture.definitions.social_open_login.execute({ clusterId, platform: 'youtube' });
     expect((toolResult as { ok: boolean }).ok).toBe(true);
-    expect(fixture.openedUrls).toEqual(['https://accounts.youtube.com/']);
+    expect(fixture.openedUrls).toEqual(['https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fwww.youtube.com%2F']);
 
     // Scope chỉ đọc bị chặn; nền tảng bất hợp lệ → 400 (trước cả authorize).
     const readOnlyToken = fixture.capabilities.issue({
@@ -147,7 +147,7 @@ describe('social agent tools — internal routes', () => {
     }).token;
     const blocked = await request(fixture.server!, readOnlyToken, 'POST', `/internal/agent-tools/social/clusters/${clusterId}/login/youtube`);
     expect(blocked.statusCode).toBe(403);
-    expect(fixture.openedUrls).toEqual(['https://accounts.youtube.com/']);
+    expect(fixture.openedUrls).toEqual(['https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fwww.youtube.com%2F']);
     const badPlatform = await request(fixture.server!, fixture.token, 'POST', `/internal/agent-tools/social/clusters/${clusterId}/login/threads`);
     expect(badPlatform.statusCode).toBe(400);
   });

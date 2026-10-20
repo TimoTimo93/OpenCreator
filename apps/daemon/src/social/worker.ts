@@ -62,6 +62,8 @@ export type PlatformExecutors = Partial<Record<SocialPlatform, SocialExecutor>>;
 export type SocialBrowserHandle = {
   /** Mở tab mới (và điều hướng nếu có url) cho automation — trả Page của Patchright. */
   newPage(url?: string): Promise<unknown>;
+  /** Kiểm tra nhanh context còn sống (tùy chọn; thiếu → xem như còn sống). */
+  alive?(): Promise<boolean>;
   close(): Promise<void>;
 };
 
@@ -176,8 +178,20 @@ export function createSocialWorker(input: CreateSocialWorkerInput = {}): SocialW
       // không đánh busyClusters vì không phải lượt upload — Patchright context
       // cho phép nhiều page song song. Handle để lại trong map, pump tự dọn
       // theo quy tắc sẵn có (đóng sau job nếu không manual-open).
-      await ensureBrowser(snapshot, clusterId, row.proxy_server);
-      const handle = browsers.get(clusterId);
+      const useProxyServer = row.proxy_server;
+      await ensureBrowser(snapshot, clusterId, useProxyServer);
+      let handle = browsers.get(clusterId);
+      // alive() có thể thiếu ở handle kiểm thử cũ — không có xem như còn sống.
+      const aliveRaw = handle?.alive?.();
+      const handleAlive = aliveRaw === undefined ? true : await aliveRaw.catch(() => true);
+      if (handle !== undefined && handleAlive === false) {
+        // Người dùng đã đóng cửa sổ trình duyệt của cụm tay → handle chết,
+        // gỡ khỏi map rồi mở context persistent mới (profile giữ nguyên).
+        browsers.delete(clusterId);
+        handle = undefined;
+        await ensureBrowser(snapshot, clusterId, useProxyServer);
+        handle = browsers.get(clusterId);
+      }
       if (handle === undefined) {
         throw new Error('Trình duyệt cụm không khả dụng (launcher chưa cấu hình)');
       }
@@ -222,6 +236,15 @@ export function createSocialWorker(input: CreateSocialWorkerInput = {}): SocialW
         try {
           if (jobNeedsBrowser(cluster, job)) {
             await ensureBrowser(depsNow, cluster.id, cluster.proxyServer);
+            const existingHandle = browsers.get(cluster.id);
+            // alive() có thể thiếu ở handle kiểm thử cũ — không có xem như còn sống.
+            const aliveRaw = existingHandle?.alive?.();
+            const existingAlive = aliveRaw === undefined ? true : await aliveRaw.catch(() => true);
+            if (existingHandle !== undefined && existingAlive === false) {
+              // Cửa sổ cụm bị đóng tay giữa chừng → mở context persistent mới.
+              browsers.delete(cluster.id);
+              await ensureBrowser(depsNow, cluster.id, cluster.proxyServer);
+            }
           }
           for (const [platform, prefix] of PLATFORM_PREFIXES) {
             if (closed) break;
