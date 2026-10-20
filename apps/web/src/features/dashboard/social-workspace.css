@@ -230,6 +230,9 @@
    TAB 2 — LỊCH ĐĂNG
    -------------------------------------------------------------------------- */
 .social-calendar { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow: hidden; }
+/* Ẩn nhật ký → lịch tuần mở rộng chiếm chỗ trống (như demo) */
+.social-console-hidden .social-cal-grid { max-height: 320px; }
+.social-console-hidden .social-calendar { flex: 1 1 auto; }
 .social-cal-toolbar { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .social-cal-nav { display: flex; gap: 4px; }
 .social-cal-title { margin: 0; font-size: 12.5px; color: #94a3b8; font-weight: 600; }

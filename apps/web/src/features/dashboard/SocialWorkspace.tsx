@@ -278,7 +278,7 @@ export default function SocialWorkspace(props: {
     service.openClusterLogin(cluster.id, platform).then(() => undefined), [service]);
 
   return (
-    <div className="social-workspace" aria-label={t('dashboard.social.tabTitle')}>
+    <div className={`social-workspace${consoleOpen ? '' : ' social-console-hidden'}`} aria-label={t('dashboard.social.tabTitle')}>
       <header className="social-header">
         <div className="social-header-back">
           <button type="button" className="social-btn" onClick={props.onBack}>
@@ -781,7 +781,6 @@ function CalendarPanel(props: {
   return (
     <div className="social-calendar" aria-label={t('dashboard.social.tabCalendar')}>
       <div className="social-cal-toolbar">
-        <span className="social-cal-heading">📅 Lịch Đăng Tuần — Kéo chip sang ngày khác để đổi ngày đăng</span>
         <div className="social-cal-tools">
           {PLATFORMS.map(platform => {
             const on = platformFilter[platform];
@@ -867,8 +866,6 @@ function CalendarPanel(props: {
               );
             })}
           </div>
-          {props.jobs.length === 0 ? <p className="social-empty">{t('dashboard.social.calEmpty')}</p> : null}
-          <p className="social-cal-hint">{t('dashboard.social.calHint')}</p>
         </>
       ) : (
         <ul className="social-cal-list">
@@ -1572,11 +1569,8 @@ function ComposerBlock(props: {
             {aiBusy ? <LoaderCircle size={11} className="social-spin" aria-hidden="true" /> : '✨'} AI Tự Làm
           </button>
         </div>
-        {mergedMedia.length === 0 ? (
-          <p className="social-empty">
-            {hasTranslatedSource ? t('dashboard.social.composerNoTranslated') : t('dashboard.social.composerNoVideos')}
-          </p>
-        ) : null}
+        {downloadsError !== '' ? <p className="social-warn-text">{downloadsError}</p> : null}
+        {translatedError !== '' ? <p className="social-warn-text">{translatedError}</p> : null}
         {!libraryOpen ? (
           <div className="social-media-grid">
             {mergedMedia.slice(0, 2).map(entry => mediaTile(entry))}
@@ -1610,8 +1604,6 @@ function ComposerBlock(props: {
             </div>
           </>
         )}
-        {downloadsError !== '' ? <p className="social-warn-text">{downloadsError}</p> : null}
-        {translatedError !== '' ? <p className="social-warn-text">{translatedError}</p> : null}
         <div className="social-inline-row">
           <label className="social-label" htmlFor="social-composer-path" style={{ margin: 0, flexShrink: 0 }}>
             Vị trí video (MP4)
