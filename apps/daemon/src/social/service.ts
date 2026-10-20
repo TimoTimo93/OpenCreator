@@ -106,6 +106,8 @@ export type SocialService = {
   closeClusterBrowser(clusterId: string): Promise<SocialOverview>;
   /** Mở tab trang đăng nhập của nền tảng trong trình duyệt persistent cụm (người dùng tự đăng nhập). */
   openClusterLoginPage(clusterId: string, platform: SocialPlatform): Promise<{ ok: true }>;
+  /** Xác minh phiên đăng nhập (đọc cookie profile cụm) + cập nhật loginStatus. */
+  verifyClusterLogin(clusterId: string, platform: SocialPlatform): Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired' }>;
   /** Nạp video vào hàng đợi; trả summary + số nạp + danh sách path bị bỏ qua. */
   enqueue(requests: readonly SocialEnqueueRequest[]): { summary: SocialOverview; accepted: number; duplicates: string[] };
   pause(): SocialOverview;
@@ -160,6 +162,56 @@ export class SocialError extends Error {
     super(message);
     this.code = code;
     this.name = 'SocialError';
+  }
+}
+
+/** Nền tảng hợp lệ (youtube | tiktok | facebook). */
+function isSocialPlatform(value: string): value is SocialPlatform {
+  return value === 'youtube' || value === 'tiktok' || value === 'facebook';
+}
+
+/**
+ * Cookie đặc trưng của phiên đăng nhập từng nền tảng:
+ * - YouTube/Google: SID / SSID / APISID / __Secure-3PSID
+ * - TikTok: sessionid / sessionid_ss
+ * - Facebook: c_user / xs / datr
+ */
+const LOGIN_COOKIE_NAMES: Record<SocialPlatform, string[]> = {
+  youtube: ['SID', 'SSID', 'APISID', '__Secure-3PSID', '__Secure-1PSID'],
+  tiktok: ['sessionid', 'sessionid_ss', 'sid_tt'],
+  facebook: ['c_user', 'xs', 'datr', 'sb']
+};
+
+/** Có cookie đăng nhập hợp lệ của nền tảng trong profile cụm không? */
+export function hasLoginCookie(
+  platform: SocialPlatform,
+  cookies: ReadonlyArray<{ name: string; value: string; domain: string }>
+): boolean {
+  const names = LOGIN_COOKIE_NAMES[platform];
+  return cookies.some(cookie =>
+    names.includes(cookie.name) && cookie.value.trim() !== ''
+  );
+}
+
+/**
+ * Tên tài khoản đã liên kết (nếu lấy được):
+ * - Google/YouTube: cookie LOGIN_INFO (base64) chứa email + tên hiển thị.
+ */
+export function readAccountName(
+  platform: SocialPlatform,
+  cookies: ReadonlyArray<{ name: string; value: string; domain: string }>
+): string | undefined {
+  if (platform !== 'youtube') return undefined;
+  const loginInfo = cookies.find(cookie => cookie.name === 'LOGIN_INFO');
+  if (loginInfo === undefined || loginInfo.value.trim() === '') return undefined;
+  try {
+    const decoded = Buffer.from(loginInfo.value, 'base64').toString('utf8');
+    const parts = decoded.split('\n').map(part => part.replace(/^\u0001/, '').trim()).filter(part => part !== '');
+    // Dạng: ["1", "<email>", "1", "<displayName>"] → lấy displayName.
+    const name = parts[3];
+    return name !== undefined && name !== '' ? name : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -422,6 +474,42 @@ export function createSocialService(input: SocialServiceInput): SocialService {
         await handle.newPage(loginUrl);
       });
       return { ok: true };
+    },
+
+    /**
+     * Xác minh phiên đăng nhập của cụm: đọc cookie thật trong profile persistent
+     * (Google SID/SSID, TikTok sessionid, Facebook c_user/xs). Có cookie → ghi
+     * loginStatus='ok' vào DB ⇒ UI hiện "✔ Đã đăng nhập" + tên kênh nếu có.
+     */
+    async verifyClusterLogin(clusterId: string, platform: SocialPlatform): Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; accountName?: string }> {
+      const row = getClusterRow(db, clusterId);
+      if (row === undefined) throw new SocialError('social_cluster_not_found', 'Không tìm thấy cụm kênh');
+      if (!isSocialPlatform(platform)) {
+        throw new SocialError('social_platform_invalid', `Nền tảng không hỗ trợ đăng nhập: ${platform}`);
+      }
+      const probeUrls = SOCIAL_PLATFORM_LOGIN_URLS[platform] === undefined
+        ? []
+        : [SOCIAL_PLATFORM_LOGIN_URLS[platform]];
+      let cookies: Array<{ name: string; value: string; domain: string }> = [];
+      try {
+        cookies = await worker.withClusterBrowser(clusterId, async handle => {
+          if (handle.cookies === undefined) return [];
+          return handle.cookies(probeUrls);
+        });
+      } catch (error) {
+        throw new SocialError(
+          'social_browser_unavailable',
+          `Không mở được trình duyệt của cụm để kiểm tra phiên đăng nhập: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+      const signedIn = hasLoginCookie(platform, cookies);
+      const status = signedIn ? 'ok' : 'unknown';
+      const accountName = signedIn ? readAccountName(platform, cookies) : undefined;
+      const column = platform === 'youtube' ? 'yt_login' : platform === 'tiktok' ? 'tk_login' : 'fb_login';
+      updateClusterRow(db, clusterId, { [column]: status, updated_at: new Date().toISOString() });
+      return accountName === undefined
+        ? { ok: signedIn, status }
+        : { ok: signedIn, status, accountName };
     },
 
     enqueue(requests: readonly SocialEnqueueRequest[]): { summary: SocialOverview; accepted: number; duplicates: string[] } {

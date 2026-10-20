@@ -386,6 +386,13 @@ export function createSocialService(client: RuntimeClient) {
       }
       return client.post(`/social/clusters/${encodeURIComponent(id)}/login/${platform}`) as Promise<{ ok: boolean }>;
     },
+    /** Xác minh phiên đăng nhập (đọc cookie profile cụm) + cập nhật loginStatus. */
+    verifyClusterLogin(id: string, platform: SocialPlatformName): Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; accountName?: string }> {
+      if (!SOCIAL_PLATFORM_NAMES.includes(platform)) {
+        return Promise.reject(new Error(`Nền tảng không hỗ trợ đăng nhập: ${platform}`));
+      }
+      return client.post(`/social/clusters/${encodeURIComponent(id)}/login/${platform}/verify`) as Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; accountName?: string }>;
+    },
     closeClusterBrowser(id: string): Promise<SocialOverview> {
       return client.post(`/social/clusters/${encodeURIComponent(id)}/close-browser`);
     },

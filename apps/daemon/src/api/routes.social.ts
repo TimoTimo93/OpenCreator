@@ -16,6 +16,7 @@ import { sanitizePlatformSettings, type SocialEnqueueRequest, type SocialPlatfor
  * - POST /social/clusters/:id/open-browser      → mở trình duyệt Persistent (đăng nhập tay)
  * - POST /social/clusters/:id/close-browser
  * - POST /social/clusters/:id/login/:platform   → mở trang đăng nhập nền tảng (youtube|tiktok|facebook)
+ * - POST /social/clusters/:id/login/:platform/verify → xác minh phiên đăng nhập (đọc cookie profile cụm)
  * - POST /social/jobs                           → nạp video (1 video × N cụm qua clusterIds)
  * - PATCH /social/jobs/:id                      → đổi giờ hẹn (chưa đăng xong)
  * - DELETE /social/jobs/:id
@@ -96,6 +97,19 @@ export async function registerSocialRoutes(
     try {
       // Chỉ mở trang đăng nhập trong trình duyệt cụm — người dùng tự đăng nhập.
       return await social.openClusterLoginPage(request.params.id, platform);
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.post<{ Params: { id: string; platform: string } }>('/social/clusters/:id/login/:platform/verify', async (request, reply) => {
+    const platform = parseSocialPlatform(request.params.platform);
+    if (platform === undefined) {
+      return reply.code(400).send(apiError('VALIDATION_FAILED', 'param.platform phải là youtube|tiktok|facebook'));
+    }
+    try {
+      // Đọc cookie thật trong profile cụm → xác nhận đã đăng nhập hay chưa.
+      return await social.verifyClusterLogin(request.params.id, platform);
     } catch (error) {
       return socialFailure(error, reply);
     }

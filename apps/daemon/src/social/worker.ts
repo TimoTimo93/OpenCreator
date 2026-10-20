@@ -64,6 +64,8 @@ export type SocialBrowserHandle = {
   newPage(url?: string): Promise<unknown>;
   /** Kiểm tra nhanh context còn sống (tùy chọn; thiếu → xem như còn sống). */
   alive?(): Promise<boolean>;
+  /** Đọc cookie của context (dùng xác minh phiên đăng nhập cụm). */
+  cookies?(urls: string[]): Promise<Array<{ name: string; value: string; domain: string }>>;
   close(): Promise<void>;
 };
 

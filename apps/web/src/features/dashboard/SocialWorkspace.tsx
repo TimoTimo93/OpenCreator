@@ -145,6 +145,7 @@ export default function SocialWorkspace(props: {
   const [handoffPath, setHandoffPath] = useState('');
   const [insightsKey, setInsightsKey] = useState(0);
   const [loginModal, setLoginModal] = useState<{ cluster: SocialClusterSummary; platform: SocialPlatformName } | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const [consoleOpen, setConsoleOpen] = useState(true);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [selectedJobId, setSelectedJobId] = useState('');
@@ -450,11 +451,33 @@ export default function SocialWorkspace(props: {
           t={t}
           onOpen={() => openSocialLogin(loginModal.cluster, loginModal.platform)}
           onDone={() => {
-            pushLog(`🔑 [${loginModal.cluster.name}] Đã lưu phiên đăng nhập mới cho nhóm.`, 'action');
-            setLoginModal(null);
-            void load(false);
+            // Xác minh phiên thật: đọc cookie profile cụm (daemon) rồi cập nhật
+            // loginStatus ⇒ cột nền tảng hiện "✔ Đã đăng nhập".
+            const target = loginModal;
+            const platformName = target.platform === 'youtube' ? 'YouTube' : target.platform === 'tiktok' ? 'TikTok' : 'Facebook';
+            setVerifying(true);
+            service.verifyClusterLogin(target.cluster.id, target.platform)
+              .then(result => {
+                if (result.ok) {
+                  const who = result.accountName === undefined || result.accountName === '' ? '' : ` (${result.accountName})`;
+                  pushLog(`✅ [${target.cluster.name}] Đã xác nhận đăng nhập ${platformName}${who} — phiên đã lưu cho cụm này.`, 'action');
+                  setToast(`Đã đăng nhập ${platformName}${who} — phiên đã lưu cho cụm.`);
+                } else {
+                  pushLog(`⚠️ [${target.cluster.name}] Chưa thấy cookie đăng nhập ${platformName} trong profile cụm — hãy đăng nhập lại nếu cửa sổ vừa mở.`, 'action');
+                  setToast('Chưa thấy phiên đăng nhập — hãy đăng nhập lại trong cửa sổ trình duyệt của cụm.');
+                }
+              })
+              .catch(cause => {
+                setToast(`Không kiểm tra được phiên đăng nhập: ${messageOf(cause)}`);
+              })
+              .finally(() => {
+                setVerifying(false);
+                setLoginModal(null);
+                void load(false);
+              });
           }}
           onClose={() => setLoginModal(null)}
+          verifying={verifying}
         />
       ) : null}
 
@@ -1871,6 +1894,8 @@ function LoginModal(props: {
   cluster: SocialClusterSummary;
   platform: SocialPlatformName;
   t: Translate;
+  /** Đang xác minh phiên đăng nhập (đọc cookie profile cụm). */
+  verifying?: boolean;
   /** Lệnh thật: daemon mở trình duyệt persistent (fingerprint + proxy của cụm) tới trang đăng nhập. */
   onOpen(): Promise<void>;
   onDone(): void;
@@ -1925,9 +1950,11 @@ function LoginModal(props: {
           </div>
         )}
         <div className="social-modal-actions">
-          <button type="button" className="social-btn" onClick={props.onClose}>Hủy</button>
-          <button type="button" className="social-btn social-btn-green" onClick={props.onDone}>
-            ✅ Tôi đã đăng nhập xong — Lưu Phiên
+          <button type="button" className="social-btn" onClick={props.onClose} disabled={props.verifying === true}>Hủy</button>
+          <button type="button" className="social-btn social-btn-green" onClick={props.onDone} disabled={props.verifying === true}>
+            {props.verifying === true
+              ? <><LoaderCircle size={13} className="social-spin" aria-hidden="true" /> Đang kiểm tra phiên…</>
+              : '✅ Tôi đã đăng nhập xong — Lưu Phiên'}
           </button>
         </div>
       </div>

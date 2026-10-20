@@ -106,6 +106,10 @@ function createHandle(context: BrowserContext): SocialBrowserHandle {
       }
       return page;
     },
+    async cookies(urls: string[]): Promise<Array<{ name: string; value: string; domain: string }>> {
+      const list = await context.cookies(urls);
+      return list.map(cookie => ({ name: cookie.name, value: cookie.value, domain: cookie.domain }));
+    },
     async close(): Promise<void> {
       try {
         await context.close();
