@@ -158,6 +158,60 @@ export async function registerSocialRoutes(
     }
   });
 
+  // ---- AI tích hợp sẵn + Trình Soi Lỗi (selector nóng) ----------------------
+  server.post<{ Body: { videoTitle?: unknown; language?: unknown } }>('/social/ai/compose', async (request, reply) => {
+    const body = (request.body ?? {}) as { videoTitle?: unknown; language?: unknown };
+    const videoTitle = typeof body.videoTitle === 'string' ? body.videoTitle : '';
+    if (videoTitle.trim() === '') {
+      return reply.code(400).send(apiError('social_ai_input_invalid', 'Thiếu tên video để AI soạn nội dung'));
+    }
+    try {
+      return await social.aiComposeVideoMeta({
+        videoTitle,
+        ...(typeof body.language === 'string' ? { language: body.language } : {})
+      });
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.post<{ Body: { comment?: unknown; prompt?: unknown } }>('/social/ai/reply-test', async (request, reply) => {
+    const body = (request.body ?? {}) as { comment?: unknown; prompt?: unknown };
+    const comment = typeof body.comment === 'string' ? body.comment : '';
+    if (comment.trim() === '') {
+      return reply.code(400).send(apiError('social_ai_input_invalid', 'Thiếu nội dung bình luận để thử phản hồi'));
+    }
+    try {
+      return await social.aiTestReply({
+        comment,
+        prompt: typeof body.prompt === 'string' ? body.prompt : ''
+      });
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.get('/social/selectors', async (_request, reply) => {
+    try {
+      return await social.getSelectors();
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.put<{ Body: { selectors?: unknown } }>('/social/selectors', async (request, reply) => {
+    const body = (request.body ?? {}) as { selectors?: unknown };
+    const selectors = typeof body.selectors === 'string' ? body.selectors : '';
+    if (selectors.trim() === '') {
+      return reply.code(400).send(apiError('social_selectors_invalid', 'Thiếu nội dung selectors'));
+    }
+    try {
+      return await social.saveSelectors(selectors);
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
   server.post<{ Params: { id: string } }>('/social/jobs/:id/retry-failed', async (request, reply) => {
     try {
       return social.retryFailedPlatforms(request.params.id);
@@ -236,7 +290,9 @@ function socialFailure(error: unknown, reply: FastifyReply): unknown {
       'social_enqueue_duplicate',
       'social_job_not_reschedulable',
       'social_job_schedule_invalid',
-      'social_screenshot_missing'
+      'social_screenshot_missing',
+      'social_selectors_invalid',
+      'social_ai_input_invalid'
     ]);
     const status = error.code === 'social_cluster_not_found' || error.code === 'social_job_not_found'
       ? 404

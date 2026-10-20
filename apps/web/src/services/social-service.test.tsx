@@ -204,9 +204,10 @@ describe('SocialWorkspace — tab Lịch đăng', () => {
         <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
       </LanguageProvider>
     );
+    // Tab 2 — Lịch Đăng & Composer (khớp demo đã chốt)
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
     await waitFor(() => expect(screen.getByText('Tập 2')).toBeInTheDocument());
-    // Tab mặc định là Lịch đăng
-    expect(screen.getByRole('tab', { name: 'Lịch đăng' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ })).toHaveAttribute('aria-selected', 'true');
 
     // Bấm chip → modal sửa nhanh với giờ đăng
     fireEvent.click(screen.getByText('Tập 2'));
@@ -228,6 +229,7 @@ describe('SocialWorkspace — tab Lịch đăng', () => {
         <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
       </LanguageProvider>
     );
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
     await waitFor(() => expect(screen.getByText('Tập 2')).toBeInTheDocument());
     const sourceKey = dayKey(new Date(overview().jobs[1]!.scheduledAt));
     const weekDays = eachDay(startOfWeek(new Date()), 7);
@@ -255,30 +257,25 @@ describe('SocialWorkspace — tab Hàng đợi', () => {
     localStorage.clear();
   });
 
-  it('hiển thị chip trạng thái và xếp video vào hàng đợi', async () => {
+  it('hiển thị chip trạng thái + Retry All khi có job lỗi', async () => {
     const { calls, client } = fakeClient();
     render(
       <LanguageProvider initialPreference="vi-VN">
         <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
       </LanguageProvider>
     );
-    fireEvent.click(screen.getByRole('tab', { name: /Hàng đợi/ }));
-    await waitFor(() => expect(screen.getByLabelText('Vị trí video (MP4)')).toBeInTheDocument());
-    // Chip trạng thái từng nền tảng (job_1: youtube failed)
+    fireEvent.click(screen.getByRole('tab', { name: /Hàng Đợi/ }));
+    await waitFor(() => expect(screen.getByText('Tập 1')).toBeInTheDocument());
+    // Chip trạng thái từng nền tảng (job_1: youtube failed, facebook published)
     expect(screen.getByText('Thất bại')).toBeInTheDocument();
     expect(screen.getByText('Đã đăng')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Chạy lại lỗi/ })).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText('Vị trí video (MP4)'), { target: { value: 'D:/new.mp4' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Xếp vào hàng đợi' }));
-    await waitFor(() => {
-      const enqueue = calls.find(call => call.method === 'POST' && call.path === '/social/jobs');
-      expect(enqueue).toBeDefined();
-      expect((enqueue!.body as { items: Array<{ path: string; clusterId: string }> }).items[0]).toMatchObject({
-        clusterId: 'cluster_a',
-        path: 'D:/new.mp4'
-      });
-    });
+    // Nút Retry All hiện khi có job lỗi
+    expect(screen.getByRole('button', { name: /Retry All/ })).toBeInTheDocument();
+    // Trình Soi Lỗi tự chọn job lỗi đầu tiên
+    expect(screen.getByText(/Trình Soi Lỗi & Ảnh Chụp/)).toBeInTheDocument();
+    // Hàng đợi cũ không còn form nạp tay — nạp bài chuyển về composer ở tab 2
+    expect(screen.queryByLabelText('Vị trí video (MP4)')).not.toBeInTheDocument();
+    expect(calls.some(call => call.method === 'POST' && call.path === '/social/jobs')).toBe(false);
   });
 });
 
@@ -295,6 +292,7 @@ describe('SocialWorkspace — composer đa kênh', () => {
         <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
       </LanguageProvider>
     );
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
     await waitFor(() => {
       const input = screen.getByLabelText('Vị trí video (MP4)') as HTMLInputElement;
       expect(input.value).toBe('D:/downloads/tap-5.mp4');
@@ -312,13 +310,12 @@ describe('SocialWorkspace — composer đa kênh', () => {
         <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
       </LanguageProvider>
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo bài đăng' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Soạn bài đăng đa kênh' });
-
-    fireEvent.change(within(dialog).getByLabelText('Vị trí video (MP4)'), { target: { value: 'D:/downloads/tap-5.mp4' } });
-    const checkbox = await waitFor(() => within(dialog).getByRole('checkbox', { name: 'Long Hổ Riệu' }));
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
+    fireEvent.change(await screen.findByLabelText('Vị trí video (MP4)'), { target: { value: 'D:/downloads/tap-5.mp4' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Chưa chọn nhóm nào/ }));
+    const checkbox = await screen.findByRole('checkbox', { name: 'Long Hổ Riệu' });
     fireEvent.click(checkbox);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Tạo 1 bài đăng' }));
+    fireEvent.click(screen.getByRole('button', { name: /Xếp Lịch Đăng/ }));
 
     await waitFor(() => {
       const enqueue = calls.find(call => call.method === 'POST' && call.path === '/social/jobs');
@@ -335,7 +332,6 @@ describe('SocialWorkspace — composer đa kênh', () => {
         }
       });
     });
-    expect(screen.queryByRole('dialog', { name: 'Soạn bài đăng đa kênh' })).not.toBeInTheDocument();
   });
 });
 
@@ -351,10 +347,10 @@ describe('SocialWorkspace — tab Thống kê + Bình luận', () => {
         <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
       </LanguageProvider>
     );
-    fireEvent.click(screen.getByRole('tab', { name: 'Thống kê' }));
+    fireEvent.click(screen.getByRole('tab', { name: /Thống Kê/ }));
     await waitFor(() => expect(screen.getByText('Cụm A')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Bình luận' }));
+    fireEvent.click(screen.getByRole('tab', { name: /Bình Luận AI/ }));
     await waitFor(() => expect(screen.getByText(/Tập 17 hay quá!/)).toBeInTheDocument());
     expect(screen.getByText('AI đã trả')).toBeInTheDocument();
   });
@@ -463,16 +459,17 @@ describe('SocialWorkspace — đăng nhập tài khoản trong tab Kênh', () =>
         <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
       </LanguageProvider>
     );
-    await waitFor(() => expect(screen.getByText('Tập 2')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('tab', { name: 'Kênh' }));
-    // Trạng thái: unknown → 'Chưa rõ' (youtube/tiktok/facebook đều unknown trong fixture)
-    await waitFor(() => expect(screen.getAllByText(/Chưa rõ/)).toHaveLength(3));
-    fireEvent.click(screen.getByTestId('social-login-status-cluster_a-youtube').closest('.social-login-entry')!.querySelector('button')!);
+    await waitFor(() => expect(screen.getByText('Cụm A')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /Nhóm Tài Khoản/ }));
+    // Trạng thái: unknown → '⚪ Chưa đăng nhập' (youtube/tiktok/facebook đều unknown trong fixture)
+    await waitFor(() => expect(screen.getAllByText(/Chưa đăng nhập/)).toHaveLength(3));
+    fireEvent.click(screen.getByTestId('social-login-cluster_a-youtube'));
     await waitFor(() => {
       const login = calls.find(call => call.method === 'POST' && call.path === '/social/clusters/cluster_a/login/youtube');
       expect(login).toBeDefined();
     });
-    expect(await screen.findByText(/Đã mở trang đăng nhập/)).toBeInTheDocument();
+    // Modal trình bày demo: khung mô phỏng + nút lưu phiên
+    expect(await screen.findByText(/Tôi đã đăng nhập xong/)).toBeInTheDocument();
   });
 });
 
@@ -489,8 +486,8 @@ describe('SocialWorkspace — công tắc tự nạp đăng sau dịch (tab Kên
         <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
       </LanguageProvider>
     );
-    await waitFor(() => expect(screen.getByText('Tập 2')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('tab', { name: 'Kênh' }));
+    await waitFor(() => expect(screen.getByText('Cụm A')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /Nhóm Tài Khoản/ }));
     const toggle = await screen.findByTestId('social-autopublish-cluster_a') as HTMLInputElement;
     expect(toggle.checked).toBe(false);
     fireEvent.click(toggle);
@@ -518,7 +515,7 @@ describe('SocialWorkspace — composer nguồn "Video đã dịch"', () => {
     } as never;
   }
 
-  it('tab "Video đã dịch" là mặc định, chọn video điền path; fallback không creatorService chỉ còn tải về', async () => {
+  it('media grid hiển thị ✨ Đã dịch cho video dịch + tile "Tìm trong thư viện"; chọn video điền path', async () => {
     const { client } = fakeClient();
     render(
       <LanguageProvider initialPreference="vi-VN">
@@ -535,28 +532,25 @@ describe('SocialWorkspace — composer nguồn "Video đã dịch"', () => {
         />
       </LanguageProvider>
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo bài đăng' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Soạn bài đăng đa kênh' });
-    // Tab mặc định là "Video đã dịch"
-    const translatedTab = within(dialog).getByRole('tab', { name: 'Video đã dịch' });
-    expect(translatedTab).toHaveAttribute('aria-selected', 'true');
-    // Job dịch hoàn tất xuất hiện trong picker (từ creatorService.listJobs)
-    fireEvent.click(within(dialog).getByRole('button', { name: /tap-1\.mp4/ }));
-    const pathInput = within(dialog).getByLabelText('Vị trí video (MP4)') as HTMLInputElement;
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
+    // Tile thư viện + trạng thái "✨ Đã dịch — chờ đăng" như demo
+    expect(await screen.findByRole('button', { name: /Tìm trong thư viện/ })).toBeInTheDocument();
+    expect(await screen.findByText('✨ Đã dịch — chờ đăng')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /tap-1\.mp4/ }));
+    const pathInput = screen.getByLabelText('Vị trí video (MP4)') as HTMLInputElement;
     expect(pathInput.value).toBe('D:/dich/tap-1.mp4');
-    expect(await screen.findByText('Soạn bài đăng đa kênh')).toBeInTheDocument();
   });
 
-  it('composer khi không có creatorService chỉ còn nút "Video tải về" (không crash)', async () => {
+  it('composer khi không có creatorService hiện tile thư viện + video tải về (không crash)', async () => {
     const { client } = fakeClient();
     render(
       <LanguageProvider initialPreference="vi-VN">
         <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
       </LanguageProvider>
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo bài đăng' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Soạn bài đăng đa kênh' });
-    expect(within(dialog).queryByRole('tab', { name: 'Video đã dịch' })).not.toBeInTheDocument();
-    expect(within(dialog).getByText('Tập 5')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
+    await screen.findByRole('button', { name: /Tìm trong thư viện/ });
+    expect(screen.queryByText('✨ Đã dịch — chờ đăng')).not.toBeInTheDocument();
+    expect(screen.getByText('Tập 5')).toBeInTheDocument();
   });
 });

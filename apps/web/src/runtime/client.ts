@@ -54,6 +54,10 @@ export class RuntimeClient {
     return this.request<T>(path, { method: 'PATCH', body });
   }
 
+  async put<T = unknown>(path: string, body: unknown): Promise<T> {
+    return this.request<T>(path, { method: 'PUT', body });
+  }
+
   async delete<T = unknown>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'DELETE' });
   }

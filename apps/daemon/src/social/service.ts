@@ -4,6 +4,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
+import { copyFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   closeSocialDatabase,
@@ -34,6 +35,7 @@ import { createSocialAnalytics } from './analytics.js';
 import { spawnCreatorProcess } from '../creator/process-tree.js';
 import type { YtDlpRuntime } from '../creator/yt-dlp/runtime.js';
 import { createSocialComments, type SocialLlmConfig } from './comments.js';
+import { aiComposeVideoMeta, aiTestReply, type SocialAiCompose, type SocialAiReplyTestInput } from './ai.js';
 import { listDownloadedVideos, type SocialDownloadItem } from './downloads.js';
 import type { SocialWorker } from './worker.js';
 import {
@@ -131,6 +133,14 @@ export type SocialService = {
     /** id các cụm bật tự nạp đã xử lý (nạp mới hoặc trùng — để log/diag). */
     clusters: string[];
   };
+  /** AI tích hợp sẵn: sinh tiêu đề + mô tả + hashtag chuẩn SEO cho 1 video. */
+  aiComposeVideoMeta(input: { videoTitle: string; language?: string }): Promise<SocialAiCompose>;
+  /** AI tích hợp sẵn: thử phản hồi bình luận — chỉ sinh chữ, không đăng thật. */
+  aiTestReply(input: SocialAiReplyTestInput): Promise<{ reply: string; fallbackUsed: boolean }>;
+  /** Đọc raw selectors.json đang dùng (Trình Soi Lỗi → Sửa Selector Nóng). */
+  getSelectors(): Promise<{ selectors: string }>;
+  /** Ghi selectors.json mới (tự tạo bản .bak trước) — job đăng sau áp dụng ngay. */
+  saveSelectors(selectors: string): Promise<{ selectors: string }>;
   close(): Promise<void>;
 };
 
@@ -157,6 +167,7 @@ export function createSocialService(input: SocialServiceInput): SocialService {
   const now = input.now ?? ((): string => new Date().toISOString());
   const db: SocialDB = openSocialDatabase(join(input.dataDir, 'social.sqlite'));
   const screenshotDir = join(input.dataDir, 'social', 'screenshots');
+  const selectorsPath = new URL('./platforms/selectors.json', import.meta.url);
   const profileRoot = join(input.dataDir, 'social', 'profiles');
   const secretKeyPath = join(input.dataDir, 'social', 'secret.key');
   mkdirSync(screenshotDir, { recursive: true });
@@ -187,11 +198,12 @@ export function createSocialService(input: SocialServiceInput): SocialService {
     ...(runYtDlpFn === undefined ? {} : { runYtDlpFn }),
     log: message => { console.log(`[social] ${message}`); }
   });
+  const readLlmConfig = input.readLlmConfig ?? (async (): Promise<SocialLlmConfig | null> => null);
   const comments = createSocialComments({
     db,
     worker,
     decryptToken,
-    readLlmConfig: input.readLlmConfig ?? (async (): Promise<SocialLlmConfig | null> => null),
+    readLlmConfig,
     scanIntervalMs: input.commentsScanIntervalMs ?? 3 * 60 * 60_000,
     log: message => { console.log(`[social] ${message}`); }
   });
@@ -526,6 +538,35 @@ export function createSocialService(input: SocialServiceInput): SocialService {
         // platformSettings không truyền → mặc định từng nền tảng.
       })));
       return { accepted: result.accepted, duplicates: result.duplicates, clusters };
+    },
+
+    async aiComposeVideoMeta(input: { videoTitle: string; language?: string }): Promise<SocialAiCompose> {
+      const config = await readLlmConfig();
+      return aiComposeVideoMeta(config, { videoTitle: input.videoTitle, language: input.language });
+    },
+
+    async aiTestReply(input: { prompt: string; comment: string }) {
+      const config = await readLlmConfig();
+      return aiTestReply(config, { prompt: input.prompt, comment: input.comment });
+    },
+
+    async getSelectors(): Promise<{ selectors: string }> {
+      return { selectors: await readFile(selectorsPath, 'utf8') };
+    },
+
+    async saveSelectors(selectors: string): Promise<{ selectors: string }> {
+      const parsed = JSON.parse(selectors) as unknown;
+      if (parsed === null || typeof parsed !== 'object') {
+        throw new SocialError('social_selectors_invalid', 'Nội dung selector phải là JSON object');
+      }
+      const normalized = `${JSON.stringify(parsed, undefined, 2)}\n`;
+      try {
+        await copyFile(selectorsPath, `${selectorsPath}.bak`);
+      } catch {
+        // Chưa có file cũ (lần đầu) — bỏ qua backup.
+      }
+      await writeFile(selectorsPath, normalized, 'utf8');
+      return { selectors: normalized };
     },
 
     async close(): Promise<void> {

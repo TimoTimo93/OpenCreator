@@ -166,6 +166,8 @@ export type RuntimeErrorCode =
   | 'social_job_not_reschedulable'
   | 'social_job_schedule_invalid'
   | 'social_screenshot_missing'
+  | 'social_selectors_invalid'
+  | 'social_ai_input_invalid'
   | 'yt_dlp_update_recommended'
   | 'dependency_not_packaged'
   | 'unsupported_source'

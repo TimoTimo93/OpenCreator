@@ -28,7 +28,11 @@ export const SOCIAL_TOOL_NAMES = [
   'social_resume_queue',
   'social_stats',
   'social_list_comments',
-  'social_scan_comments'
+  'social_scan_comments',
+  'social_ai_compose',
+  'social_ai_reply_test',
+  'social_get_selectors',
+  'social_save_selectors'
 ] as const;
 
 export class SocialToolError extends Error {
@@ -129,6 +133,22 @@ const rescheduleSchema = z.object({
   jobId: z.string().min(1).describe('id job trong hàng đợi (từ social_overview)'),
   scheduledAt: z.string().min(10)
     .describe('ISO mới cho ngày giờ công khai — chỉ áp dụng với job chưa đăng/chưa hẹn trên nền tảng')
+}).strict();
+
+const aiComposeSchema = z.object({
+  videoTitle: z.string().min(1)
+    .describe('Tên video gốc (tên file hoặc tên tập) — AI dùng làm chất liệu soạn tiêu đề/mô tả/hashtag'),
+  language: z.string().min(1).optional().describe('Ngôn ngữ nội dung, mặc định vi')
+}).strict();
+
+const aiReplyTestSchema = z.object({
+  comment: z.string().min(1).describe('Nội dung bình luận khán giả cần được phản hồi thử'),
+  prompt: z.string().min(1).optional().describe('Chỉ dẫn tính cách của kênh (auto_reply_prompt) — bỏ trống nếu chưa biết')
+}).strict();
+
+const saveSelectorsSchema = z.object({
+  selectors: z.string().min(1)
+    .describe('Toàn bộ selectors.json (string JSON) — job đăng sau áp dụng ngay; daemon tự tạo bản .bak')
 }).strict();
 
 export function createSocialToolDefinitions(input: {
@@ -372,6 +392,65 @@ export function createSocialToolDefinitions(input: {
           method: 'POST',
           path: '/internal/agent-tools/social/comments/scan',
           body: parsed.clusterId === undefined ? {} : { clusterId: parsed.clusterId }
+        });
+      }
+    },
+    social_ai_compose: {
+      description: [
+        'Dùng AI tích hợp sẵn của app (không cần key) soạn nội dung đăng chuẩn SEO cho 1 video:',
+        'tiêu đề ≤100 ký tự, mô tả 1–3 câu có kêu gọi theo dõi, bộ hashtag. Trả JSON {title, description, hashtags}.'
+      ].join(' '),
+      inputSchema: aiComposeSchema,
+      execute: async (value: unknown) => {
+        const parsed = aiComposeSchema.parse(value);
+        return input.request({
+          method: 'POST',
+          path: '/internal/agent-tools/social/ai/compose',
+          body: {
+            videoTitle: parsed.videoTitle,
+            ...(parsed.language === undefined ? {} : { language: parsed.language })
+          } as Record<string, unknown>
+        });
+      }
+    },
+    social_ai_reply_test: {
+      description: [
+        'Dùng AI tích hợp sẵn thử giọng trả lời cho 1 bình luận khán giả — CHỈ sinh chữ để người dùng duyệt,',
+        'KHÔNG đăng lên nền tảng. Có tự-fallback câu mẫu khi chưa cấu hình LLM.'
+      ].join(' '),
+      inputSchema: aiReplyTestSchema,
+      execute: async (value: unknown) => {
+        const parsed = aiReplyTestSchema.parse(value);
+        return input.request({
+          method: 'POST',
+          path: '/internal/agent-tools/social/ai/reply-test',
+          body: {
+            comment: parsed.comment,
+            ...(parsed.prompt === undefined ? {} : { prompt: parsed.prompt })
+          } as Record<string, unknown>
+        });
+      }
+    },
+    social_get_selectors: {
+      description: [
+        'Đọc selectors.json đang dùng cho đăng tự động (Trình Soi Lỗi → Sửa Selector Nóng) —',
+        'dùng khi nền tảng đổi giao diện khiến upload thất bại. Trả chuỗi JSON nguyên bản.'
+      ].join(' '),
+      inputSchema: overviewSchema,
+      execute: async () => input.request({ method: 'GET', path: '/internal/agent-tools/social/selectors' })
+    },
+    social_save_selectors: {
+      description: [
+        'Ghi selectors.json mới (tự tạo bản .bak để khôi phục). Job đăng sau áp dụng ngay.',
+        'Nên social_get_selectors trước, sửa chỉ đúng selector lỗi rồi gửi nguyên bản đã sửa.'
+      ].join(' '),
+      inputSchema: saveSelectorsSchema,
+      execute: async (value: unknown) => {
+        const parsed = saveSelectorsSchema.parse(value);
+        return input.request({
+          method: 'POST',
+          path: '/internal/agent-tools/social/selectors/save',
+          body: { selectors: parsed.selectors } as Record<string, unknown>
         });
       }
     }

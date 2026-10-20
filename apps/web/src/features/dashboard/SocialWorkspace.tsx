@@ -1,9 +1,6 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  ArrowLeft,
-  BarChart3,
-  Calendar,
   CalendarClock,
   Check,
   ChevronLeft,
@@ -12,22 +9,18 @@ import {
   Facebook,
   FileVideo,
   KeyRound,
-  ListVideo,
   LoaderCircle,
-  MessageSquareReply,
-  MonitorSmartphone,
   Music2,
   Plus,
   RefreshCw,
-  ShieldCheck,
   Trash2,
   TriangleAlert,
-  Tv,
   Youtube
 } from 'lucide-react';
 import { useAppLanguage, type Translate } from '../../i18n/LanguageProvider.js';
 import type {
   SocialClusterSummary,
+  SocialClusterInput,
   SocialDownloadItem,
   SocialEnqueueItem,
   SocialJobPlatformSettings,
@@ -57,7 +50,6 @@ import {
 import { ExcelImportButton, downloadTemplate } from './social-excel.js';
 import { SocialCommentsPanel, SocialStatsPanel } from './social-insights.js';
 import {
-  peekPendingSocialHandoffSource,
   takePendingSocialHandoffSource
 } from './pending-social-handoff.js';
 import './social-workspace.css';
@@ -66,13 +58,24 @@ type PlatformName = 'youtube' | 'tiktok' | 'facebook';
 
 const PLATFORMS: PlatformName[] = ['youtube', 'tiktok', 'facebook'];
 
-type TabId = 'calendar' | 'queue' | 'channels' | 'stats' | 'comments';
+type TabId = 'channels' | 'calendar' | 'queue' | 'stats' | 'comments';
 
 const PLATFORM_ICONS: Record<PlatformName, LucideIcon> = {
   youtube: Youtube,
   tiktok: Music2,
   facebook: Facebook
 };
+
+/** Nhãn tab trùng khớp demo đã chốt. */
+const TAB_LABELS: Record<TabId, string> = {
+  channels: '1. Nhóm Tài Khoản',
+  calendar: '2. Lịch Đăng & Composer Đa Kênh',
+  queue: '3. Hàng Đợi & Trình Soi Lỗi',
+  stats: '4. Thống Kê Tài Khoản',
+  comments: '5. Trung Tâm Bình Luận AI + Playground'
+};
+
+type LogLine = { time: string; text: string; level: 'info' | 'error' | 'action' };
 
 function messageOf(error: unknown): string {
   if (error instanceof Error && error.message.trim() !== '') return error.message;
@@ -83,7 +86,7 @@ function formatSchedule(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleString(undefined, {
-    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
   });
 }
 
@@ -119,6 +122,10 @@ function platformIcon(platform: PlatformName, size = 11) {
   return <Icon size={size} aria-hidden="true" />;
 }
 
+function platformEmoji(platform: PlatformName): string {
+  return platform === 'youtube' ? '▶️' : platform === 'tiktok' ? '🎵' : '📘';
+}
+
 export default function SocialWorkspace(props: {
   service: SocialService;
   /** Dịch vụ creator phía web — cho phép chọn "Video đã dịch" trong composer. */
@@ -132,17 +139,48 @@ export default function SocialWorkspace(props: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
-  const [activeTab, setActiveTab] = useState<TabId>('calendar');
+  const [activeTab, setActiveTab] = useState<TabId>('channels');
   const [editing, setEditing] = useState<SocialClusterSummary | 'new' | null>(null);
-  const [composerOpen, setComposerOpen] = useState(false);
   const [handoffPath, setHandoffPath] = useState('');
   const [insightsKey, setInsightsKey] = useState(0);
-  const [loginPending, setLoginPending] = useState<string | null>(null);
+  const [loginModal, setLoginModal] = useState<{ cluster: SocialClusterSummary; platform: SocialPlatformName } | null>(null);
+  const [consoleOpen, setConsoleOpen] = useState(true);
+  const [logs, setLogs] = useState<LogLine[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState('');
+  const overviewRef = useRef<SocialOverview | null>(null);
+
+  const pushLog = useCallback((text: string, level: LogLine['level'] = 'info') => {
+    setLogs(current => [
+      ...current.slice(-199),
+      { time: new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }), text, level }
+    ]);
+  }, []);
 
   const load = useCallback(async (showSpinner: boolean): Promise<void> => {
     if (showSpinner) setLoading(true);
     try {
       const data = await service.getOverview();
+      const previous = overviewRef.current;
+      // Nhật ký thực: nền tảng lỗi mới / nền tảng vừa công khai.
+      if (previous !== null) {
+        for (const job of data.jobs) {
+          const before = previous.jobs.find(candidate => candidate.id === job.id);
+          if (before === undefined) continue;
+          for (const platform of PLATFORMS) {
+            const beforeStatus = before.platforms[platform].status;
+            const nowStatus = job.platforms[platform].status;
+            if (nowStatus === beforeStatus) continue;
+            if (nowStatus === 'failed') {
+              pushLog(`❌ [${job.clusterName} - ${platform}] ${job.title}: ${job.platforms[platform].error ?? 'lỗi'}`, 'error');
+            } else if (nowStatus === 'published') {
+              pushLog(`✅ [${job.clusterName} - ${platform}] Đã công khai: ${job.title}`);
+            } else if (nowStatus === 'running') {
+              pushLog(`🔄 [${job.clusterName} - ${platform}] Đang tải lên: ${job.title}`);
+            }
+          }
+        }
+      }
+      overviewRef.current = data;
       setOverview(data);
       setError('');
       setInsightsKey(key => key + 1);
@@ -151,7 +189,7 @@ export default function SocialWorkspace(props: {
     } finally {
       if (showSpinner) setLoading(false);
     }
-  }, [service]);
+  }, [service, pushLog]);
 
   useEffect(() => {
     void load(true);
@@ -164,7 +202,7 @@ export default function SocialWorkspace(props: {
     const handoff = takePendingSocialHandoffSource();
     if (handoff !== undefined && handoff.path.trim() !== '') {
       setHandoffPath(handoff.path);
-      setComposerOpen(true);
+      setActiveTab('calendar');
       setToast(t('dashboard.social.handoffLoaded'));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -178,17 +216,32 @@ export default function SocialWorkspace(props: {
   const failedCount = overview?.counts.failed ?? 0;
   const queueRunning = overview?.queue !== 'paused';
 
+  // Chọn job mặc định cho Trình Soi Lỗi: job lỗi đầu tiên, nếu không có thì job đầu tiên.
+  useEffect(() => {
+    if (jobs.length === 0) {
+      if (selectedJobId !== '') setSelectedJobId('');
+      return;
+    }
+    if (jobs.some(job => job.id === selectedJobId)) return;
+    const failedJob = jobs.find(job => jobKind(job) === 'failed');
+    const fallback = failedJob ?? (jobs.length > 0 ? jobs[0] : undefined);
+    if (fallback !== undefined) setSelectedJobId(fallback.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs]);
+
   async function action(showToast: string, run: () => Promise<unknown>): Promise<void> {
     try {
       const result = await run();
       if (result !== undefined && result !== null && typeof result === 'object' && 'clusters' in result) {
         setOverview(result as SocialOverview);
+        overviewRef.current = result as SocialOverview;
       } else {
         await load(false);
       }
       if (showToast !== '') setToast(showToast);
     } catch (cause) {
-      setError(t('dashboard.social.actionFailed', { message: messageOf(cause) }));
+      setError(messageOf(cause));
+      pushLog(`⚠️ ${messageOf(cause)}`, 'error');
     }
   }
 
@@ -196,9 +249,10 @@ export default function SocialWorkspace(props: {
     try {
       await service.rescheduleJob(job.id, scheduledAtISO);
       setToast(t('dashboard.social.rescheduled'));
+      pushLog(`📅 Đã hẹn giờ lại job ${shortJobId(job.id)} @ ${formatSchedule(scheduledAtISO)}`, 'action');
       await load(false);
     } catch (cause) {
-      setError(t('dashboard.social.calDropFailed', { message: messageOf(cause) }));
+      setError(messageOf(cause));
     }
   }
 
@@ -206,45 +260,49 @@ export default function SocialWorkspace(props: {
     try {
       const result = await service.enqueue(items);
       setToast(t('dashboard.social.composerSubmitted', { count: result.accepted }));
-      setComposerOpen(false);
       setHandoffPath('');
+      pushLog(`📤 Đã nạp ${result.accepted} bài đăng vào hàng đợi (auto-slot khung giờ vàng khi để trống giờ)`, 'action');
       await load(false);
     } catch (cause) {
-      setError(t('dashboard.social.actionFailed', { message: messageOf(cause) }));
+      setError(messageOf(cause));
     }
   }
 
-  const openClusterLogin = useCallback(async (cluster: SocialClusterSummary, platform: SocialPlatformName): Promise<void> => {
-    const key = `${cluster.id}:${platform}`;
-    setLoginPending(key);
-    try {
-      await service.openClusterLogin(cluster.id, platform);
-      setToast(t('dashboard.social.loginOpened'));
-    } catch (cause) {
-      setError(t('dashboard.social.actionFailed', { message: messageOf(cause) }));
-    } finally {
-      setLoginPending(null);
-    }
-  }, [service, t]);
+  /** Danh sách nền tảng chưa đăng nhập của cụm (lấy nền tảng ưu tiên). */
+  function firstPendingLoginPlatformLocal(cluster: SocialClusterSummary): SocialPlatformName {
+    return firstPendingLoginPlatform(cluster);
+  }
+
+  const openSocialLogin = useCallback((cluster: SocialClusterSummary, platform: SocialPlatformName): Promise<void> =>
+    service.openClusterLogin(cluster.id, platform).then(() => undefined), [service]);
 
   return (
     <div className="social-workspace" aria-label={t('dashboard.social.tabTitle')}>
       <header className="social-header">
+        <div className="social-header-back">
+          <button type="button" className="social-btn" onClick={props.onBack}>
+            🏠 Về Trang Chủ
+          </button>
+        </div>
         <div className="social-header-titles">
-          <div className="social-header-back">
-            <button type="button" className="social-btn social-btn-ghost" onClick={props.onBack}>
-              <ArrowLeft size={14} aria-hidden="true" /> {t('settings.back')}
-            </button>
-          </div>
-          <h1><MonitorSmartphone size={20} aria-hidden="true" /> {t('dashboard.social.tabTitle')}</h1>
-          <p className="social-subtitle">{t('dashboard.social.subtitle')}</p>
+          <span aria-hidden="true" style={{ fontSize: 17 }}>🌐</span>
+          <h1>{t('dashboard.social.tabTitle')}</h1>
         </div>
         <div className="social-header-actions">
-          <button type="button" className="social-btn" onClick={() => void load(true)} disabled={loading}>
-            <RefreshCw size={14} aria-hidden="true" /> {t('dashboard.drama.refresh')}
-          </button>
-          <button type="button" className="social-btn social-btn-primary" onClick={() => setComposerOpen(true)}>
-            <Plus size={14} aria-hidden="true" /> {t('dashboard.social.newPost')}
+          <button
+            type="button"
+            className={`social-btn ${queueRunning ? 'social-btn-danger' : 'social-btn-green'}`}
+            onClick={() => {
+              if (queueRunning) {
+                pushLog('⏸️ [System] Đã tạm dừng hàng đợi theo lệnh người dùng.', 'action');
+                void action(t('dashboard.social.paused'), () => service.pauseQueue());
+              } else {
+                pushLog('▶️ [System] Hàng đợi tiếp tục chạy.', 'action');
+                void action(t('dashboard.social.resumed'), () => service.resumeQueue());
+              }
+            }}
+          >
+            {queueRunning ? '⏸️ Dừng Khẩn Cấp' : '▶️ Tiếp Tục Chạy'}
           </button>
         </div>
       </header>
@@ -265,46 +323,95 @@ export default function SocialWorkspace(props: {
       ) : null}
 
       <nav className="social-tabs" role="tablist" aria-label={t('dashboard.social.tabTitle')}>
-        <TabButton id="calendar" icon={Calendar} label={t('dashboard.social.tabCalendar')} active={activeTab} onSelect={setActiveTab} />
-        <TabButton id="queue" icon={ListVideo} label={t('dashboard.social.tabQueue')} active={activeTab} onSelect={setActiveTab} badge={failedCount > 0 ? failedCount : undefined} />
-        <TabButton id="channels" icon={Tv} label={t('dashboard.social.tabChannels')} active={activeTab} onSelect={setActiveTab} />
-        <TabButton id="stats" icon={BarChart3} label={t('dashboard.social.tabStats')} active={activeTab} onSelect={setActiveTab} />
-        <TabButton id="comments" icon={MessageSquareReply} label={t('dashboard.social.tabComments')} active={activeTab} onSelect={setActiveTab} />
+        <TabButton id="channels" label={TAB_LABELS.channels} active={activeTab} onSelect={setActiveTab} />
+        <TabButton id="calendar" label={TAB_LABELS.calendar} active={activeTab} onSelect={setActiveTab} />
+        <TabButton
+          id="queue"
+          label={TAB_LABELS.queue}
+          active={activeTab}
+          onSelect={setActiveTab}
+          badge={failedCount > 0 ? `${failedCount} Lỗi` : undefined}
+        />
+        <TabButton id="stats" label={TAB_LABELS.stats} active={activeTab} onSelect={setActiveTab} />
+        <TabButton id="comments" label={TAB_LABELS.comments} active={activeTab} onSelect={setActiveTab} />
       </nav>
 
       {overview !== null ? (
         <section className="social-panel" role="tabpanel" aria-label={t('dashboard.social.tabTitle')}>
-          {activeTab === 'calendar' ? (
-            <CalendarPanel
-              jobs={jobs}
+          {activeTab === 'channels' ? (
+            <ChannelsPanel
+              clusters={clusters}
               t={t}
-              onReschedule={(job, iso) => void reschedule(job, iso)}
-              onRemove={job => void action(t('dashboard.social.jobRemoved'), () => service.removeJob(job.id))}
-              onRetry={job => void action(t('dashboard.social.retried'), () => service.retryFailedPlatforms(job.id))}
+              loginPendingPlatform={loginModal !== null ? `${loginModal.cluster.id}:${loginModal.platform}` : ''}
+              onOpenLogin={(cluster, platform) => setLoginModal({ cluster, platform })}
+              onToggleAutoPublish={(cluster, enabled) => void action(
+                t('dashboard.social.autoPublishSaved'),
+                () => service.updateCluster(cluster.id, { autoPublishAfterTranslate: enabled })
+              )}
+              onEdit={cluster => setEditing(cluster)}
+              onNewCluster={() => setEditing('new')}
+              onCheckAllProxy={() => {
+                pushLog('⚡ [Proxy Checker] Đang kiểm tra đồng loạt Proxy của tất cả nhóm...', 'action');
+                void action(t('dashboard.social.checkedProxy'), async () => {
+                  let last: SocialOverview | null = null;
+                  for (const cluster of clusters) {
+                    last = await service.checkClusterProxy(cluster.id);
+                  }
+                  return last;
+                });
+              }}
             />
+          ) : null}
+          {activeTab === 'calendar' ? (
+            <>
+              <CalendarPanel
+                jobs={jobs}
+                t={t}
+                onReschedule={(job, iso) => void reschedule(job, iso)}
+                onRemove={job => void action(t('dashboard.social.jobRemoved'), () => service.removeJob(job.id))}
+                onRetry={job => void action(t('dashboard.social.retried'), () => service.retryFailedPlatforms(job.id))}
+              />
+              <ComposerBlock
+                clusters={clusters}
+                service={service}
+                creatorService={props.creatorService}
+                projectId={props.projectId}
+                initialPath={handoffPath}
+                t={t}
+                onClose={() => { setHandoffPath(''); }}
+                onEnqueue={items => enqueueFromComposer(items)}
+              />
+            </>
           ) : null}
           {activeTab === 'queue' ? (
             <QueuePanel
               jobs={jobs}
               clusters={clusters}
-              queueRunning={queueRunning}
+              service={service}
               t={t}
-              onToggleQueue={() => void action(
-                queueRunning ? t('dashboard.social.paused') : t('dashboard.social.resumed'),
-                () => queueRunning ? service.pauseQueue() : service.resumeQueue()
-              )}
-              onNewPost={() => setComposerOpen(true)}
+              selectedJobId={selectedJobId}
+              onSelectJob={setSelectedJobId}
+              onNewPost={() => setActiveTab('calendar')}
+              onToggleQueue={() => {
+                if (queueRunning) {
+                  pushLog('⏸️ [System] Đã tạm dừng hàng đợi theo lệnh người dùng.', 'action');
+                  void action(t('dashboard.social.paused'), () => service.pauseQueue());
+                } else {
+                  void action(t('dashboard.social.resumed'), () => service.resumeQueue());
+                }
+              }}
+              queueRunning={queueRunning}
               onEnqueue={(item, scheduledAt) => void action(
                 t('dashboard.social.enqueued'),
-                () => service.enqueue([{ ...item, ...(scheduledAt === '' ? {} : { scheduledAt }) }])
+                () => service.enqueue([{ ...item, ...(scheduledAt === '' ? {} : { scheduledAt }) }]).then(result => result.summary)
               )}
               onEnqueueMany={(items, summaryMessage) => void action(
                 summaryMessage,
                 async () => {
-                  let last = null;
+                  let last: SocialOverview | null = null;
                   for (let index = 0; index < items.length; index += 60) {
                     const chunk = items.slice(index, index + 60);
-                    last = await service.enqueue(chunk);
+                    last = (await service.enqueue(chunk)).summary;
                   }
                   return last;
                 }
@@ -312,28 +419,6 @@ export default function SocialWorkspace(props: {
               onError={message => setError(message)}
               onRemove={job => void action(t('dashboard.social.jobRemoved'), () => service.removeJob(job.id))}
               onRetry={job => void action(t('dashboard.social.retried'), () => service.retryFailedPlatforms(job.id))}
-            />
-          ) : null}
-          {activeTab === 'channels' ? (
-            <ChannelsPanel
-              clusters={clusters}
-              t={t}
-              onNewCluster={() => setEditing('new')}
-              onCheckProxy={cluster => void action(t('dashboard.social.checkedProxy'), () => service.checkClusterProxy(cluster.id))}
-              onOpenBrowser={cluster => void action(t('dashboard.social.browserOpened'), () => service.openClusterBrowser(cluster.id))}
-              onCloseBrowser={cluster => void action(t('dashboard.social.browserClosed'), () => service.closeClusterBrowser(cluster.id))}
-              onOpenLogin={openClusterLogin}
-              onLoginPending={loginPending}
-              onToggleAutoPublish={(cluster, enabled) => void action(
-                t('dashboard.social.autoPublishSaved'),
-                () => service.updateCluster(cluster.id, { autoPublishAfterTranslate: enabled })
-              )}
-              onEdit={cluster => setEditing(cluster)}
-              onDelete={cluster => {
-                if (window.confirm(t('dashboard.social.confirmDelete', { name: cluster.name }))) {
-                  void action(t('dashboard.social.deletedCluster'), () => service.deleteCluster(cluster.id));
-                }
-              }}
             />
           ) : null}
           {activeTab === 'stats' ? (
@@ -345,22 +430,35 @@ export default function SocialWorkspace(props: {
         </section>
       ) : null}
 
-      <ComposerModal
-        open={composerOpen}
-        service={service}
-        clusters={clusters}
-        creatorService={props.creatorService}
-        projectId={props.projectId}
-        initialPath={handoffPath}
-        t={t}
-        onClose={() => { setComposerOpen(false); setHandoffPath(''); }}
-        onEnqueue={items => enqueueFromComposer(items)}
+      <SocialConsole
+        open={consoleOpen}
+        logs={logs}
+        errorBadge={failedCount}
+        onToggle={() => setConsoleOpen(open => !open)}
+        onClear={() => { setLogs([]); }}
       />
+
+      {loginModal !== null ? (
+        <LoginModal
+          cluster={loginModal.cluster}
+          platform={loginModal.platform}
+          t={t}
+          onOpen={() => openSocialLogin(loginModal.cluster, loginModal.platform)}
+          onDone={() => {
+            pushLog(`🔑 [${loginModal.cluster.name}] Đã lưu phiên đăng nhập mới cho nhóm.`, 'action');
+            setLoginModal(null);
+            void load(false);
+          }}
+          onClose={() => setLoginModal(null)}
+        />
+      ) : null}
 
       {editing !== null ? (
         <ClusterEditor
           cluster={editing === 'new' ? null : editing}
           t={t}
+          service={service}
+          onMessage={pushLog}
           onClose={() => setEditing(null)}
           onSave={input => {
             const payload = input;
@@ -377,15 +475,23 @@ export default function SocialWorkspace(props: {
   );
 }
 
+function shortJobId(id: string): string {
+  return id.length <= 8 ? id : id.slice(0, 8);
+}
+
+/** Danh sách nền tảng chưa đăng nhập của cụm (lấy nền tảng ưu tiên). */
+function firstPendingLoginPlatform(cluster: SocialClusterSummary): SocialPlatformName {
+  const entry = PLATFORMS.find(platform => cluster.loginStatus[platform] !== 'ok');
+  return (entry ?? 'youtube') as SocialPlatformName;
+}
+
 function TabButton(props: {
   id: TabId;
-  icon: LucideIcon;
   label: string;
   active: TabId;
   onSelect(id: TabId): void;
-  badge?: number;
+  badge?: string;
 }) {
-  const Icon = props.icon;
   return (
     <button
       type="button"
@@ -394,7 +500,6 @@ function TabButton(props: {
       className="social-tab"
       onClick={() => props.onSelect(props.id)}
     >
-      <Icon size={15} aria-hidden="true" />
       {props.label}
       {props.badge !== undefined ? <span className="social-tab-badge">{props.badge}</span> : null}
     </button>
@@ -402,10 +507,200 @@ function TabButton(props: {
 }
 
 // ---------------------------------------------------------------------------
+// Console đáy — nhật ký thời gian thực (nút Ẩn/Mở ở giữa như demo)
+// ---------------------------------------------------------------------------
+
+function SocialConsole(props: {
+  open: boolean;
+  logs: LogLine[];
+  errorBadge?: number;
+  onToggle(): void;
+  onClear(): void;
+}) {
+  return (
+    <div className={`social-console${props.open ? '' : ' social-console-collapsed'}`}>
+      <div className="social-console-head">
+        <span className="social-console-title">
+          📋 Nhật Ký Hoạt Động Thời Gian Thực
+          {props.errorBadge !== undefined && props.errorBadge > 0
+            ? <span className="social-console-badge">{props.errorBadge} Lỗi</span>
+            : null}
+        </span>
+        <button type="button" className="social-console-toggle" onClick={props.onToggle}>
+          {props.open ? '⌄ Ẩn Xuống' : '⌃ Mở Lên'}
+        </button>
+        <button type="button" className="social-console-clear" onClick={props.onClear}>🧹 Xóa Hiển Thị</button>
+      </div>
+      <div className="social-console-box" role="log">
+        {props.logs.map((line, index) => (
+          <div key={index} className={line.level === 'error' ? 'social-log-error' : line.level === 'action' ? 'social-log-action' : undefined}>
+            [{line.time}] {line.level === 'error' ? '❌' : line.level === 'action' ? '🟢' : '💬'} {line.text}
+          </div>
+        ))}
+        {props.logs.length === 0
+          ? <div className="social-log-action">[00:00:00] 🟢 [Worker] Luồng điều phối tự động đã khởi động (SQLite WAL).</div>
+          : null}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 1 — Nhóm Tài Khoản (bảng như demo)
+// ---------------------------------------------------------------------------
+
+const LOGIN_STATUS_LABEL: Record<string, string> = {
+  ok: '✔ Đã đăng nhập',
+  expired: '❌ Đã văng phiên',
+  unknown: '⚪ Chưa đăng nhập'
+};
+
+function proxyChipClass(proxyStatus: string): string {
+  switch (proxyStatus) {
+    case 'online': return 'social-chip-ok';
+    case 'dead': return 'social-chip-failed';
+    case 'checking': return 'social-chip-running';
+    default: return 'social-chip-skipped';
+  }
+}
+
+function proxyChipText(proxyStatus: string, server: string): string {
+  const host = server.replace(/^https?:\/\//, '');
+  switch (proxyStatus) {
+    case 'online': return `🟢 ${host !== '' ? host : 'Đang hoạt động'}`;
+    case 'dead': return `🔴 ${host !== '' ? `${host} (Lỗi)` : 'Lỗi kết nối'}`;
+    case 'checking': return '⏳ Đang đo...';
+    case 'no_proxy': return '— (mạng nhà)';
+    default: return '⚪ Chưa kiểm tra';
+  }
+}
+
+function ChannelsPanel(props: {
+  clusters: SocialClusterSummary[];
+  t: Translate;
+  loginPendingPlatform: string;
+  onOpenLogin(cluster: SocialClusterSummary, platform: SocialPlatformName): void;
+  onToggleAutoPublish(cluster: SocialClusterSummary, enabled: boolean): void;
+  onEdit(cluster: SocialClusterSummary): void;
+  onNewCluster(): void;
+  onCheckAllProxy(): void;
+}) {
+  const { t } = props;
+  return (
+    <div className="social-channels">
+      <div className="social-channels-toolbar">
+        <button type="button" className="social-btn social-btn-primary" onClick={props.onCheckAllProxy}>
+          ⚡ Kiểm Tra Proxy Tất Cả Nhóm
+        </button>
+        <button type="button" className="social-btn social-btn-green" onClick={props.onNewCluster}>
+          ➕ {t('dashboard.social.newCluster')}
+        </button>
+      </div>
+      {props.clusters.length === 0 ? (
+        <p className="social-empty">{t('dashboard.social.noClusters')}</p>
+      ) : (
+        <div className="social-tablewrap">
+          <table className="social-table">
+            <thead>
+              <tr>
+                <th>{t('dashboard.social.tabChannels')}</th>
+                <th>{t('dashboard.social.seriesName')}</th>
+                <th>Proxy</th>
+                <th>YouTube</th>
+                <th>TikTok</th>
+                <th>Facebook</th>
+                <th>{t('dashboard.social.autoPublishToggle')}</th>
+                <th style={{ textAlign: 'center' }}>Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.clusters.map((cluster, index) => {
+                const label = cluster.seriesName !== '' ? cluster.seriesName : cluster.name;
+                return (
+                  <tr key={`${cluster.id}-${index}`}>
+                    <td className="social-cell-name">{cluster.name}</td>
+                    <td className="social-cell-soft">{cluster.seriesName !== '' ? cluster.seriesName : '—'}</td>
+                    <td>
+                      <span className={`social-chip ${proxyChipClass(cluster.proxyStatus)}`}>
+                        {proxyChipText(cluster.proxyStatus, cluster.proxyServer)}
+                      </span>
+                    </td>
+                    {PLATFORMS.map(platform => {
+                      const status = cluster.loginStatus[platform];
+                      const key = `${cluster.id}:${platform}`;
+                      return (
+                        <td key={platform}>
+                          <span className={`social-platform-entry social-login-${platform}`}>
+                            <span className={`social-login social-login-${status}`}>
+                              {LICENSE_MARK[status]} <b>{LOGIN_STATUS_LABEL[status] ?? t('dashboard.social.loginUnknown')}</b>
+                            </span>
+                            <button
+                              type="button"
+                              data-testid={`social-login-${cluster.id}-${platform}`}
+                              className={`social-btn social-btn-sm ${status === 'expired' ? 'social-btn-amber' : ''}`}
+                              title={`${t('dashboard.social.loginAction')} ${platform}`}
+                              onClick={() => props.onOpenLogin(cluster, platform)}
+                            >
+                              {props.loginPendingPlatform === key
+                                ? <LoaderCircle size={12} className="social-spin" aria-hidden="true" />
+                                : <KeyRound size={12} aria-hidden="true" />}
+                              {t('dashboard.social.loginAction')}
+                            </button>
+                          </span>
+                        </td>
+                      );
+                    })}
+                    <td>
+                      <label className="social-autopublish-toggle" title={t('dashboard.social.autoPublishHint')}>
+                        <input
+                          type="checkbox"
+                          className="accent-green"
+                          data-testid={`social-autopublish-${cluster.id}`}
+                          checked={cluster.autoPublishAfterTranslate}
+                          onChange={event => props.onToggleAutoPublish(cluster, event.target.checked)}
+                        />
+                        {cluster.autoPublishAfterTranslate ? '✅ Bật' : '⚪ Tắt'}
+                      </label>
+                    </td>
+                    <td>
+                      <div className="social-actions-cell">
+                        <button
+                          type="button"
+                          className="social-btn social-btn-sm"
+                          onClick={() => props.onOpenLogin(cluster, firstPendingLoginPlatform(cluster))}
+                        >
+                          🔑 {t('dashboard.social.loginAction')}
+                        </button>
+                        <button type="button" className="social-btn social-btn-sm" onClick={() => props.onEdit(cluster)}>
+                          ⚙️ {t('dashboard.social.editCluster')}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const LICENSE_MARK: Record<string, string> = {
+  youtube: '▶️',
+  tiktok: '🎵',
+  facebook: '📘'
+};
+
+// ---------------------------------------------------------------------------
 // Tab Lịch đăng — grid tuần/tháng + kéo-thả đổi giờ + danh sách
 // ---------------------------------------------------------------------------
 
 const MAX_CHIPS_PER_CELL = 4;
+
+/** Nhãn ngày trong tuần literal theo demo (T2 … CN). */
+const WEEKDAY_LABELS = ['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
 
 function CalendarPanel(props: {
   jobs: SocialJobSummary[];
@@ -419,19 +714,17 @@ function CalendarPanel(props: {
   const [anchor, setAnchor] = useState(() => new Date());
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<SocialJobSummary | null>(null);
+  const [platformFilter, setPlatformFilter] = useState<Record<SocialPlatformName, boolean>>({ youtube: true, tiktok: true, facebook: true });
 
-  const byDay = useMemo(() => groupJobsByDay(props.jobs), [props.jobs]);
+  const filteredJobs = useMemo(() => props.jobs.filter(job =>
+    PLATFORMS.some(platform => job.platforms[platform].status !== 'skipped' && platformFilter[platform])
+  ), [props.jobs, platformFilter]);
+  const byDay = useMemo(() => groupJobsByDay(filteredJobs), [filteredJobs]);
   const today = new Date();
 
   const days = view === 'month'
     ? monthGridDays(anchor)
     : eachDay(startOfWeek(anchor), 7);
-
-  const rangeLabel = view === 'month'
-    ? anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-    : view === 'week'
-      ? `${days[0]!.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} – ${days[days.length - 1]!.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })}`
-      : t('dashboard.social.calListTitle', { count: props.jobs.length });
 
   function step(direction: number): void {
     setAnchor(current => view === 'month' ? addMonthsSafe(current, direction) : addDaysSafe(current, direction * 7));
@@ -440,30 +733,45 @@ function CalendarPanel(props: {
   return (
     <div className="social-calendar" aria-label={t('dashboard.social.tabCalendar')}>
       <div className="social-cal-toolbar">
-        <div className="social-cal-nav">
-          <button type="button" className="social-btn social-btn-icon" aria-label={t('dashboard.social.calPrev')} onClick={() => step(-1)}>
-            <ChevronLeft size={14} aria-hidden="true" />
-          </button>
-          <button type="button" className="social-btn social-btn-sm" onClick={() => setAnchor(new Date())}>
-            {t('dashboard.social.calToday')}
-          </button>
-          <button type="button" className="social-btn social-btn-icon" aria-label={t('dashboard.social.calNext')} onClick={() => step(1)}>
-            <ChevronRight size={14} aria-hidden="true" />
-          </button>
-        </div>
-        <p className="social-cal-title">{rangeLabel}</p>
-        <div className="social-cal-viewswitch" role="group" aria-label={t('dashboard.social.tabCalendar')}>
-          {(['week', 'month', 'list'] as const).map(id => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={view === id}
-              className={`social-btn social-btn-sm ${view === id ? 'social-btn-primary' : ''}`}
-              onClick={() => setView(id)}
+        <span className="social-cal-heading">📅 Lịch Đăng Tuần — Kéo chip sang ngày khác để đổi ngày đăng</span>
+        <div className="social-cal-tools">
+          {PLATFORMS.map(platform => {
+            const on = platformFilter[platform];
+            return (
+              <button
+                key={platform}
+                type="button"
+                aria-pressed={on}
+                className={`social-cal-pill social-cal-pill-${platform}${on ? '' : ' social-cal-pill-off'}`}
+                onClick={() => setPlatformFilter(current => ({ ...current, [platform]: !current[platform] }))}
+              >
+                {platformEmoji(platform)} {platform === 'youtube' ? 'YouTube' : platform === 'tiktok' ? 'TikTok' : 'Facebook'}
+              </button>
+            );
+          })}
+          <div className="social-cal-viewswitch" role="group" aria-label={t('dashboard.social.tabCalendar')}>
+            <select
+              className="social-cal-period"
+              value={view}
+              onChange={event => setView(event.target.value as typeof view)}
+              aria-label={t('dashboard.social.tabCalendar')}
             >
-              {id === 'week' ? t('dashboard.social.calWeek') : id === 'month' ? t('dashboard.social.calMonth') : t('dashboard.social.calList')}
+              <option value="week">{t('dashboard.social.calWeek')}</option>
+              <option value="month">{t('dashboard.social.calMonth')}</option>
+              <option value="list">{t('dashboard.social.calList')}</option>
+            </select>
+          </div>
+          <div className="social-cal-nav">
+            <button type="button" className="social-btn social-btn-icon" aria-label={t('dashboard.social.calPrev')} onClick={() => step(-1)}>
+              <ChevronLeft size={14} aria-hidden="true" />
             </button>
-          ))}
+            <button type="button" className="social-btn social-btn-sm" onClick={() => setAnchor(new Date())}>
+              {t('dashboard.social.calToday')}
+            </button>
+            <button type="button" className="social-btn social-btn-icon" aria-label={t('dashboard.social.calNext')} onClick={() => step(1)}>
+              <ChevronRight size={14} aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -471,7 +779,7 @@ function CalendarPanel(props: {
         <>
           <div className="social-cal-weekdays" aria-hidden="true">
             {days.slice(0, 7).map(day => (
-              <span key={dayKey(day)}>{day.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+              <span key={dayKey(day)}>{WEEKDAY_LABELS[day.getDay()]}</span>
             ))}
           </div>
           <div className={`social-cal-grid ${view === 'month' ? 'social-cal-grid-month' : ''}`}>
@@ -496,7 +804,7 @@ function CalendarPanel(props: {
                     }
                   }}
                 >
-                  <span className="social-cal-daynum">{day.getDate()}</span>
+                  {view === 'month' ? <span className="social-cal-daynum">{day.getDate()}</span> : null}
                   <div className="social-cal-chips">
                     {visible.map(job => (
                       <JobChip key={job.id} job={job} t={t} onClick={() => setEditing(job)} />
@@ -516,8 +824,8 @@ function CalendarPanel(props: {
         </>
       ) : (
         <ul className="social-cal-list">
-          {props.jobs.length === 0 ? <li className="social-empty">{t('dashboard.social.calEmpty')}</li> : null}
-          {props.jobs.map(job => (
+          {filteredJobs.length === 0 ? <li className="social-empty">{t('dashboard.social.calEmpty')}</li> : null}
+          {filteredJobs.map(job => (
             <li key={job.id}>
               <button type="button" className="social-cal-list-row" onClick={() => setEditing(job)}>
                 <span className="social-cal-list-when">{formatSchedule(job.scheduledAt)}</span>
@@ -568,10 +876,18 @@ function addMonthsSafe(date: Date, amount: number): Date {
 function JobChip(props: { job: SocialJobSummary; t: Translate; onClick(): void }) {
   const { job } = props;
   const draggable = jobIsReschedulable(job);
+  const activePlatforms = PLATFORMS.filter(platform => job.platforms[platform].status !== 'skipped');
+  const primary = activePlatforms.includes('youtube') ? 'youtube' : activePlatforms.includes('tiktok') ? 'tiktok' : 'facebook';
+  const statuses = activePlatforms.map(platform => job.platforms[platform].status);
+  const state = statuses.every(status => status === 'published')
+    ? 'done'
+    : statuses.includes('failed')
+      ? 'failed'
+      : 'sched';
   return (
     <button
       type="button"
-      className={`social-cal-chip social-cal-chip-${jobKind(job)}`}
+      className={`social-cal-chip social-cal-chip-plat-${primary} social-cal-chip-state-${state}`}
       draggable={draggable}
       title={draggable ? props.t('dashboard.social.calHint') : job.title}
       onClick={props.onClick}
@@ -580,10 +896,8 @@ function JobChip(props: { job: SocialJobSummary; t: Translate; onClick(): void }
         event.dataTransfer.effectAllowed = 'move';
       }}
     >
-      <span className="social-cal-chip-top">
-        <span className="social-cal-chip-time">{formatTime(job.scheduledAt)}</span>
-        <span className="social-cal-chip-title" title={job.title}>{job.title}</span>
-      </span>
+      <span className="social-cal-chip-time">{formatTime(job.scheduledAt)}</span>
+      <span className="social-cal-chip-title" title={job.title}>{job.title}</span>
       <span className="social-cal-chip-dots">
         {PLATFORMS.map(platform => (
           <span key={platform} className={`social-dot social-dot-${platform} social-dot-${job.platforms[platform].status}`}>
@@ -610,7 +924,10 @@ function JobQuickEditModal(props: {
   return (
     <div className="social-modal-mask" role="dialog" aria-modal="true" aria-label={t('dashboard.social.quickEdit')}>
       <div className="social-modal">
-        <h2>{t('dashboard.social.quickEdit')}</h2>
+        <div className="social-modal-head">
+          <h2>{t('dashboard.social.quickEdit')}</h2>
+          <button type="button" className="social-modal-close" onClick={props.onClose} aria-label={t('dashboard.drama.close')}>✕</button>
+        </div>
         <p className="social-quickedit-meta" title={job.videoPath}>
           {job.title} · {job.clusterName} · <CalendarClock size={11} aria-hidden="true" /> {formatSchedule(job.scheduledAt)}
         </p>
@@ -663,13 +980,16 @@ function JobQuickEditModal(props: {
 }
 
 // ---------------------------------------------------------------------------
-// Tab Hàng đợi — form nạp nhanh + Excel + bảng job
+// Tab Hàng đợi — công cụ nạp nhanh + bảng job + Trình Soi Lỗi
 // ---------------------------------------------------------------------------
 
 function QueuePanel(props: {
   jobs: SocialJobSummary[];
   clusters: SocialClusterSummary[];
+  service: SocialService;
   queueRunning: boolean;
+  selectedJobId: string;
+  onSelectJob(id: string): void;
   t: Translate;
   onToggleQueue(): void;
   onNewPost(): void;
@@ -680,263 +1000,19 @@ function QueuePanel(props: {
   onRetry(job: SocialJobSummary): void;
 }) {
   const { t } = props;
+  const selectedJob = props.jobs.find(job => job.id === props.selectedJobId) ?? null;
+  const failedJobs = props.jobs.filter(job => jobKind(job) === 'failed');
+  function retryAllFailed(): void {
+    for (const job of failedJobs) props.onRetry(job);
+  }
   return (
     <div className="social-queue">
-      <div className="social-panel-head">
-        <h2>{t('dashboard.social.queueTitle')}</h2>
+      <div className="social-inline-row">
         <span className={`social-queue-state social-queue-state-${props.queueRunning ? 'running' : 'paused'}`}>
           {props.queueRunning ? t('dashboard.social.queueRunning') : t('dashboard.social.queuePaused')}
         </span>
-        <div className="social-panel-head-actions">
-          <button type="button" className="social-btn social-btn-sm" onClick={props.onNewPost}>
-            <Plus size={13} aria-hidden="true" /> {t('dashboard.social.newPost')}
-          </button>
-          <button type="button" className="social-btn social-btn-sm" onClick={props.onToggleQueue}>
-            {props.queueRunning ? t('dashboard.social.pauseQueue') : t('dashboard.social.resumeQueue')}
-          </button>
-        </div>
-      </div>
-      <p className="social-enqueue-hint">{t('dashboard.social.queueTranslatedHint')}</p>
-      <EnqueueSheet
-        clusters={props.clusters}
-        t={t}
-        onEnqueue={props.onEnqueue}
-        onEnqueueMany={props.onEnqueueMany}
-        onError={props.onError}
-      />
-      {props.jobs.length === 0 ? (
-        <p className="social-empty">{t('dashboard.social.noJobs')}</p>
-      ) : (
-        <ul className="social-job-list">
-          {props.jobs.map(job => (
-            <JobRow
-              key={job.id}
-              job={job}
-              t={t}
-              onRemove={() => props.onRemove(job)}
-              onRetry={() => props.onRetry(job)}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function ClusterCard(props: {
-  cluster: SocialClusterSummary;
-  t: Translate;
-  loginPendingKey: string;
-  onCheckProxy(): void;
-  onOpenBrowser(): void;
-  onCloseBrowser(): void;
-  onOpenLogin(platform: SocialPlatformName): void;
-  onToggleAutoPublish(enabled: boolean): void;
-  onEdit(): void;
-  onDelete(): void;
-}) {
-  const { cluster, t } = props;
-  const proxyLabel: Record<string, string> = {
-    online: t('dashboard.social.proxyOnline'),
-    dead: t('dashboard.social.proxyDead'),
-    unchecked: t('dashboard.social.proxyUnchecked'),
-    checking: t('dashboard.social.proxyChecking'),
-    no_proxy: t('dashboard.social.proxyNone')
-  };
-  const loginLabel: Record<string, string> = {
-    ok: t('dashboard.social.loginOk'),
-    expired: t('dashboard.social.loginExpired'),
-    unknown: t('dashboard.social.loginUnknown')
-  };
-  return (
-    <li className="social-cluster-card">
-      <div className="social-cluster-head">
-        <strong title={cluster.seriesName !== '' ? cluster.seriesName : cluster.name}>
-          {cluster.seriesName !== '' ? cluster.seriesName : cluster.name}
-        </strong>
-        <span className={`social-cluster-proxy social-cluster-proxy-${cluster.proxyStatus}`}>
-          <ShieldCheck size={12} aria-hidden="true" /> {proxyLabel[cluster.proxyStatus] ?? cluster.proxyStatus}
-        </span>
-      </div>
-      <div className="social-cluster-logins">
-        {PLATFORMS.map(platform => {
-          const status = cluster.loginStatus[platform];
-          const key = `${cluster.id}:${platform}`;
-          return (
-            <span key={platform} className="social-login-entry">
-              <span
-                className={`social-login social-login-${status}`}
-                title={loginLabel[status] ?? status}
-                data-testid={`social-login-status-${cluster.id}-${platform}`}
-              >
-                {platformIcon(platform, 10)} {platform} · {loginLabel[status] ?? t('dashboard.social.loginUnknown')}
-              </span>
-              <button
-                type="button"
-                className="social-btn social-btn-sm"
-                disabled={props.loginPendingKey === key}
-                onClick={() => props.onOpenLogin(platform)}
-              >
-                {props.loginPendingKey === key ? <LoaderCircle size={12} className="social-spin" /> : <KeyRound size={12} aria-hidden="true" />}
-                {t('dashboard.social.loginAction')}
-              </button>
-            </span>
-          );
-        })}
-      </div>
-      <p className="social-cluster-meta">
-        {t('dashboard.social.scheduleTimes', { times: cluster.defaultScheduleTimes.join(', ') })}
-        {' · '}
-        {t('dashboard.social.fbMode', { mode: cluster.fbMode === 'graph_api' ? 'Graph API' : 'Business Suite' })}
-      </p>
-      <label
-        className="social-cluster-autopublish"
-        title={t('dashboard.social.autoPublishHint')}
-      >
-        <input
-          type="checkbox"
-          data-testid={`social-autopublish-${cluster.id}`}
-          checked={cluster.autoPublishAfterTranslate}
-          onChange={event => props.onToggleAutoPublish(event.target.checked)}
-        />
-        {' '}{t('dashboard.social.autoPublishToggle')}
-      </label>
-      <div className="social-cluster-actions">
-        {cluster.browserOpen
-          ? <button type="button" className="social-btn social-btn-sm" onClick={props.onCloseBrowser}>{t('dashboard.social.closeBrowser')}</button>
-          : <button type="button" className="social-btn social-btn-sm" onClick={props.onOpenBrowser}><ExternalLink size={12} aria-hidden="true" /> {t('dashboard.social.openBrowser')}</button>}
-        <button type="button" className="social-btn social-btn-sm" onClick={props.onCheckProxy}>{t('dashboard.social.checkProxy')}</button>
-        <button type="button" className="social-btn social-btn-sm" onClick={props.onEdit}>{t('dashboard.social.editCluster')}</button>
-        <button type="button" className="social-btn social-btn-sm social-btn-danger" onClick={props.onDelete}><Trash2 size={12} aria-hidden="true" /> {t('dashboard.social.deleteCluster')}</button>
-      </div>
-    </li>
-  );
-}
-
-function ChannelsPanel(props: {
-  clusters: SocialClusterSummary[];
-  t: Translate;
-  onNewCluster(): void;
-  onCheckProxy(cluster: SocialClusterSummary): void;
-  onOpenBrowser(cluster: SocialClusterSummary): void;
-  onCloseBrowser(cluster: SocialClusterSummary): void;
-  onOpenLogin(cluster: SocialClusterSummary, platform: SocialPlatformName): Promise<void>;
-  onLoginPending: string | null;
-  onToggleAutoPublish(cluster: SocialClusterSummary, enabled: boolean): void;
-  onEdit(cluster: SocialClusterSummary): void;
-  onDelete(cluster: SocialClusterSummary): void;
-}) {
-  const { t } = props;
-  return (
-    <div className="social-channels">
-      <div className="social-panel-head">
-        <h2>{t('dashboard.social.clustersTitle', { count: props.clusters.length })}</h2>
-        <div className="social-panel-head-actions">
-          <button type="button" className="social-btn social-btn-primary" onClick={props.onNewCluster}>
-            <Plus size={14} aria-hidden="true" /> {t('dashboard.social.newCluster')}
-          </button>
-        </div>
-      </div>
-      <p className="social-enqueue-hint">{t('dashboard.social.loginHint')}</p>
-      {props.clusters.length === 0 ? (
-        <p className="social-empty">{t('dashboard.social.noClusters')}</p>
-      ) : (
-        <ul className="social-cluster-grid">
-          {props.clusters.map(cluster => (
-            <ClusterCard
-              key={cluster.id}
-              cluster={cluster}
-              t={props.t}
-              loginPendingKey={props.onLoginPending ?? ''}
-              onCheckProxy={() => props.onCheckProxy(cluster)}
-              onOpenBrowser={() => props.onOpenBrowser(cluster)}
-              onCloseBrowser={() => props.onCloseBrowser(cluster)}
-              onOpenLogin={platform => void props.onOpenLogin(cluster, platform)}
-              onToggleAutoPublish={enabled => props.onToggleAutoPublish(cluster, enabled)}
-              onEdit={() => props.onEdit(cluster)}
-              onDelete={() => props.onDelete(cluster)}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function EnqueueSheet(props: {
-  clusters: SocialClusterSummary[];
-  t: Translate;
-  onEnqueue(item: SocialEnqueueItem, scheduledAt: string): void;
-  onEnqueueMany(items: SocialEnqueueItem[], summaryMessage: string): void;
-  onError(message: string): void;
-}) {
-  const { t } = props;
-  const [clusterId, setClusterId] = useState('');
-  const [enqueuePath, setEnqueuePath] = useState('');
-  const [title, setTitle] = useState('');
-  const [scheduleNow, setScheduleNow] = useState('');
-  useEffect(() => {
-    if (props.clusters.length > 0 && clusterId === '') setClusterId(props.clusters[0]!.id);
-  }, [clusterId, props.clusters]);
-  const valid = enqueuePath.trim() !== '' && clusterId !== '';
-  return (
-    <div className="social-enqueue">
-      <div className="social-enqueue-inline">
-        <div className="social-enqueue-row">
-          <label htmlFor="social-enqueue-cluster">{t('dashboard.social.pickCluster')}</label>
-          <select
-            id="social-enqueue-cluster"
-            value={clusterId}
-            onChange={event => setClusterId(event.target.value)}
-          >
-            {props.clusters.length === 0 ? <option value="">{t('dashboard.social.noClusters')}</option> : null}
-            {props.clusters.map(cluster => (
-              <option key={cluster.id} value={cluster.id}>{cluster.seriesName !== '' ? cluster.seriesName : cluster.name}</option>
-            ))}
-          </select>
-        </div>
-        <div className="social-enqueue-row">
-          <label htmlFor="social-enqueue-title">{t('dashboard.social.jobTitle')}</label>
-          <input
-            id="social-enqueue-title"
-            type="text"
-            placeholder={t('dashboard.social.jobTitlePlaceholder')}
-            value={title}
-            onChange={event => setTitle(event.target.value)}
-          />
-        </div>
-      </div>
-      <div className="social-enqueue-row">
-        <label htmlFor="social-enqueue-path">{t('dashboard.social.videoPath')}</label>
-        <input
-          id="social-enqueue-path"
-          type="text"
-          placeholder={t('dashboard.social.videoPathPlaceholder')}
-          value={enqueuePath}
-          onChange={event => setEnqueuePath(event.target.value)}
-        />
-      </div>
-      <div className="social-enqueue-row">
-        <label htmlFor="social-enqueue-schedule"><CalendarClock size={12} aria-hidden="true" /> {t('dashboard.social.scheduleAt')}</label>
-        <input
-          id="social-enqueue-schedule"
-          type="datetime-local"
-          value={scheduleNow}
-          onChange={event => setScheduleNow(event.target.value)}
-        />
-      </div>
-      <div className="social-enqueue-actions">
-        <button
-          type="button"
-          className="social-btn social-btn-primary"
-          disabled={!valid}
-          onClick={() => {
-            props.onEnqueue({ clusterId, path: enqueuePath.trim(), ...(title.trim() === '' ? {} : { title: title.trim() }) }, scheduleNow);
-            setEnqueuePath('');
-            setScheduleNow('');
-          }}
-        >
-          <Plus size={14} aria-hidden="true" /> {t('dashboard.social.enqueue')}
+        <button type="button" className="social-btn social-btn-primary" onClick={props.onNewPost}>
+          ➕ {t('dashboard.social.newPost')}
         </button>
         <ExcelImportButton
           clusters={props.clusters}
@@ -944,64 +1020,202 @@ function EnqueueSheet(props: {
           onEnqueueMany={props.onEnqueueMany}
           onError={message => props.onError(message)}
         />
+        {failedJobs.length > 0 ? (
+          <button type="button" className="social-btn social-btn-amber" onClick={retryAllFailed}>
+            🔄 Đặt Lại Job Lỗi (Retry All)
+          </button>
+        ) : null}
       </div>
-      <p className="social-enqueue-hint">{t('dashboard.social.enqueueHint')}</p>
+      <div className="social-queue-cols">
+        <div className="social-queue-table">
+          {props.jobs.length === 0 ? (
+            <p className="social-empty">{t('dashboard.social.noJobs')}</p>
+          ) : (
+            <div className="social-tablewrap">
+              <table className="social-table">
+                <thead>
+                  <tr>
+                    <th>Job ID</th>
+                    <th>{t('dashboard.social.tabChannels')}</th>
+                    <th>{t('dashboard.social.jobTitle')}</th>
+                    <th>{t('dashboard.social.scheduleAt')}</th>
+                    <th>YouTube</th>
+                    <th>TikTok</th>
+                    <th>Facebook</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {props.jobs.map(job => {
+                    const selected = job.id === props.selectedJobId;
+                    const failed = jobKind(job) === 'failed';
+                    return (
+                      <tr
+                        key={job.id}
+                        className={`social-queue-selectable${selected ? ' social-queue-selected' : ''}${failed ? ' social-queue-row-failed' : ''}`}
+                        onClick={() => props.onSelectJob(job.id)}
+                      >
+                        <td className="social-cell-mono">#{shortJobId(job.id)}</td>
+                        <td className="social-cell-name">{job.clusterName}</td>
+                        <td className="social-cell-mono" title={job.videoPath}>
+                          {job.title !== '' ? job.title : fileNameOf(job.videoPath)}
+                        </td>
+                        <td className="social-cell-mono" style={{ color: '#fbbf24' }}>{formatSchedule(job.scheduledAt)}</td>
+                        {PLATFORMS.map(platform => {
+                          const kind = platformKind(job.platforms[platform].status);
+                          return (
+                            <td key={platform}>
+                              <span className={`social-chip social-chip-${kind}`} title={job.platforms[platform].error ?? job.platforms[platform].videoId ?? undefined}>
+                                {t(`dashboard.social.status_${kind}` as never)}
+                              </span>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        {selectedJob !== null ? (
+          <ErrorInspector
+            service={props.service}
+            job={selectedJob}
+            t={t}
+            onRetry={() => props.onRetry(selectedJob)}
+            onRemove={() => props.onRemove(selectedJob)}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function JobRow(props: {
+const SCREENSHOT_PLATFORM_CODES: Record<PlatformName, 'yt' | 'tk' | 'fb'> = { youtube: 'yt', tiktok: 'tk', facebook: 'fb' };
+
+function ErrorInspector(props: {
+  service: SocialService;
   job: SocialJobSummary;
   t: Translate;
-  onRemove(): void;
   onRetry(): void;
+  onRemove(): void;
 }) {
   const { job, t } = props;
   const failedPlatforms = PLATFORMS.filter(platform => job.platforms[platform].status === 'failed');
-  const hasFailed = failedPlatforms.length > 0;
+  const [shotUrl, setShotUrl] = useState<string | null>(null);
+  const [shotLoading, setShotLoading] = useState(false);
+  const [selectors, setSelectors] = useState<string>('');
+  const [selectorsLoaded, setSelectorsLoaded] = useState(false);
+  const [selectorsSaving, setSelectorsSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setShotUrl(null);
+    setShotLoading(true);
+    (async () => {
+      for (const platform of failedPlatforms) {
+        const result = await props.service.getErrorScreenshot(job.id, SCREENSHOT_PLATFORM_CODES[platform]).catch(() => null);
+        if (result !== null && result.url !== '' && alive) {
+          setShotUrl(result.url);
+          break;
+        }
+      }
+      if (alive) setShotLoading(false);
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job.id, failedPlatforms.length]);
+
+  useEffect(() => {
+    if (!selectorsLoaded) return;
+    props.service.getSelectors()
+      .then(result => setSelectors(result.selectors))
+      .catch(() => setSelectors(''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectorsLoaded]);
+
   return (
-    <li className={`social-job-row${hasFailed ? ' social-job-row-failed' : ''}`}>
-      <div className="social-job-main">
-        <p className="social-job-title" title={job.videoPath}>{job.title}</p>
-        <p className="social-job-meta">
-          {job.clusterName} · <CalendarClock size={11} aria-hidden="true" /> {formatSchedule(job.scheduledAt)}
-        </p>
-        {hasFailed ? (
-          <p className="social-job-error">
-            {failedPlatforms.map(platform => `${platform}: ${job.platforms[platform].error ?? t('dashboard.social.status_failed')}`).join(' · ')}
-          </p>
+    <div className="social-err-panel">
+      <div className="social-err-head">
+        <span className="social-err-title">🔍 Trình Soi Lỗi & Ảnh Chụp (Job #{shortJobId(job.id)})</span>
+        {failedPlatforms.length > 0 ? (
+          <button type="button" className="social-btn social-btn-danger social-btn-sm" onClick={props.onRetry}>
+            🔄 {t('dashboard.social.retry')}
+          </button>
         ) : null}
       </div>
-      <div className="social-job-platforms">
+      <div className="social-err-chips">
         {PLATFORMS.map(platform => {
-          const state = job.platforms[platform];
-          const kind = platformKind(state.status);
+          const kind = platformKind(job.platforms[platform].status);
           return (
-            <span key={platform} className={`social-chip social-chip-${kind}`} title={state.error ?? state.videoId ?? undefined}>
-              {platformIcon(platform)} {t(`dashboard.social.status_${kind}` as never)}
+            <span key={platform} className={`social-chip social-chip-${kind}`}>
+              {platformEmoji(platform)} {platform}
             </span>
           );
         })}
       </div>
-      <div className="social-job-actions">
-        {hasFailed ? <button type="button" className="social-btn social-btn-sm social-btn-retry" onClick={props.onRetry}><RefreshCw size={12} aria-hidden="true" /> {t('dashboard.social.retry')}</button> : null}
-        <button type="button" className="social-btn social-btn-sm social-btn-danger" onClick={props.onRemove}>{t('dashboard.social.remove')}</button>
+      <div className="social-err-box">
+        {failedPlatforms.length > 0
+          ? failedPlatforms.map(platform => `${platform}: ${job.platforms[platform].error ?? t('dashboard.social.status_failed')}`).join('\n')
+          : '✅ Không có lỗi — job đang bình thường.'}
       </div>
-    </li>
+      <span style={{ fontSize: 11, color: '#94a3b8' }}>
+        📸 Ảnh chụp màn hình trong trình duyệt của nhóm vào lúc gặp lỗi:
+      </span>
+      <div className="social-err-shot">
+        {shotUrl !== null
+          ? <img src={shotUrl} alt={`ảnh chụp lỗi job ${shortJobId(job.id)}`} />
+          : (
+            <div className="social-err-shot-placeholder">
+              {shotLoading ? <LoaderCircle size={14} className="social-spin" aria-hidden="true" /> : 'Không có ảnh chụp lỗi cho job này.'}
+            </div>
+          )}
+      </div>
+      <details className="social-selectors-details">
+        <summary onClick={() => setSelectorsLoaded(true)}>🛠️ Sửa Selector Nóng (khi nền tảng đổi giao diện)</summary>
+        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <textarea
+            className="social-selectors-textarea"
+            spellCheck={false}
+            value={selectors}
+            onChange={event => setSelectors(event.target.value)}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="social-btn social-btn-green social-btn-sm"
+              disabled={selectorsSaving || selectors.trim() === ''}
+              onClick={() => {
+                setSelectorsSaving(true);
+                props.service.saveSelectors(selectors)
+                  .then(result => { setSelectors(result.selectors); alert('✅ Đã lưu selectors — job đăng sau áp dụng ngay (đã tạo bản .bak).'); })
+                  .catch(cause => alert(`❌ Không lưu được selectors: ${messageOf(cause)}`))
+                  .finally(() => setSelectorsSaving(false));
+              }}
+            >
+              ⚡ Lưu & Áp Dụng Ngay
+            </button>
+            <span className="social-selectors-note">Mỗi lần lưu tự tạo bản backup `.bak` để khôi phục nếu cần.</span>
+          </div>
+        </div>
+      </details>
+      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        <button type="button" className="social-btn social-btn-danger social-btn-sm" onClick={props.onRemove}>
+          <Trash2 size={12} aria-hidden="true" /> {t('dashboard.social.remove')}
+        </button>
+      </div>
+    </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Composer đa kênh — media picker + cụm + cài đặt từng nền tảng + preview
+// Composer đa kênh — trình bày inline trong tab Lịch Đăng như demo
 // ---------------------------------------------------------------------------
 
-type MediaSourceTab = 'translated' | 'downloads';
-
-function ComposerModal(props: {
-  open: boolean;
-  service: SocialService;
+function ComposerBlock(props: {
   clusters: SocialClusterSummary[];
-  /** Dịch vụ creator phía web — có thể undefined (chỉ còn nguồn "Video tải về"). */
+  service: SocialService;
   creatorService?: CreatorWebService | null;
   projectId?: string;
   initialPath: string;
@@ -1010,37 +1224,33 @@ function ComposerModal(props: {
   onEnqueue(items: SocialEnqueueItem[]): Promise<void>;
 }) {
   const { t } = props;
-  const [path, setPath] = useState('');
+  const [path, setPath] = useState(props.initialPath);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [hashtags, setHashtags] = useState('');
+  const [snapshot, setSnapshot] = useState<Set<string>>(new Set());
+  const [aiBusy, setAiBusy] = useState(false);
   const [schedule, setSchedule] = useState('');
   const [downloads, setDownloads] = useState<SocialDownloadItem[] | null>(null);
   const [downloadsError, setDownloadsError] = useState('');
   const [translatedVideos, setTranslatedVideos] = useState<SocialTranslatedVideo[] | null>(null);
   const [translatedError, setTranslatedError] = useState('');
-  // 2 nguồn chọn media: "Video đã dịch" (luồng dịch → đăng) là mặc định khi
-  // có creator service; không có creator service → chỉ còn nguồn tải về.
-  const [sourceTab, setSourceTab] = useState<MediaSourceTab>(
-    () => props.creatorService == null ? 'downloads' : 'translated'
-  );
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [ddOpen, setDdOpen] = useState(false);
+  const [ddUp, setDdUp] = useState(false);
+  const ddWrapRef = useRef<HTMLDivElement | null>(null);
   const [yt, setYt] = useState({ privacy: 'public', tags: '', madeForKids: false });
   const [tk, setTk] = useState({ privacy: 'public', allowDuet: true, allowStitch: true, allowComments: true, directPost: false });
   const [fb, setFb] = useState({ postType: 'post' });
-  const [openSections, setOpenSections] = useState<Record<'youtube' | 'tiktok' | 'facebook', boolean>>({
-    youtube: false, tiktok: false, facebook: false
-  });
 
   useEffect(() => {
-    if (!props.open) return;
-    setPath(props.initialPath);
+    setPath(current => current.trim() === '' ? props.initialPath : current);
     let alive = true;
     props.service.listDownloads(500)
       .then(result => { if (alive) { setDownloads(result.items); setDownloadsError(''); } })
       .catch(cause => { if (alive) setDownloadsError(messageOf(cause)); });
-    // Nguồn "Video đã dịch": creator service có thể không tồn tại (chỉ còn tải về).
     if (props.creatorService !== undefined && props.creatorService !== null) {
       listTranslatedVideos(props.creatorService, props.projectId)
         .then(result => { if (alive) { setTranslatedVideos(result.items); setTranslatedError(''); } })
@@ -1048,9 +1258,30 @@ function ComposerModal(props: {
     }
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.open, props.initialPath]);
+  }, []);
 
-  if (!props.open) return null;
+  // Bấm ra ngoài → đóng dropdown nhóm thông minh.
+  useEffect(() => {
+    if (!ddOpen) return;
+    const handler = (event: MouseEvent): void => {
+      if (ddWrapRef.current !== null && !ddWrapRef.current.contains(event.target as Node)) {
+        setDdOpen(false);
+      }
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [ddOpen]);
+
+  function toggleDropdown(): void {
+    setDdOpen(current => {
+      if (!current && ddWrapRef.current !== null) {
+        // Smart positioning: đủ chỗ trống phía dưới → mở xuống, không thì nhô lên.
+        const rect = ddWrapRef.current.getBoundingClientRect();
+        setDdUp(window.innerHeight - rect.bottom < 200);
+      }
+      return !current;
+    });
+  }
 
   const hasTranslatedSource = props.creatorService != null;
   const needle = search.trim().toLowerCase();
@@ -1064,28 +1295,34 @@ function ComposerModal(props: {
     translateFilter(item.title, item.seriesName, item.path)
   );
   const filteredTranslated = (translatedVideos ?? []).filter(item => translateFilter(item.title, item.jobId, item.path));
-  const selectedClusters = props.clusters.filter(cluster => selectedIds.has(cluster.id));
+  const selectedClusters = props.clusters.filter(cluster => snapshot.has(cluster.id));
   const pathOk = path.trim() !== '';
   const clustersOk = selectedClusters.length > 0;
   const slotTimes = [...new Set(selectedClusters.flatMap(cluster => cluster.defaultScheduleTimes))];
+  const titleCounter = title.length;
 
-  const settings: SocialJobPlatformSettings = {
-    youtube: {
-      privacy: yt.privacy,
-      ...(yt.tags.split(',').map(tag => tag.trim()).filter(tag => tag !== '').length > 0
-        ? { tags: yt.tags.split(',').map(tag => tag.trim()).filter(tag => tag !== '') }
-        : {}),
-      ...(yt.madeForKids ? { madeForKids: true } : {})
-    },
-    tiktok: {
-      privacy: tk.privacy,
-      allowDuet: tk.allowDuet,
-      allowStitch: tk.allowStitch,
-      allowComments: tk.allowComments,
-      directPost: tk.directPost
-    },
-    facebook: { postType: fb.postType }
-  };
+  function buildSettings(): SocialJobPlatformSettings {
+    const hashtagsList = hashtags.split(/\s+/).map(tag => tag.replace(/^#/, '').trim()).filter(tag => tag !== '');
+    const ytTags = yt.tags.split(',').map(tag => tag.trim()).filter(tag => tag !== '');
+    return {
+      youtube: {
+        privacy: yt.privacy,
+        // Tags để trống → AI tự sinh từ hashtag của composer.
+        ...(ytTags.length > 0
+          ? { tags: ytTags }
+          : hashtagsList.length > 0 ? { tags: hashtagsList } : {}),
+        ...(yt.madeForKids ? { madeForKids: true } : {})
+      },
+      tiktok: {
+        privacy: tk.privacy,
+        allowDuet: tk.allowDuet,
+        allowStitch: tk.allowStitch,
+        allowComments: tk.allowComments,
+        directPost: tk.directPost
+      },
+      facebook: { postType: fb.postType }
+    };
+  }
 
   function pickDownload(item: SocialDownloadItem): void {
     setPath(item.path);
@@ -1097,20 +1334,47 @@ function ComposerModal(props: {
     if (title.trim() === '') setTitle(item.title);
   }
 
+  function aiDoAll(): void {
+    const base = title.trim() !== '' ? title : (path.trim() !== '' ? fileNameOf(path) : '');
+    if (base === '') return;
+    setAiBusy(true);
+    props.service.aiCompose(base)
+      .then(result => {
+        setTitle(result.title);
+        setDescription(result.description);
+        setHashtags(result.hashtags);
+      })
+      .catch(cause => alert(`❌ AI soạn nội dung lỗi: ${messageOf(cause)}`))
+      .finally(() => setAiBusy(false));
+  }
+
   function submit(): void {
     if (!pathOk || !clustersOk || submitting) return;
+    const fullDescription = hashtags.trim() === ''
+      ? description
+      : [description.trim(), hashtags.trim()].filter(part => part !== '').join('\n\n');
     const items = composeEnqueueItems({
       clusters: selectedClusters,
       path,
       title,
-      description,
+      description: fullDescription,
       scheduledAt: schedule,
-      settings
+      settings: buildSettings()
     });
     setSubmitting(true);
     props.onEnqueue(items)
       .catch(() => undefined)
       .finally(() => setSubmitting(false));
+  }
+
+  function ddLabel(): string {
+    if (selectedClusters.length === 0) return 'Chưa chọn nhóm nào';
+    const first = selectedClusters[0];
+    if (first === undefined) return 'Chưa chọn nhóm nào';
+    const firstName = first.seriesName !== '' ? first.seriesName : first.name;
+    return selectedClusters.length === 1
+      ? `✅ ${firstName}`
+      : `✅ ${firstName} +${selectedClusters.length - 1} nhóm nữa`;
   }
 
   const ytPrivacyLabels: Record<string, string> = {
@@ -1129,329 +1393,337 @@ function ComposerModal(props: {
     story: t('dashboard.social.fbPostTypeStory')
   };
 
+  const mergedMedia: Array<{ key: string } & ({ kind: 'translated'; item: SocialTranslatedVideo } | { kind: 'downloads'; item: SocialDownloadItem })> = [
+    ...filteredTranslated.map(item => ({ key: `t:${item.artifactId}`, kind: 'translated' as const, item })),
+    ...filteredDownloads.map(item => ({ key: `d:${item.path}`, kind: 'downloads' as const, item }))
+  ];
+
+  function mediaTile(entry: (typeof mergedMedia)[number]) {
+    const selected = path.trim() !== '' && entry.item.path === path.trim();
+    const onPick = () => entry.kind === 'translated'
+      ? pickTranslated(entry.item)
+      : pickDownload(entry.item);
+    return (
+      <button
+        key={entry.key}
+        type="button"
+        className={`social-media-card${selected ? ' social-media-card-selected' : ''}`}
+        aria-pressed={selected}
+        onClick={onPick}
+      >
+        <span className="social-media-thumb"><FileVideo size={20} aria-hidden="true" /></span>
+        <span className="social-media-name">{entry.item.title !== '' ? entry.item.title : fileNameOf(entry.item.path)}</span>
+        {entry.kind === 'translated'
+          ? <span className="social-media-status ok">✨ Đã dịch — chờ đăng</span>
+          : (
+            <span className="social-media-status">
+              MP4 · {formatBytes(entry.item.sizeBytes)}
+            </span>
+          )}
+      </button>
+    );
+  }
+
   return (
-    <div className="social-modal-mask" role="dialog" aria-modal="true" aria-label={t('dashboard.social.composerTitle')}>
-      <div className="social-composer">
-        <header className="social-composer-head">
-          <h2>{t('dashboard.social.composerTitle')}</h2>
-          <button type="button" className="social-btn social-btn-ghost" onClick={props.onClose} aria-label={t('dashboard.drama.close')}>✕</button>
-        </header>
-
-        <div className="social-composer-cols">
-          <div className="social-composer-col">
-            <section className="social-composer-section" aria-label={t('dashboard.social.composerPickVideo')}>
-              <h3><FileVideo size={14} aria-hidden="true" /> {t('dashboard.social.composerPickVideo')}</h3>
-              {hasTranslatedSource ? (
-                <div
-                  className="social-media-sources"
-                  role="tablist"
-                  aria-label={t('dashboard.social.composerPickVideo')}
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={sourceTab === 'translated'}
-                    className={`social-btn social-btn-sm${sourceTab === 'translated' ? ' social-btn-primary' : ''}`}
-                    onClick={() => setSourceTab('translated')}
-                  >
-                    {t('dashboard.social.composerSourceTranslated')}
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={sourceTab === 'downloads'}
-                    className={`social-btn social-btn-sm${sourceTab === 'downloads' ? ' social-btn-primary' : ''}`}
-                    onClick={() => setSourceTab('downloads')}
-                  >
-                    {t('dashboard.social.composerSourceDownloads')}
-                  </button>
-                </div>
-              ) : null}
-              <input
-                type="search"
-                className="social-media-search"
-                placeholder={t('dashboard.social.composerSearchVideo')}
-                value={search}
-                onChange={event => setSearch(event.target.value)}
-              />
-              {sourceTab === 'downloads' && downloadsError !== '' ? <p className="social-warn-text">{downloadsError}</p> : null}
-              {sourceTab === 'translated' && translatedError !== '' ? <p className="social-warn-text">{translatedError}</p> : null}
-              {sourceTab === 'translated' && filteredTranslated.length === 0 ? (
-                <p className="social-empty">{t('dashboard.social.composerNoTranslated')}</p>
-              ) : null}
-              {sourceTab === 'downloads' && downloads !== null && filteredDownloads.length === 0 ? (
-                <p className="social-empty">{t('dashboard.social.composerNoVideos')}</p>
-              ) : null}
-              <div className="social-media-grid">
-                {sourceTab === 'translated' ? filteredTranslated.map(item => {
-                  const selected = path.trim() !== '' && item.path === path.trim();
-                  return (
-                    <button
-                      key={item.artifactId}
-                      type="button"
-                      className={`social-media-card${selected ? ' social-media-card-selected' : ''}`}
-                      aria-pressed={selected}
-                      onClick={() => pickTranslated(item)}
-                    >
-                      <span className="social-media-thumb"><FileVideo size={20} aria-hidden="true" /></span>
-                      <span className="social-media-name" title={item.title}>{item.title}</span>
-                      <span className="social-media-series">{t('dashboard.social.composerSourceTranslated')} · V{item.version}</span>
-                      <span className="social-media-meta">{t('dashboard.social.translatedMeta', { time: formatSchedule(item.completedAt) })}</span>
-                    </button>
-                  );
-                }) : filteredDownloads.map(item => {
-                  const selected = path.trim() !== '' && item.path === path.trim();
-                  return (
-                    <button
-                      key={item.path}
-                      type="button"
-                      className={`social-media-card${selected ? ' social-media-card-selected' : ''}`}
-                      aria-pressed={selected}
-                      onClick={() => pickDownload(item)}
-                    >
-                      <span className="social-media-thumb"><FileVideo size={20} aria-hidden="true" /></span>
-                      <span className="social-media-name" title={item.title}>{item.title !== '' ? item.title : fileNameOf(item.path)}</span>
-                      {item.seriesName !== '' ? <span className="social-media-series">{item.seriesName}</span> : null}
-                      <span className="social-media-meta">{formatBytes(item.sizeBytes)} · {t('dashboard.social.composerDownloaded', { time: formatSchedule(item.downloadedAt) })}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="social-enqueue-row">
-                <label htmlFor="social-composer-path">{t('dashboard.social.videoPath')}</label>
-                <input
-                  id="social-composer-path"
-                  type="text"
-                  placeholder={t('dashboard.social.videoPathPlaceholder')}
-                  value={path}
-                  onChange={event => setPath(event.target.value)}
-                />
-              </div>
-              <div className="social-enqueue-row">
-                <label htmlFor="social-composer-title">{t('dashboard.social.jobTitle')}</label>
-                <input
-                  id="social-composer-title"
-                  type="text"
-                  placeholder={t('dashboard.social.jobTitlePlaceholder')}
-                  value={title}
-                  onChange={event => setTitle(event.target.value)}
-                />
-              </div>
-              <div className="social-enqueue-row">
-                <label htmlFor="social-composer-desc">{t('dashboard.social.defaultDescription')}</label>
-                <textarea
-                  id="social-composer-desc"
-                  rows={3}
-                  value={description}
-                  onChange={event => setDescription(event.target.value)}
-                />
-              </div>
-            </section>
-
-            <section className="social-composer-section" aria-label={t('dashboard.social.composerClusters')}>
-              <h3><Tv size={14} aria-hidden="true" /> {t('dashboard.social.composerClusters')}</h3>
-              <div className="social-cluster-picker">
+    <div className="social-composer-cols">
+      <div className="social-composer-col composer-col">
+        <div className="social-composer-sec-title">
+          <span>🧾 Composer — Soạn Bài Đăng Đa Kênh</span>
+          <button
+            type="button"
+            className="social-btn social-btn-primary social-btn-sm"
+            title="AI tự làm: tiêu đề · mô tả · hashtag"
+            disabled={aiBusy || path.trim() === ''}
+            onClick={aiDoAll}
+          >
+            {aiBusy ? <LoaderCircle size={11} className="social-spin" aria-hidden="true" /> : '✨'} AI Tự Làm
+          </button>
+        </div>
+        {mergedMedia.length === 0 ? (
+          <p className="social-empty">
+            {hasTranslatedSource ? t('dashboard.social.composerNoTranslated') : t('dashboard.social.composerNoVideos')}
+          </p>
+        ) : null}
+        {!libraryOpen ? (
+          <div className="social-media-grid">
+            {mergedMedia.slice(0, 2).map(entry => mediaTile(entry))}
+            <button
+              type="button"
+              className="social-media-card social-media-card-search"
+              aria-expanded={libraryOpen}
+              onClick={() => setLibraryOpen(true)}
+            >
+              <span>🔍 Tìm trong thư viện</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            <input
+              type="search"
+              className="social-media-search"
+              placeholder={t('dashboard.social.composerSearchVideo')}
+              value={search}
+              onChange={event => setSearch(event.target.value)}
+            />
+            <div className="social-media-grid social-media-grid-full">
+              {mergedMedia.map(entry => mediaTile(entry))}
+              <button
+                type="button"
+                className="social-media-card social-media-card-search"
+                onClick={() => { setLibraryOpen(false); setSearch(''); }}
+              >
+                <span>✕ Đóng thư viện</span>
+              </button>
+            </div>
+          </>
+        )}
+        {downloadsError !== '' ? <p className="social-warn-text">{downloadsError}</p> : null}
+        {translatedError !== '' ? <p className="social-warn-text">{translatedError}</p> : null}
+        <div className="social-inline-row">
+          <label className="social-label" htmlFor="social-composer-path" style={{ margin: 0, flexShrink: 0 }}>
+            Vị trí video (MP4)
+          </label>
+          <input
+            id="social-composer-path"
+            type="text"
+            className="social-input-mono"
+            placeholder="D:/downloads/tap-5.mp4"
+            value={path}
+            onChange={event => setPath(event.target.value)}
+          />
+        </div>
+        <div>
+          <label className="social-label" htmlFor="social-composer-title">Tiêu đề (AI sẽ tự viết chuẩn SEO, ≤100 ký tự):</label>
+          <input
+            id="social-composer-title"
+            type="text"
+            placeholder={t('dashboard.social.jobTitlePlaceholder')}
+            value={title}
+            onChange={event => setTitle(event.target.value)}
+          />
+          <div className={`social-title-counter${titleCounter > 100 ? ' over' : ''}`}>{titleCounter}/100 ký tự</div>
+        </div>
+        <div>
+          <label className="social-label" htmlFor="social-composer-desc">Mô tả video:</label>
+          <textarea
+            id="social-composer-desc"
+            rows={2}
+            value={description}
+            onChange={event => setDescription(event.target.value)}
+          />
+        </div>
+        <div className="social-inline-row">
+          <span className="social-label" style={{ margin: 0 }}>Hashtag:</span>
+          <input
+            type="text"
+            className="social-input-mono"
+            style={{ flex: 1, minWidth: 0 }}
+            placeholder="AI tự tạo bộ hashtag khi bấm ✨ AI Tự Làm"
+            value={hashtags}
+            onChange={event => setHashtags(event.target.value)}
+          />
+        </div>
+        <div className="social-inline-row">
+          <span className="social-label" style={{ margin: 0, flexShrink: 0 }}>{t('dashboard.social.scheduleAt')}:</span>
+          <input
+            type="datetime-local"
+            style={{ width: 168, flexShrink: 0 }}
+            value={schedule}
+            onChange={event => setSchedule(event.target.value)}
+          />
+          <span className="social-label" style={{ margin: 0, marginLeft: 4, flexShrink: 0 }}>{t('dashboard.social.composerClusters')}:</span>
+          <div className="soc-dd-wrap" ref={ddWrapRef} style={{ flex: 1, minWidth: 180 }}>
+            <button type="button" className="soc-dd-btn" onClick={toggleDropdown}>
+              <span className={`soc-dd-label${selectedClusters.length === 0 ? ' none' : ''}`}>{ddLabel()}</span>
+              <span style={{ color: '#94a3b8' }}>▾</span>
+            </button>
+            {ddOpen ? (
+              <div className={`soc-dd-panel ${ddUp ? 'dd-up' : 'dd-down'}`}>
+                {props.clusters.length === 0 ? <span className="soc-dd-item">{t('dashboard.social.noClusters')}</span> : null}
                 {props.clusters.map(cluster => {
                   const label = cluster.seriesName !== '' ? cluster.seriesName : cluster.name;
-                  const selected = selectedIds.has(cluster.id);
+                  const selected = snapshot.has(cluster.id);
                   return (
-                    <label key={cluster.id} className={`social-cluster-option${selected ? ' social-cluster-option-selected' : ''}`}>
+                    <label key={cluster.id} className="soc-dd-item">
                       <input
                         type="checkbox"
                         checked={selected}
-                        aria-label={label}
+                        className={cluster.loginStatus.youtube === 'ok' ? 'accent-green' : undefined}
                         onChange={() => {
-                          setSelectedIds(current => {
+                          setSnapshot(current => {
                             const next = new Set(current);
                             if (next.has(cluster.id)) next.delete(cluster.id);
                             else next.add(cluster.id);
                             return next;
                           });
                         }}
+                        aria-label={label}
                       />
-                      <span className="social-cluster-option-name">{label}</span>
-                      <span className="social-cluster-option-badges">
-                        {PLATFORMS.map(platform => (
-                          <span key={platform} className={`social-dot social-dot-${platform} social-dot-${cluster.loginStatus[platform] === 'ok' ? 'published' : 'pending'}`}>
-                            {platformIcon(platform, 10)}
-                          </span>
-                        ))}
-                      </span>
+                      {label}
                     </label>
                   );
                 })}
-                {props.clusters.length === 0 ? <p className="social-empty">{t('dashboard.social.noClusters')}</p> : null}
               </div>
-            </section>
-
-            <section className="social-composer-section" aria-label={t('dashboard.social.composerSchedule')}>
-              <h3><CalendarClock size={14} aria-hidden="true" /> {t('dashboard.social.composerSchedule')}</h3>
-              <div className="social-enqueue-inline">
-                <div className="social-enqueue-row">
-                  <label htmlFor="social-composer-schedule">{t('dashboard.social.scheduleAt')}</label>
-                  <input
-                    id="social-composer-schedule"
-                    type="datetime-local"
-                    value={schedule}
-                    onChange={event => setSchedule(event.target.value)}
-                  />
-                </div>
-                <div className="social-enqueue-row">
-                  <label htmlFor="social-composer-slot">{t('dashboard.social.composerUseSlot')}</label>
-                  <button
-                    id="social-composer-slot"
-                    type="button"
-                    className="social-btn"
-                    disabled={slotTimes.length === 0}
-                    onClick={() => {
-                      const slot = nextGoldenSlot(slotTimes);
-                      if (slot !== null) setSchedule(toDatetimeLocalValue(slot.toISOString()));
-                    }}
-                  >
-                    <CalendarClock size={13} aria-hidden="true" /> {t('dashboard.social.composerUseSlot')}
-                  </button>
-                </div>
-              </div>
-              <p className="social-enqueue-hint">{t('dashboard.social.enqueueHint')}</p>
-              <p className="social-enqueue-hint">{t('dashboard.social.queueTranslatedHint')}</p>
-              <div className="social-enqueue-actions">
-                <button type="button" className="social-btn social-btn-sm" onClick={() => downloadTemplate()}>
-                  {t('dashboard.social.excelTemplate')}
-                </button>
-              </div>
-            </section>
+            ) : null}
           </div>
-
-          <div className="social-composer-col">
-            <section className="social-composer-section" aria-label={t('dashboard.social.composerSettings')}>
-              <h3>{t('dashboard.social.composerSettings')}</h3>
-              <div className="social-acc">
-                <button type="button" className="social-acc-head" aria-expanded={openSections.youtube} onClick={() => setOpenSections(current => ({ ...current, youtube: !current.youtube }))}>
-                  <span className="social-dot social-dot-youtube">{platformIcon('youtube', 11)}</span>
-                  {t('dashboard.social.youtubeSettings')}
-                  <span className="social-acc-summary">{ytPrivacyLabels[yt.privacy] ?? yt.privacy}</span>
-                  <ChevronRight size={14} aria-hidden="true" />
-                </button>
-                {openSections.youtube ? (
-                  <div className="social-acc-body">
-                    <div className="social-enqueue-row">
-                      <label htmlFor="social-yt-privacy">{t('dashboard.social.ytPrivacy')}</label>
-                      <select id="social-yt-privacy" value={yt.privacy} onChange={event => setYt({ ...yt, privacy: event.target.value })}>
-                        <option value="public">{t('dashboard.social.ytPrivacyPublic')}</option>
-                        <option value="unlisted">{t('dashboard.social.ytPrivacyUnlisted')}</option>
-                        <option value="private">{t('dashboard.social.ytPrivacyPrivate')}</option>
-                      </select>
-                    </div>
-                    <div className="social-enqueue-row">
-                      <label htmlFor="social-yt-tags">{t('dashboard.social.ytTags')}</label>
-                      <input id="social-yt-tags" type="text" value={yt.tags} onChange={event => setYt({ ...yt, tags: event.target.value })} placeholder="phim, review, tap-1" />
-                    </div>
-                    <label className="social-switch">
-                      <input type="checkbox" checked={yt.madeForKids} onChange={event => setYt({ ...yt, madeForKids: event.target.checked })} />
-                      {t('dashboard.social.ytMadeForKids')}
-                    </label>
-                  </div>
-                ) : null}
-              </div>
-              <div className="social-acc">
-                <button type="button" className="social-acc-head" aria-expanded={openSections.tiktok} onClick={() => setOpenSections(current => ({ ...current, tiktok: !current.tiktok }))}>
-                  <span className="social-dot social-dot-tiktok">{platformIcon('tiktok', 11)}</span>
-                  {t('dashboard.social.tiktokSettings')}
-                  <span className="social-acc-summary">{tk.directPost ? t('dashboard.social.tkDirectPostOn') : tkPrivacyLabels[tk.privacy] ?? tk.privacy}</span>
-                  <ChevronRight size={14} aria-hidden="true" />
-                </button>
-                {openSections.tiktok ? (
-                  <div className="social-acc-body">
-                    <div className="social-enqueue-row">
-                      <label htmlFor="social-tk-privacy">{t('dashboard.social.tkPrivacy')}</label>
-                      <select id="social-tk-privacy" value={tk.privacy} onChange={event => setTk({ ...tk, privacy: event.target.value })}>
-                        <option value="public">{t('dashboard.social.tkPrivacyPublic')}</option>
-                        <option value="friends">{t('dashboard.social.tkPrivacyFriends')}</option>
-                        <option value="private">{t('dashboard.social.tkPrivacyPrivate')}</option>
-                      </select>
-                    </div>
-                    <label className="social-switch">
-                      <input type="checkbox" checked={tk.allowDuet} onChange={event => setTk({ ...tk, allowDuet: event.target.checked })} />
-                      {t('dashboard.social.tkAllowDuet')}
-                    </label>
-                    <label className="social-switch">
-                      <input type="checkbox" checked={tk.allowStitch} onChange={event => setTk({ ...tk, allowStitch: event.target.checked })} />
-                      {t('dashboard.social.tkAllowStitch')}
-                    </label>
-                    <label className="social-switch">
-                      <input type="checkbox" checked={tk.allowComments} onChange={event => setTk({ ...tk, allowComments: event.target.checked })} />
-                      {t('dashboard.social.tkAllowComments')}
-                    </label>
-                    <label className="social-switch">
-                      <input type="checkbox" checked={tk.directPost} onChange={event => setTk({ ...tk, directPost: event.target.checked })} />
-                      {t('dashboard.social.tkDirectPost')}
-                    </label>
-                  </div>
-                ) : null}
-              </div>
-              <div className="social-acc">
-                <button type="button" className="social-acc-head" aria-expanded={openSections.facebook} onClick={() => setOpenSections(current => ({ ...current, facebook: !current.facebook }))}>
-                  <span className="social-dot social-dot-facebook">{platformIcon('facebook', 11)}</span>
-                  {t('dashboard.social.facebookSettings')}
-                  <span className="social-acc-summary">{fbPostTypeLabels[fb.postType] ?? fb.postType}</span>
-                  <ChevronRight size={14} aria-hidden="true" />
-                </button>
-                {openSections.facebook ? (
-                  <div className="social-acc-body">
-                    <div className="social-enqueue-row">
-                      <label htmlFor="social-fb-posttype">{t('dashboard.social.fbPostType')}</label>
-                      <select id="social-fb-posttype" value={fb.postType} onChange={event => setFb({ postType: event.target.value })}>
-                        <option value="post">{t('dashboard.social.fbPostTypePost')}</option>
-                        <option value="reel">{t('dashboard.social.fbPostTypeReel')}</option>
-                        <option value="story">{t('dashboard.social.fbPostTypeStory')}</option>
-                      </select>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="social-composer-section" aria-label={t('dashboard.social.composerPreview')}>
-              <h3>{t('dashboard.social.composerPreview')}</h3>
-              <div className="social-preview-card">
-                <span className="social-preview-thumb"><FileVideo size={22} aria-hidden="true" /></span>
-                <div className="social-preview-body">
-                  <p className="social-preview-title" title={title}>{title.trim() !== '' ? title.trim() : (path.trim() !== '' ? fileNameOf(path) : t('dashboard.social.jobTitlePlaceholder'))}</p>
-                  {description.trim() !== '' ? <p className="social-preview-desc">{description.trim().length > 90 ? `${description.trim().slice(0, 90)}…` : description.trim()}</p> : null}
-                  <div className="social-preview-chips">
-                    {selectedClusters.slice(0, 3).map(cluster => (
-                      <span key={cluster.id} className="social-chip social-chip-pending">{cluster.seriesName !== '' ? cluster.seriesName : cluster.name}</span>
-                    ))}
-                    {selectedClusters.length > 3 ? <span className="social-chip social-chip-pending">{t('dashboard.social.calMore', { count: selectedClusters.length - 3 })}</span> : null}
-                    {PLATFORMS.map(platform => (
-                      <span key={platform} className={`social-dot social-dot-${platform} social-dot-published`}>{platformIcon(platform, 10)}</span>
-                    ))}
-                  </div>
-                  <p className="social-preview-when">
-                    {schedule.trim() !== ''
-                      ? formatSchedule(fromDatetimeLocalValue(schedule) ?? schedule)
-                      : t('dashboard.social.composerAutoSlot')}
-                  </p>
-                </div>
-              </div>
-            </section>
-          </div>
-        </div>
-
-        <footer className="social-composer-foot">
-          <p className="social-composer-hint">
-            {!pathOk ? t('dashboard.social.composerNeedVideo') : !clustersOk ? t('dashboard.social.composerNeedCluster') : ''}
-          </p>
+          <button
+            type="button"
+            className="social-btn"
+            style={{ flexShrink: 0 }}
+            disabled={slotTimes.length === 0}
+            title={t('dashboard.social.composerUseSlot')}
+            onClick={() => {
+              const slot = nextGoldenSlot(slotTimes);
+              if (slot !== null) setSchedule(toDatetimeLocalValue(slot.toISOString()));
+            }}
+          >
+            Theo khung giờ nhóm
+          </button>
           <button
             type="button"
             className="social-btn social-btn-primary"
+            style={{ flexShrink: 0 }}
             disabled={!pathOk || !clustersOk || submitting}
             onClick={submit}
           >
-            {submitting ? <LoaderCircle size={14} className="social-spin" aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}
-            {t('dashboard.social.composerSubmit', { count: selectedClusters.length })}
+            {submitting ? <LoaderCircle size={13} className="social-spin" aria-hidden="true" /> : <Plus size={13} aria-hidden="true" />}
+            📤 Xếp Lịch Đăng
           </button>
-        </footer>
+        </div>
+        <div className="social-inline-row" style={{ gap: 10 }}>
+          <button type="button" className="social-btn social-btn-sm" onClick={() => void downloadTemplate()}>
+            {t('dashboard.social.excelTemplate')}
+          </button>
+        </div>
+      </div>
+
+      <div className="social-composer-col composer-col">
+        <span className="social-composer-sec-title amber">⚙️ {t('dashboard.social.composerSettings')}</span>
+        <details className="social-acc" open>
+          <summary className="social-acc-head" style={{ color: '#fca5a5' }}>
+            <span className="social-dot social-dot-youtube">{platformIcon('youtube', 11)}</span>
+            {t('dashboard.social.youtubeSettings')}
+            <span className="social-acc-summary">{ytPrivacyLabels[yt.privacy] ?? yt.privacy}</span>
+          </summary>
+          <div className="social-acc-body">
+            <div className="social-acc-grid">
+              <label>
+                {t('dashboard.social.ytPrivacy')}
+                <select value={yt.privacy} onChange={event => setYt({ ...yt, privacy: event.target.value })}>
+                  <option value="public">{t('dashboard.social.ytPrivacyPublic')}</option>
+                  <option value="unlisted">{t('dashboard.social.ytPrivacyUnlisted')}</option>
+                  <option value="private">{t('dashboard.social.ytPrivacyPrivate')}</option>
+                </select>
+              </label>
+              <label>
+                {t('dashboard.social.ytMadeForKids')}
+                <select
+                  value={yt.madeForKids ? 'kids' : 'not_kids'}
+                  onChange={event => setYt({ ...yt, madeForKids: event.target.value === 'kids' })}
+                >
+                  <option value="not_kids">Không</option>
+                  <option value="kids">Có</option>
+                </select>
+              </label>
+              <label className="span-2">
+                Tags YouTube (tùy chọn — AI tự sinh từ hashtag nếu để trống)
+                <input
+                  type="text"
+                  className="social-input-mono"
+                  value={yt.tags}
+                  onChange={event => setYt({ ...yt, tags: event.target.value })}
+                  placeholder="phim, review, tap-1"
+                />
+              </label>
+            </div>
+          </div>
+        </details>
+        <details className="social-acc">
+          <summary className="social-acc-head" style={{ color: '#cbd5e1' }}>
+            <span className="social-dot social-dot-tiktok">{platformIcon('tiktok', 11)}</span>
+            {t('dashboard.social.tiktokSettings')}
+            <span className="social-acc-summary">{tk.directPost ? t('dashboard.social.tkDirectPostOn') : tkPrivacyLabels[tk.privacy] ?? tk.privacy}</span>
+          </summary>
+          <div className="social-acc-body">
+            <div className="social-acc-grid">
+              <label>
+                {t('dashboard.social.tkPrivacy')}
+                <select value={tk.privacy} onChange={event => setTk({ ...tk, privacy: event.target.value })}>
+                  <option value="public">{t('dashboard.social.tkPrivacyPublic')}</option>
+                  <option value="friends">{t('dashboard.social.tkPrivacyFriends')}</option>
+                  <option value="private">{t('dashboard.social.tkPrivacyPrivate')}</option>
+                </select>
+              </label>
+              <div className="social-switch-row">
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label className="social-switch">
+                    <input type="checkbox" checked={tk.allowDuet} onChange={event => setTk({ ...tk, allowDuet: event.target.checked })} />
+                    {t('dashboard.social.tkAllowDuet')}
+                  </label>
+                  <label className="social-switch">
+                    <input type="checkbox" checked={tk.allowStitch} onChange={event => setTk({ ...tk, allowStitch: event.target.checked })} />
+                    {t('dashboard.social.tkAllowStitch')}
+                  </label>
+                  <label className="social-switch">
+                    <input type="checkbox" checked={tk.allowComments} onChange={event => setTk({ ...tk, allowComments: event.target.checked })} />
+                    {t('dashboard.social.tkAllowComments')}
+                  </label>
+                  <label className="social-switch">
+                    <input type="checkbox" checked={tk.directPost} onChange={event => setTk({ ...tk, directPost: event.target.checked })} />
+                    {t('dashboard.social.tkDirectPost')}
+                  </label>
+                </span>
+              </div>
+            </div>
+          </div>
+        </details>
+        <details className="social-acc">
+          <summary className="social-acc-head" style={{ color: '#93c5fd' }}>
+            <span className="social-dot social-dot-facebook">{platformIcon('facebook', 11)}</span>
+            {t('dashboard.social.facebookSettings')}
+            <span className="social-acc-summary">{fbPostTypeLabels[fb.postType] ?? fb.postType}</span>
+          </summary>
+          <div className="social-acc-body">
+            <label>
+              {t('dashboard.social.fbPostType')}
+              <select value={fb.postType} onChange={event => setFb({ postType: event.target.value })}>
+                <option value="post">{t('dashboard.social.fbPostTypePost')}</option>
+                <option value="reel">{t('dashboard.social.fbPostTypeReel')}</option>
+                <option value="story">{t('dashboard.social.fbPostTypeStory')}</option>
+              </select>
+            </label>
+          </div>
+        </details>
+        <div style={{ flex: '1 1 auto', minHeight: 0 }}>
+          <span className="social-label">🔍 {t('dashboard.social.composerPreview')}:</span>
+          <div className="social-preview-card">
+            <span className="social-preview-thumb"><FileVideo size={22} aria-hidden="true" /></span>
+            <div className="social-preview-body">
+              <p className="social-preview-title" title={title}>{title.trim() !== '' ? title.trim() : (path.trim() !== '' ? fileNameOf(path) : t('dashboard.social.jobTitlePlaceholder'))}</p>
+              {hashtags.trim() !== '' ? <p className="social-preview-desc">{hashtags.trim()}</p> : null}
+              <div className="social-preview-chips">
+                {selectedClusters.slice(0, 3).map(cluster => (
+                  <span key={cluster.id} className="social-chip social-chip-pending">{cluster.seriesName !== '' ? cluster.seriesName : cluster.name}</span>
+                ))}
+                {selectedClusters.length > 3 ? <span className="social-chip social-chip-pending">{t('dashboard.social.calMore', { count: selectedClusters.length - 3 })}</span> : null}
+                {PLATFORMS.map(platform => (
+                  <span key={platform} className={`social-dot social-dot-${platform} social-dot-published`}>{platformIcon(platform, 10)}</span>
+                ))}
+              </div>
+              <p className="social-preview-when">
+                {schedule.trim() !== ''
+                  ? formatSchedule(fromDatetimeLocalValue(schedule) ?? schedule)
+                  : t('dashboard.social.composerAutoSlot')}
+              </p>
+            </div>
+          </div>
+          {!pathOk && path.trim() === '' ? (
+            <p className="social-enqueue-hint" style={{ marginTop: 6 }}>
+              {t('dashboard.social.composerNeedVideo')}
+              {selectedClusters.length === 0 ? '' : ''}
+            </p>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -1463,27 +1735,88 @@ function fileNameOf(path: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Editor cụm kênh (giữ nguyên logic, trình bày mới)
+// MODAL ĐĂNG NHẬP — trình bày demo; thật: daemon mở trình duyệt cách ly của cụm
+// ---------------------------------------------------------------------------
+
+function LoginModal(props: {
+  cluster: SocialClusterSummary;
+  platform: SocialPlatformName;
+  t: Translate;
+  /** Lệnh thật: daemon mở trình duyệt persistent (fingerprint + proxy của cụm) tới trang đăng nhập. */
+  onOpen(): Promise<void>;
+  onDone(): void;
+  onClose(): void;
+}) {
+  const { cluster, platform, t } = props;
+  const name = platform === 'youtube' ? 'YouTube' : platform === 'tiktok' ? 'TikTok' : 'Facebook';
+  const url = platform === 'youtube' ? 'accounts.google.com/signin' : platform === 'tiktok' ? 'www.tiktok.com/login' : 'www.facebook.com/login';
+  const [step, setStep] = useState(0);
+  const [openingError, setOpeningError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    // Gọi daemon thật: mở trang đăng nhập nền tảng trong trình duyệt riêng của cụm.
+    props.onOpen()
+      .then(() => { if (alive) setOpeningError(''); })
+      .catch(cause => { if (alive) setOpeningError(messageOf(cause)); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (step > 3 || openingError !== '') return;
+    const timer = setInterval(() => setStep(current => {
+      if (current > 3 || openingError !== '') return current;
+      return current + 1;
+    }), 1200);
+    return () => clearInterval(timer);
+  }, [step, openingError]);
+
+  return (
+    <div className="social-modal-mask" role="dialog" aria-modal="true" aria-label={`Đăng nhập ${name}`}>
+      <div className="social-modal">
+        <div className="social-modal-head">
+          <h2>🔑 Đăng Nhập {name} — {cluster.name}</h2>
+          <button type="button" className="social-modal-close" onClick={props.onClose} aria-label={t('dashboard.drama.close')}>✕</button>
+        </div>
+        <p className="social-modal-note">
+          Mở trình duyệt <b>riêng biệt</b> (fingerprint + proxy của nhóm) tại trang đăng nhập — bạn tự thao tác, phiên được lưu <b>chỉ cho nhóm này</b>.
+        </p>
+        {openingError !== '' ? (
+          <div className="social-error" role="alert"><TriangleAlert size={14} aria-hidden="true" /> <span>{openingError}</span></div>
+        ) : (
+          <div className="social-login-frame">
+            <div className={`social-login-step${step >= 3 ? ' done' : ''}`}>
+              {step === 0 ? '⏳ Đang khởi động trình duyệt cách ly...' : step === 1 ? '🌐 Đang trỏ tới trang đăng nhập...' : step >= 2 ? `✍️ (Trình duyệt nhóm đã mở ${url}) Hãy đăng nhập trong cửa sổ trình duyệt của nhóm...` : ''}
+            </div>
+            <div className="social-login-bar">
+              <div className="social-login-bar-fill" style={{ width: step === 0 ? '0%' : step === 1 ? '40%' : '75%' }} />
+            </div>
+            <div className="social-login-url">{step >= 1 ? url : ''}</div>
+          </div>
+        )}
+        <div className="social-modal-actions">
+          <button type="button" className="social-btn" onClick={props.onClose}>Hủy</button>
+          <button type="button" className="social-btn social-btn-green" onClick={props.onDone}>
+            ✅ Tôi đã đăng nhập xong — Lưu Phiên
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Editor cụm kênh — modal config như demo; chứa nén file nâng cao
 // ---------------------------------------------------------------------------
 
 function ClusterEditor(props: {
   cluster: SocialClusterSummary | null;
+  service: SocialService;
   t: Translate;
+  onMessage(text: string, level?: 'info' | 'error' | 'action'): void;
   onClose(): void;
-  onSave(input: {
-    name?: string;
-    seriesName?: string;
-    proxyServer?: string;
-    fbMode?: 'graph_api' | 'browser';
-    fbPageId?: string;
-    fbPageToken?: string | null;
-    defaultScheduleTimes?: string[];
-    defaultDescription?: string;
-    ytChannelUrl?: string;
-    tkProfileUrl?: string;
-    autoReplyEnabled?: boolean;
-    autoReplyPrompt?: string;
-  }): void;
+  onSave(input: SocialClusterInput & { name?: string }): void;
 }) {
   const { t, cluster } = props;
   const [name, setName] = useState(cluster?.name ?? '');
@@ -1492,113 +1825,165 @@ function ClusterEditor(props: {
   const [fbMode, setFbMode] = useState<'graph_api' | 'browser'>(cluster?.fbMode ?? 'graph_api');
   const [fbPageId, setFbPageId] = useState(cluster?.fbPageId ?? '');
   const [fbPageToken, setFbPageToken] = useState('');
-  const [times, setTimes] = useState(cluster?.defaultScheduleTimes.join(', ') ?? '19:30');
-  const [description, setDescription] = useState(cluster?.defaultDescription ?? '');
+  const [times, setTimes] = useState(cluster?.defaultScheduleTimes.join(', ') ?? '11:30, 19:30, 21:00');
+  const [autoReplyPrompt, setAutoReplyPrompt] = useState(cluster?.autoReplyPrompt ?? '');
+  const [autoPublishAfterTranslate, setAutoPublishAfterTranslate] = useState(cluster?.autoPublishAfterTranslate ?? false);
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(cluster?.autoReplyEnabled ?? false);
   const [ytChannelUrl, setYtChannelUrl] = useState(cluster?.ytChannelUrl ?? '');
   const [tkProfileUrl, setTkProfileUrl] = useState(cluster?.tkProfileUrl ?? '');
-  const [autoReplyEnabled, setAutoReplyEnabled] = useState(cluster?.autoReplyEnabled ?? false);
-  const [autoReplyPrompt, setAutoReplyPrompt] = useState(cluster?.autoReplyPrompt ?? '');
   const newToken = fbPageToken.trim();
+
   return (
     <div className="social-modal-mask" role="dialog" aria-modal="true">
       <div className="social-modal">
-        <h2>{cluster === null ? t('dashboard.social.newCluster') : t('dashboard.social.editCluster')}</h2>
-        <div className="social-enqueue-row">
-          <label htmlFor="social-cluster-name">{t('dashboard.social.clusterName')}</label>
-          <input id="social-cluster-name" type="text" value={name} onChange={event => setName(event.target.value)} />
+        <div className="social-modal-head">
+          <h2>{cluster === null ? `➕ ${t('dashboard.social.newCluster')}` : `⚙️ Cấu Hình Chi Tiết: ${cluster.name}`}</h2>
+          <button type="button" className="social-modal-close" onClick={props.onClose} aria-label={t('dashboard.drama.close')}>✕</button>
         </div>
-        <div className="social-enqueue-row">
-          <label htmlFor="social-cluster-series">{t('dashboard.social.seriesName')}</label>
-          <input id="social-cluster-series" type="text" value={seriesName} onChange={event => setSeriesName(event.target.value)} placeholder=" " />
-        </div>
-        <div className="social-enqueue-row">
-          <label htmlFor="social-cluster-proxy">{t('dashboard.social.proxy')}</label>
+        <div className="social-grid-3">
+          <label htmlFor="social-cluster-name">Tên Nhóm:</label>
+          <input id="social-cluster-name" type="text" className="span-2" value={name} onChange={event => setName(event.target.value)} placeholder="Nhóm_01" />
+          <label htmlFor="social-cluster-series">{t('dashboard.social.seriesName')}:</label>
+          <input id="social-cluster-series" type="text" className="span-2" value={seriesName} onChange={event => setSeriesName(event.target.value)} placeholder="Phàm Nhân Tu Tiên - Phần 3" />
+          <label htmlFor="social-cluster-proxy">Proxy:</label>
           <input
             id="social-cluster-proxy"
             type="text"
-            placeholder="http://user:pass@host:port"
+            className="span-2 social-input-mono"
+            placeholder="Tùy chọn — để trống dùng mạng nhà"
             value={proxyServer}
             onChange={event => setProxyServer(event.target.value)}
           />
+          <label htmlFor="social-cluster-times">{t('dashboard.social.slotTimes')}:</label>
+          <input
+            id="social-cluster-times"
+            type="text"
+            className="span-2 social-input-mono"
+            style={{ color: '#fbbf24' }}
+            value={times}
+            onChange={event => setTimes(event.target.value)}
+            placeholder='"11:30", "19:30", "21:00"'
+          />
+          <label htmlFor="social-cluster-persona">{t('dashboard.social.autoReplyPrompt')}:</label>
+          <input
+            id="social-cluster-persona"
+            type="text"
+            className="span-2"
+            value={autoReplyPrompt}
+            onChange={event => setAutoReplyPrompt(event.target.value)}
+            placeholder="Đạo hữu tu tiên hài hước, xưng tại hạ - đạo hữu"
+          />
         </div>
-        <div className="social-enqueue-inline">
-          <div>
-            <label htmlFor="social-cluster-fbmode">{t('dashboard.social.fbModeLabel')}</label>
-            <select id="social-cluster-fbmode" value={fbMode} onChange={event => setFbMode(event.target.value === 'browser' ? 'browser' : 'graph_api')}>
-              <option value="graph_api">Graph API</option>
-              <option value="browser">Business Suite</option>
-            </select>
-          </div>
-          <div>
-            <label htmlFor="social-cluster-fbpage">{t('dashboard.social.fbPageId')}</label>
-            <input id="social-cluster-fbpage" type="text" value={fbPageId} onChange={event => setFbPageId(event.target.value)} />
-          </div>
-        </div>
-        {fbMode === 'graph_api' ? (
-          <div className="social-enqueue-row">
-            <label htmlFor="social-cluster-fbtoken">
-              {t('dashboard.social.fbPageToken')}{cluster !== null && cluster.fbPageTokenConfigured ? ` · ${t('dashboard.social.tokenSaved')}` : ''}
-            </label>
+        <div className="social-modal-toggles">
+          <label className="flex items-center gap-1.5">
             <input
-              id="social-cluster-fbtoken"
-              type="password"
-              placeholder={cluster !== null && cluster.fbPageTokenConfigured ? t('dashboard.social.tokenPlaceholder') : 'EAAG…'}
-              value={fbPageToken}
-              onChange={event => setFbPageToken(event.target.value)}
+              type="checkbox"
+              className="accent-green"
+              checked={autoPublishAfterTranslate}
+              onChange={event => setAutoPublishAfterTranslate(event.target.checked)}
             />
-          </div>
-        ) : null}
-        <div className="social-enqueue-row">
-          <label htmlFor="social-cluster-times">{t('dashboard.social.slotTimes')}</label>
-          <input id="social-cluster-times" type="text" value={times} onChange={event => setTimes(event.target.value)} />
-        </div>
-        <div className="social-enqueue-row">
-          <label htmlFor="social-cluster-desc">{t('dashboard.social.defaultDescription')}</label>
-          <textarea id="social-cluster-desc" rows={3} value={description} onChange={event => setDescription(event.target.value)} />
-        </div>
-        <div className="social-enqueue-row social-enqueue-inline">
-          <div>
-            <label htmlFor="social-cluster-yt">{t('dashboard.social.ytChannelUrl')}</label>
+            {' '}📥 Tự nạp đăng sau khi dịch xong
+          </label>
+          <label>
             <input
-              id="social-cluster-yt"
-              type="text"
-              placeholder="https://www.youtube.com/@kenhphim"
-              value={ytChannelUrl}
-              onChange={event => setYtChannelUrl(event.target.value)}
-            />
-          </div>
-          <div>
-            <label htmlFor="social-cluster-tk">{t('dashboard.social.tkProfileUrl')}</label>
-            <input
-              id="social-cluster-tk"
-              type="text"
-              placeholder="https://www.tiktok.com/@kenhphim"
-              value={tkProfileUrl}
-              onChange={event => setTkProfileUrl(event.target.value)}
-            />
-          </div>
-        </div>
-        <div className="social-enqueue-row social-autoreply-editor">
-          <label className="social-autoreply-switch">
-            <input
-              id="social-cluster-autoreply"
               type="checkbox"
               checked={autoReplyEnabled}
               onChange={event => setAutoReplyEnabled(event.target.checked)}
             />
-            {' '}{t('dashboard.social.autoReplyToggle')}
+            {' '}🤖 AI tự trả lời bình luận
           </label>
-          <label htmlFor="social-cluster-autoreply-prompt">{t('dashboard.social.autoReplyPrompt')}</label>
-          <textarea
-            id="social-cluster-autoreply-prompt"
-            rows={2}
-            placeholder={t('dashboard.social.autoReplyPromptPlaceholder')}
-            value={autoReplyPrompt}
-            onChange={event => setAutoReplyPrompt(event.target.value)}
-          />
         </div>
+        <details className="social-selectors-details">
+          <summary>⚙️ Nâng cao (trình duyệt nhóm · Facebook Page · đường dẫn kênh)</summary>
+          <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="social-enqueue-inline">
+              <div>
+                <label className="social-label" htmlFor="social-cluster-fbmode">{t('dashboard.social.fbModeLabel')}</label>
+                <select id="social-cluster-fbmode" value={fbMode} onChange={event => setFbMode(event.target.value === 'browser' ? 'browser' : 'graph_api')}>
+                  <option value="graph_api">Graph API</option>
+                  <option value="browser">Business Suite</option>
+                </select>
+              </div>
+              <div>
+                <label className="social-label" htmlFor="social-cluster-fbpage">{t('dashboard.social.fbPageId')}</label>
+                <input id="social-cluster-fbpage" type="text" value={fbPageId} onChange={event => setFbPageId(event.target.value)} />
+              </div>
+            </div>
+            {fbMode === 'graph_api' ? (
+              <div className="social-enqueue-row">
+                <label className="social-label" htmlFor="social-cluster-fbtoken">
+                  {t('dashboard.social.fbPageToken')}{cluster !== null && cluster.fbPageTokenConfigured ? ` · ${t('dashboard.social.tokenSaved')}` : ''}
+                </label>
+                <input
+                  id="social-cluster-fbtoken"
+                  type="password"
+                  className="social-input-mono"
+                  placeholder={cluster !== null && cluster.fbPageTokenConfigured ? t('dashboard.social.tokenPlaceholder') : 'EAAG…'}
+                  value={fbPageToken}
+                  onChange={event => setFbPageToken(event.target.value)}
+                />
+              </div>
+            ) : null}
+            <div className="social-enqueue-inline">
+              <div>
+                <label className="social-label" htmlFor="social-cluster-yt">{t('dashboard.social.ytChannelUrl')}</label>
+                <input
+                  id="social-cluster-yt"
+                  type="text"
+                  placeholder="https://www.youtube.com/@kenhphim"
+                  value={ytChannelUrl}
+                  onChange={event => setYtChannelUrl(event.target.value)}
+                />
+              </div>
+              <div>
+                <label className="social-label" htmlFor="social-cluster-tk">{t('dashboard.social.tkProfileUrl')}</label>
+                <input
+                  id="social-cluster-tk"
+                  type="text"
+                  placeholder="https://www.tiktok.com/@kenhphim"
+                  value={tkProfileUrl}
+                  onChange={event => setTkProfileUrl(event.target.value)}
+                />
+              </div>
+            </div>
+            {cluster !== null ? (
+              <div className="social-enqueue-actions">
+                {cluster.browserOpen ? (
+                  <button
+                    type="button"
+                    className="social-btn social-btn-sm"
+                    onClick={() => props.service.closeClusterBrowser(cluster.id).then(() => props.onMessage(`🌐 [${cluster.name}] Đã đóng trình duyệt nhóm.`, 'action'), () => undefined)}
+                  >
+                    {t('dashboard.social.closeBrowser')}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="social-btn social-btn-sm"
+                    onClick={() => props.service.openClusterBrowser(cluster.id).then(() => props.onMessage(`🌐 [${cluster.name}] Đang mở trình duyệt nhóm...`, 'action'), () => undefined)}
+                  >
+                    <ExternalLink size={12} aria-hidden="true" /> {t('dashboard.social.openBrowser')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="social-btn social-btn-sm social-btn-danger"
+                  onClick={() => {
+                    if (window.confirm(t('dashboard.social.confirmDelete', { name: cluster.name }))) {
+                      props.service.deleteCluster(cluster.id)
+                        .then(() => { props.onMessage(`🗑️ [${cluster.name}] Đã xóa nhóm.`, 'action'); props.onClose(); })
+                        .catch(() => undefined);
+                    }
+                  }}
+                >
+                  <Trash2 size={12} aria-hidden="true" /> {t('dashboard.social.deleteCluster')}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </details>
         <div className="social-modal-actions">
-          <button type="button" className="social-btn" onClick={props.onClose}>{t('dashboard.drama.close')}</button>
+          <button type="button" className="social-btn" onClick={props.onClose}>Hủy</button>
           <button
             type="button"
             className="social-btn social-btn-primary"
@@ -1611,14 +1996,14 @@ function ClusterEditor(props: {
               ...(fbPageId.trim() === '' ? {} : { fbPageId: fbPageId.trim() }),
               ...(fbMode === 'graph_api' && newToken !== '' ? { fbPageToken: newToken } : {}),
               defaultScheduleTimes: times.split(',').map(time => time.trim()).filter(time => /^\d{1,2}:\d{2}$/.test(time)),
-              ...(description.trim() === '' ? {} : { defaultDescription: description.trim() }),
               ytChannelUrl: ytChannelUrl.trim(),
               tkProfileUrl: tkProfileUrl.trim(),
               autoReplyEnabled,
-              autoReplyPrompt: autoReplyPrompt.trim()
+              autoReplyPrompt: autoReplyPrompt.trim(),
+              autoPublishAfterTranslate
             })}
           >
-            <Check size={14} aria-hidden="true" /> {t('dashboard.drama.rangeApply')}
+            💾 {t('dashboard.drama.rangeApply')}
           </button>
         </div>
       </div>

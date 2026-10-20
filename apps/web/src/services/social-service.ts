@@ -340,6 +340,25 @@ export type SocialCommentScanResult = {
   errors: string[];
 };
 
+// ---------------------------------------------------------------------------
+// AI tích hợp sẵn (router nội bộ của daemon, không cần key)
+// ---------------------------------------------------------------------------
+
+export type SocialAiCompose = {
+  title: string;
+  description: string;
+  hashtags: string;
+};
+
+export type SocialAiReplyTestResult = {
+  reply: string;
+  fallbackUsed: boolean;
+};
+
+export type SocialSelectorsResult = {
+  selectors: string;
+};
+
 export function createSocialService(client: RuntimeClient) {
   return {
     getOverview(): Promise<SocialOverview> {
@@ -410,6 +429,32 @@ export function createSocialService(client: RuntimeClient) {
     },
     scanComments(clusterId?: string): Promise<SocialCommentScanResult> {
       return client.post('/social/comments/scan', clusterId === undefined ? {} : { clusterId });
+    },
+    /** AI tích hợp sẵn: soạn tiêu đề + mô tả + hashtag chuẩn SEO. */
+    aiCompose(videoTitle: string): Promise<SocialAiCompose> {
+      return client.post('/social/ai/compose', { videoTitle, language: 'vi' });
+    },
+    /** AI tích hợp sẵn: thử phản hồi bình luận (không đăng thật). */
+    aiReplyTest(prompt: string, comment: string): Promise<SocialAiReplyTestResult> {
+      return client.post('/social/ai/reply-test', { prompt, comment });
+    },
+    /** Đọc selectors.json đang dùng (Sửa Selector Nóng). */
+    getSelectors(): Promise<SocialSelectorsResult> {
+      return client.get('/social/selectors');
+    },
+    /** Lưu selectors.json mới (daemon tự backup .bak). */
+    saveSelectors(selectors: string): Promise<SocialSelectorsResult> {
+      return client.put('/social/selectors', { selectors });
+    },
+    /** Ảnh chụp màn hình lỗi của job (chỉ khi nền tảng đã chụp; không có → null). */
+    async getErrorScreenshot(jobId: string, platform: 'yt' | 'tk' | 'fb'): Promise<{ url: string } | null> {
+      const response = await client.rawRequest(
+        `/social/jobs/${encodeURIComponent(jobId)}/error-screenshot?platform=${platform}`,
+        { method: 'GET' }
+      );
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      return { url: URL.createObjectURL(blob) };
     }
   };
 }

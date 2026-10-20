@@ -444,6 +444,36 @@ export async function registerAgentToolRoutes(
       const clusterId = typeof body.clusterId === 'string' && body.clusterId !== '' ? body.clusterId : undefined;
       return flexSocial(request, reply, 'social:manage', () => social.scanComments(clusterId));
     });
+    // AI tích hợp sẵn + Selector nóng (dành cho trợ lý AI điều khiển phần mềm).
+    server.post<{ Body: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/ai/compose`, async (request, reply) => {
+      const body = typeof request.body === 'object' && request.body !== null ? request.body as Record<string, unknown> : {};
+      const videoTitle = typeof body.videoTitle === 'string' ? body.videoTitle : '';
+      if (videoTitle.trim() === '') {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.videoTitle must be a non-empty string'));
+      }
+      const language = typeof body.language === 'string' && body.language.trim() !== '' ? body.language : undefined;
+      return flexSocial(request, reply, 'social:read', () => social.aiComposeVideoMeta({ videoTitle, ...(language === undefined ? {} : { language }) }));
+    });
+    server.post<{ Body: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/ai/reply-test`, async (request, reply) => {
+      const body = typeof request.body === 'object' && request.body !== null ? request.body as Record<string, unknown> : {};
+      const comment = typeof body.comment === 'string' ? body.comment : '';
+      if (comment.trim() === '') {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.comment must be a non-empty string'));
+      }
+      const prompt = typeof body.prompt === 'string' ? body.prompt : '';
+      return flexSocial(request, reply, 'social:read', () => social.aiTestReply({ comment, prompt }));
+    });
+    server.get(`${AGENT_TOOL_ROUTE_PREFIX}/social/selectors`, async (request, reply) =>
+      flexSocial(request, reply, 'social:read', () => social.getSelectors()));
+    server.post<{ Body: unknown }>(`${AGENT_TOOL_ROUTE_PREFIX}/social/selectors/save`, async (request, reply) => {
+      const body = parseBody(request.body, reply);
+      if (body === undefined) return;
+      const selectors = typeof body.selectors === 'string' ? body.selectors : '';
+      if (selectors.trim() === '') {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.selectors must be a JSON string'));
+      }
+      return flexSocial(request, reply, 'social:manage', () => social.saveSelectors(selectors));
+    });
   }
   server.get<{ Params: { id: string } }>(
     `${AGENT_TOOL_ROUTE_PREFIX}/schedules/:id`,
