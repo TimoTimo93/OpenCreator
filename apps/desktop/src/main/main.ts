@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { resolveOpenCreatorPaths } from '@opencreator/config';
 import {
@@ -52,10 +53,23 @@ const APP_ENTRY_AT = Date.now();
 const DEVELOPMENT =
   process.env.OPENCREATOR_DESKTOP_DEV === '1' || !app.isPackaged;
 const appRootPath = app.getAppPath();
+/**
+ * Thư mục dữ liệu (home) của OpenCreator — nơi lưu DB, profile trình duyệt cụm,
+ * phiên đăng nhập và log. Thứ tự ưu tiên:
+ *   1) biến môi trường OPENCREATOR_HOME (nếu người dùng đặt tay)
+ *   2) %USERPROFILE%\.opencreator — nơi dữ liệu thật của máy đang nằm
+ *   3) thư mục cài đặt (.opencreator cạnh exe) — bản portable
+ * KHÔNG hardcode ổ đĩa: app có thể được cài ở bất kỳ đâu, hardcode làm mất
+ * dữ liệu (và phiên đăng nhập) khi chuyển nơi cài.
+ */
+const userHomeDir = join(homedir(), '.opencreator');
+const portableHomeDir = join(dirname(app.getPath('exe')), '.opencreator');
 const defaultOpenCreatorHome = process.env.OPENCREATOR_HOME?.trim()
-  || (process.platform === 'win32'
-    ? 'D:\\Program Files\\OpenCreator\\.opencreator'
-    : (DEVELOPMENT ? resolve(appRootPath, '../../.opencreator') : join(dirname(app.getPath('userData')), 'OpenCreatorPortable')));
+  || (existsSync(userHomeDir)
+    ? userHomeDir
+    : (existsSync(portableHomeDir)
+      ? portableHomeDir
+      : (DEVELOPMENT ? resolve(appRootPath, '../../.opencreator') : userHomeDir)));
 process.env.OPENCREATOR_HOME = defaultOpenCreatorHome;
 
 const userDataPath = join(defaultOpenCreatorHome, DEVELOPMENT ? 'user-data-dev' : 'user-data');
