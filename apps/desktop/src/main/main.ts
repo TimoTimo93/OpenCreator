@@ -49,6 +49,14 @@ import type {
 registerPrivilegedSchemes();
 app.setName('OpenCreator');
 app.commandLine.appendSwitch('lang', 'vi');
+// stdout/stderr của main process có thể bị đóng (app chạy nền, launcher kết thúc)
+// → electron-updater ghi log sẽ ném EPIPE thành uncaught exception và hiện hộp
+// thoại "A JavaScript error occurred in the main process". Bỏ qua lỗi ống.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') return;
+  });
+}
 const APP_ENTRY_AT = Date.now();
 const DEVELOPMENT =
   process.env.OPENCREATOR_DESKTOP_DEV === '1' || !app.isPackaged;
