@@ -148,12 +148,6 @@ export default function SocialWorkspace(props: {
   const [verifying, setVerifying] = useState(false);
   const [creatingChannel, setCreatingChannel] = useState('');
   const [creatingAccount, setCreatingAccount] = useState('');
-  const [createDialog, setCreateDialog] = useState<{
-    cluster: SocialClusterSummary;
-    platform: SocialPlatformName;
-    mode: 'channel' | 'account';
-    name: string;
-  } | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(true);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [selectedJobId, setSelectedJobId] = useState('');
@@ -316,6 +310,9 @@ export default function SocialWorkspace(props: {
         pushLog(`✅ [${target.cluster.name}] Đã tạo tài khoản ${label}${result.accountName === undefined ? '' : ` "${result.accountName}"`} — sẵn sàng đăng video.`, 'action');
         setToast(`Đã tạo tài khoản ${label}${result.accountName === undefined ? '' : `: ${result.accountName}`}`);
       } else {
+        if (result.needsManual === true) {
+          pushLog(`⚠️ [${target.cluster.name}] ${result.message ?? `Cần bạn hoàn tất đăng ký ${label} trong cửa sổ trình duyệt của cụm.`}`, 'error');
+        }
         setToast(result.message ?? `Không tạo được tài khoản ${label}`);
       }
     } catch (cause) {
@@ -406,11 +403,11 @@ export default function SocialWorkspace(props: {
               )}
               onCreateChannel={cluster => {
                 const suggested = cluster.seriesName !== '' ? cluster.seriesName : cluster.name;
-                setCreateDialog({ cluster, platform: 'youtube', mode: 'channel', name: suggested });
+                void submitCreate({ cluster, platform: 'youtube', mode: 'channel' }, suggested);
               }}
               onCreateAccount={(cluster, platform) => {
                 const suggested = cluster.seriesName !== '' ? cluster.seriesName : cluster.name;
-                setCreateDialog({ cluster, platform, mode: 'account', name: suggested });
+                void submitCreate({ cluster, platform, mode: 'account' }, suggested);
               }}
 
               onCheckAllProxy={() => {
@@ -500,20 +497,6 @@ export default function SocialWorkspace(props: {
         onToggle={() => setConsoleOpen(open => !open)}
         onClear={() => { setLogs([]); }}
       />
-
-      {createDialog !== null ? (
-        <CreateAccountDialog
-          target={createDialog}
-          busy={creatingChannel !== '' || creatingAccount !== ''}
-          onChange={name => setCreateDialog(current => current === null ? null : { ...current, name })}
-          onClose={() => setCreateDialog(null)}
-          onSubmit={async name => {
-            const target = createDialog;
-            setCreateDialog(null);
-            await submitCreate(target, name);
-          }}
-        />
-      ) : null}
 
       {loginModal !== null ? (
         <LoginModal

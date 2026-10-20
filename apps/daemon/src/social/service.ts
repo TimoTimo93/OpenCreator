@@ -732,6 +732,11 @@ export function createSocialService(input: SocialServiceInput): SocialService {
           ? signUpTiktokViaGoogle(browserHandle)
           : createFacebookPage(browserHandle, { name }));
       if (!result.ok) {
+        // Cần người dùng xác minh thủ công (mã 6 số, CAPTCHA…) → trả về để UI
+        // hiện hướng dẫn, không coi là lỗi hệ thống.
+        if (result.needsManual === true) {
+          return { ok: false, needsManual: true, message: result.message ?? 'Cần bạn hoàn tất thủ công trong cửa sổ trình duyệt của cụm.' };
+        }
         throw new SocialError('social_account_create_failed', result.message ?? 'Không tạo được tài khoản');
       }
       const column = platform === 'tiktok' ? 'tk_login' : 'fb_login';
