@@ -170,6 +170,7 @@ export type RuntimeErrorCode =
   | 'social_ai_input_invalid'
   | 'social_channel_name_required'
   | 'social_channel_create_failed'
+  | 'social_account_create_failed'
   | 'social_browser_unavailable'
   | 'yt_dlp_update_recommended'
   | 'dependency_not_packaged'

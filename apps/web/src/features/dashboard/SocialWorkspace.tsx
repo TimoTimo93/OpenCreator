@@ -147,6 +147,7 @@ export default function SocialWorkspace(props: {
   const [loginModal, setLoginModal] = useState<{ cluster: SocialClusterSummary; platform: SocialPlatformName } | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [creatingChannel, setCreatingChannel] = useState('');
+  const [creatingAccount, setCreatingAccount] = useState('');
   const [consoleOpen, setConsoleOpen] = useState(true);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [selectedJobId, setSelectedJobId] = useState('');
@@ -374,6 +375,32 @@ export default function SocialWorkspace(props: {
                   .catch(cause => setToast(`Không tạo được kênh YouTube: ${messageOf(cause)}`))
                   .finally(() => {
                     setCreatingChannel('');
+                    void load(false);
+                  });
+              }}
+              onCreateAccount={(cluster, platform) => {
+                const suggested = cluster.seriesName !== '' ? cluster.seriesName : cluster.name;
+                const label = platform === 'tiktok' ? 'TikTok' : 'Facebook';
+                const name = window.prompt(
+                  platform === 'tiktok'
+                    ? `Tên tài khoản ${label} muốn tạo (đăng ký bằng tài khoản Google đã đăng nhập):`
+                    : `Tên Page ${label} muốn tạo:`,
+                  suggested
+                );
+                if (name === null || name.trim() === '') return;
+                setCreatingAccount(`${cluster.id}:${platform}`);
+                service.createSocialAccount(cluster.id, platform, name.trim())
+                  .then(result => {
+                    if (result.ok) {
+                      pushLog(`✅ [${cluster.name}] Đã tạo tài khoản ${label}${result.accountName === undefined ? '' : ` "${result.accountName}"`} — sẵn sàng đăng video.`, 'action');
+                      setToast(`Đã tạo tài khoản ${label}${result.accountName === undefined ? '' : `: ${result.accountName}`}`);
+                    } else {
+                      setToast(result.message ?? `Không tạo được tài khoản ${label}`);
+                    }
+                  })
+                  .catch(cause => setToast(`Không tạo được tài khoản ${label}: ${messageOf(cause)}`))
+                  .finally(() => {
+                    setCreatingAccount('');
                     void load(false);
                   });
               }}
@@ -668,6 +695,7 @@ function ChannelsPanel(props: {
   onCheckAllProxy(): void;
   onDeleteCluster(cluster: SocialClusterSummary): void;
   onCreateChannel(cluster: SocialClusterSummary): void;
+  onCreateAccount(cluster: SocialClusterSummary, platform: SocialPlatformName): void;
 }) {
   const { t } = props;
   return (
@@ -722,10 +750,7 @@ function ChannelsPanel(props: {
                               <span className={`social-login social-login-${status}`} title={accountId !== '' ? accountId : undefined}>
                                 <span className="social-login-dot" aria-hidden="true" />
                                 {accountName !== '' ? (
-                                  <span className="social-login-account">
-                                    {accountName}
-                                    {accountId !== '' ? <em> · {accountId}</em> : null}
-                                  </span>
+                                  <span className="social-login-account">{accountName}</span>
                                 ) : null}
                               </span>
                             ) : (
@@ -756,6 +781,19 @@ function ChannelsPanel(props: {
                                 onClick={() => props.onCreateChannel(cluster)}
                               >
                                 ➕ Tạo kênh
+                              </button>
+                            ) : null}
+                            {platform === 'tiktok' || platform === 'facebook' ? (
+                              <button
+                                type="button"
+                                className="social-btn social-btn-sm social-btn-green"
+                                data-testid={`social-create-account-${cluster.id}-${platform}`}
+                                title={platform === 'tiktok'
+                                  ? 'Đăng ký tài khoản TikTok bằng tài khoản Google đã đăng nhập'
+                                  : 'Tạo Page Facebook cho tài khoản đã đăng nhập'}
+                                onClick={() => props.onCreateAccount(cluster, platform)}
+                              >
+                                ➕ Tạo tài khoản
                               </button>
                             ) : null}
                           </span>

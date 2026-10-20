@@ -38,6 +38,7 @@ import { createSocialComments, type SocialLlmConfig } from './comments.js';
 import { aiComposeVideoMeta, aiTestReply, type SocialAiCompose, type SocialAiReplyTestInput } from './ai.js';
 import { listDownloadedVideos, type SocialDownloadItem } from './downloads.js';
 import { createYoutubeChannel } from './platforms/youtube-channel.js';
+import { createFacebookPage, signUpTiktokViaGoogle } from './platforms/account-signup.js';
 import type { SocialWorker } from './worker.js';
 import {
   SOCIAL_PLATFORM_LOGIN_URLS,
@@ -111,6 +112,8 @@ export type SocialService = {
   verifyClusterLogin(clusterId: string, platform: SocialPlatform): Promise<{ ok: boolean; status: 'ok' | 'unknown' | 'expired'; needsChannel?: boolean; accountName?: string; channelId?: string; channelUrl?: string }>;
   /** Tạo kênh YouTube (Brand Account) khi tài khoản đã đăng nhập nhưng chưa có kênh. */
   createClusterYoutubeChannel(clusterId: string, channelName: string): Promise<{ ok: boolean; channelId?: string; channelName?: string; error?: string }>;
+  /** Tạo tài khoản/kênh TikTok (qua Google) hoặc Facebook Page khi cụm chưa có tài khoản. */
+  createClusterSocialAccount(clusterId: string, platform: SocialPlatform, options?: { name?: string }): Promise<{ ok: boolean; needsManual?: boolean; message?: string; accountName?: string; accountUrl?: string }>;
   /** Nạp video vào hàng đợi; trả summary + số nạp + danh sách path bị bỏ qua. */
   enqueue(requests: readonly SocialEnqueueRequest[]): { summary: SocialOverview; accepted: number; duplicates: string[] };
   pause(): SocialOverview;
@@ -306,6 +309,55 @@ export function readAccountName(
     return name !== undefined && name !== '' ? name : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * ??c t?n/URL t?i kho?n TikTok|Facebook sau khi ??ng nh?p (m? trang ch? v? d?
+ * t?n hi?n th? trong DOM). Kh?ng ??c ???c ? b? tr?ng, kh?ng b?o sai.
+ */
+async function readSocialProfileName(
+  handle: { newPage(url?: string): Promise<unknown> },
+  platform: SocialPlatform
+): Promise<{ name?: string; url?: string }> {
+  const home = platform === 'tiktok' ? 'https://www.tiktok.com/' : 'https://www.facebook.com/';
+  let page: {
+    url(): string;
+    title(): Promise<string>;
+    waitForTimeout(ms: number): Promise<void>;
+    evaluate<T>(fn: (arg?: unknown) => T, arg?: unknown): Promise<T>;
+    close(): Promise<void>;
+  } | undefined;
+  try {
+    const opened = await handle.newPage(home);
+    page = opened as unknown as NonNullable<typeof page>;
+    await page.waitForTimeout(5_000);
+    const url = page.url();
+    const title = await page.title().catch(() => '');
+    const name = await page.evaluate((unused: unknown) => {
+      const candidates = [
+        'h1',
+        '[data-e2e="user-title"]',
+        'strong[data-e2e="user-title"]',
+        '[data-e2e="unique-username"]'
+      ];
+      for (const selector of candidates) {
+        const el = document.querySelector(selector);
+        const text = el?.textContent?.trim() ?? '';
+        if (text !== '' && text.length < 80) return text;
+      }
+      return '';
+    }, null).catch(() => '');
+    const cleanedTitle = title.replace(/\s*[-??]\s*(TikTok|Facebook)\s*$/i, '').trim();
+    const label = name !== '' ? name : cleanedTitle;
+    return {
+      ...(label !== '' && label.length < 80 ? { name: label } : {}),
+      ...(url.includes(platform === 'tiktok' ? 'tiktok.com' : 'facebook.com') ? { url } : {})
+    };
+  } catch {
+    return {};
+  } finally {
+    await page?.close().catch(() => undefined);
   }
 }
 
@@ -607,8 +659,7 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       let channelUrl: string | undefined;
       let needsChannel = false;
       let webSignedIn = signedIn;
-      if (signedIn && platform === 'youtube') {
-        // Đọc thông tin kênh thật: đã đăng nhập + có kênh ⇒ lấy tên/ID;
+      if (signedIn && platform === 'youtube') {        // Đọc thông tin kênh thật: đã đăng nhập + có kênh ⇒ lấy tên/ID;
         // đã đăng nhập nhưng chưa có kênh ⇒ cần tạo kênh (needs_channel);
         // web chưa cấp phiên (cookie có nhưng chưa hoàn tất) ⇒ coi như chưa đăng nhập.
         const account = await worker.withClusterBrowser(clusterId, async browserHandle => readYoutubeAccount(browserHandle));
@@ -638,6 +689,15 @@ export function createSocialService(input: SocialServiceInput): SocialService {
           patch.yt_account_name = '';
           patch.yt_account_id = '';
         }
+      } else if (signedIn && (platform === 'tiktok' || platform === 'facebook')) {
+        // TikTok/Facebook: cookie phiên (sessionid / c_user) là đủ ⇒ đã đăng nhập.
+        // Tên tài khoản lấy từ trang profile sau khi đăng nhập (nếu đọc được).
+        const account = await worker.withClusterBrowser(clusterId, async browserHandle =>
+          readSocialProfileName(browserHandle, platform));
+        if (account.name !== undefined) {
+          accountName = account.name;
+          if (platform === 'tiktok') patch.tk_profile_url = account.url ?? '';
+        }
       }
       updateClusterRow(db, clusterId, patch);
       return {
@@ -647,6 +707,44 @@ export function createSocialService(input: SocialServiceInput): SocialService {
         ...(accountName === undefined ? {} : { accountName }),
         ...(channelId === undefined ? {} : { channelId }),
         ...(channelUrl === undefined ? {} : { channelUrl })
+      };
+    },
+
+    /**
+     * Tạo tài khoản/kênh cho nền tảng khi cụm đã đăng nhập Google nhưng chưa có
+     * tài khoản ở nền tảng đó: TikTok đăng ký bằng Google, Facebook tạo Page.
+     */    async createClusterSocialAccount(
+      clusterId: string,
+      platform: SocialPlatform,
+      options: { name?: string } = {}
+    ): Promise<{ ok: boolean; needsManual?: boolean; message?: string; accountName?: string; accountUrl?: string }> {
+      const row = getClusterRow(db, clusterId);
+      if (row === undefined) throw new SocialError('social_cluster_not_found', 'Không tìm thấy cụm kênh');
+      if (platform !== 'tiktok' && platform !== 'facebook') {
+        throw new SocialError('social_platform_invalid', `Nền tảng không hỗ trợ tạo tài khoản tự động: ${platform}`);
+      }
+      const requestedName = (options.name ?? '').trim();
+      const name = requestedName !== ''
+        ? requestedName
+        : row.series_name !== '' ? row.series_name : row.name;
+      const result = await worker.withClusterBrowser(clusterId, async browserHandle =>
+        platform === 'tiktok'
+          ? signUpTiktokViaGoogle(browserHandle)
+          : createFacebookPage(browserHandle, { name }));
+      if (!result.ok) {
+        throw new SocialError('social_account_create_failed', result.message ?? 'Không tạo được tài khoản');
+      }
+      const column = platform === 'tiktok' ? 'tk_login' : 'fb_login';
+      const patch: Parameters<typeof updateClusterRow>[2] = {
+        [column]: 'ok',
+        updated_at: new Date().toISOString()
+      };
+      if (platform === 'tiktok' && result.accountName !== undefined) patch.tk_profile_url = result.accountUrl ?? '';
+      updateClusterRow(db, clusterId, patch);
+      return {
+        ok: true,
+        ...(result.accountName === undefined ? {} : { accountName: result.accountName }),
+        ...(result.accountUrl === undefined ? {} : { accountUrl: result.accountUrl })
       };
     },
 

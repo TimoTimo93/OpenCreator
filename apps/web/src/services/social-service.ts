@@ -403,6 +403,10 @@ export function createSocialService(client: RuntimeClient) {
     createYoutubeChannel(id: string, name: string): Promise<{ ok: boolean; channelId?: string; channelName?: string; error?: string }> {
       return client.post(`/social/clusters/${encodeURIComponent(id)}/youtube/create-channel`, { name });
     },
+    /** Tạo tài khoản/kênh: TikTok đăng ký bằng Google, Facebook tạo Page. */
+    createSocialAccount(id: string, platform: SocialPlatformName, name: string): Promise<{ ok: boolean; needsManual?: boolean; message?: string; accountName?: string; accountUrl?: string }> {
+      return client.post(`/social/clusters/${encodeURIComponent(id)}/accounts/${platform}/signup`, { name });
+    },
     closeClusterBrowser(id: string): Promise<SocialOverview> {
       return client.post(`/social/clusters/${encodeURIComponent(id)}/close-browser`);
     },

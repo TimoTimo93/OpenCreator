@@ -115,6 +115,21 @@ export async function registerSocialRoutes(
     }
   });
 
+  server.post<{ Params: { id: string; platform: string }; Body: unknown }>('/social/clusters/:id/accounts/:platform/signup', async (request, reply) => {
+    const platform = parseSocialPlatform(request.params.platform);
+    if (platform === undefined || (platform !== 'tiktok' && platform !== 'facebook')) {
+      return reply.code(400).send(apiError('VALIDATION_FAILED', 'param.platform phải là tiktok|facebook'));
+    }
+    const body = typeof request.body === 'object' && request.body !== null ? request.body as Record<string, unknown> : {};
+    const name = typeof body.name === 'string' ? body.name : '';
+    try {
+      // Tạo tài khoản/kênh (TikTok qua Google, Facebook Page) rồi ghi trạng thái.
+      return await social.createClusterSocialAccount(request.params.id, platform, { name });
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
   server.post<{ Params: { id: string }; Body: unknown }>('/social/clusters/:id/youtube/create-channel', async (request, reply) => {
     const body = typeof request.body === 'object' && request.body !== null ? request.body as Record<string, unknown> : {};
     const name = typeof body.name === 'string' ? body.name : '';
@@ -323,6 +338,7 @@ function socialFailure(error: unknown, reply: FastifyReply): unknown {
       'social_ai_input_invalid',
       'social_channel_name_required',
       'social_channel_create_failed',
+      'social_account_create_failed',
       'social_browser_unavailable'
     ]);
     const status = error.code === 'social_cluster_not_found' || error.code === 'social_job_not_found'
