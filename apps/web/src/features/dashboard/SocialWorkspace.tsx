@@ -351,6 +351,10 @@ export default function SocialWorkspace(props: {
               )}
               onEdit={cluster => setEditing(cluster)}
               onNewCluster={() => setEditing('new')}
+              onDeleteCluster={cluster => void action(
+                t('dashboard.social.removedCluster'),
+                () => service.deleteCluster(cluster.id)
+              )}
               onCheckAllProxy={() => {
                 pushLog('⚡ [Proxy Checker] Đang kiểm tra đồng loạt Proxy của tất cả nhóm...', 'action');
                 void action(t('dashboard.social.checkedProxy'), async () => {
@@ -615,6 +619,7 @@ function ChannelsPanel(props: {
   onEdit(cluster: SocialClusterSummary): void;
   onNewCluster(): void;
   onCheckAllProxy(): void;
+  onDeleteCluster(cluster: SocialClusterSummary): void;
 }) {
   const { t } = props;
   return (
@@ -704,6 +709,18 @@ function ChannelsPanel(props: {
                         </button>
                         <button type="button" className="social-btn social-btn-sm" onClick={() => props.onEdit(cluster)}>
                           ⚙️ {t('dashboard.social.editCluster')}
+                        </button>
+                        <button
+                          type="button"
+                          className="social-btn social-btn-sm social-btn-danger"
+                          title={t('dashboard.social.removeCluster')}
+                          onClick={() => {
+                            if (window.confirm(`Xóa cụm "${cluster.name}" và toàn bộ job của nó?`)) {
+                              props.onDeleteCluster(cluster);
+                            }
+                          }}
+                        >
+                          🗑 {t('dashboard.social.remove')}
                         </button>
                       </div>
                     </td>
