@@ -211,32 +211,61 @@ export async function readYoutubeAccount(
     url(): string;
     title(): Promise<string>;
     waitForTimeout(ms: number): Promise<void>;
-    evaluate<T>(fn: () => T): Promise<T>;
+    evaluate<T>(fn: (arg?: unknown) => T, arg?: unknown): Promise<T>;
     goto(url: string, options?: { timeout?: number; waitUntil?: string }): Promise<unknown>;
+    click(selector: string, options?: { timeout?: number }): Promise<void>;
     close(): Promise<void>;
   };
   let page: Page | undefined;
   try {
-    // Bước 1: web đã cấp phiên chưa? (menu tài khoản có email tức đã đăng nhập)
+    // Bước 1: web đã cấp phiên chưa?
+    // (không dùng #email vì chỉ hiện sau khi mở menu avatar — dùng sự hiện diện
+    //  của nút avatar/menu tài khoản ở thanh trên cùng hoặc mục "You" trong sidebar)
     page = await handle.newPage('https://www.youtube.com/') as Page;
     await page.waitForTimeout(4_000);
-    const email = await page
+    const signedInWeb = await page
       .evaluate(() => {
-        const el = document.querySelector('#email');
-        return el?.textContent?.trim() ?? '';
+        const selectors = [
+          'ytd-topbar-menu-button',
+          '#avatar',
+          'yt-avatar-shape',
+          'ytd-masthead #avatar',
+          'a[href*="/feed/history"]',
+          'ytd-guide-renderer a[title*="You"]',
+          'ytd-mini-guide-renderer a[title*="You"]'
+        ];
+        for (const selector of selectors) {
+          if (document.querySelector(selector) !== null) return true;
+        }
+        return false;
+      })
+      .catch(() => false);
+    if (!signedInWeb) return { signedIn: false };
+
+    // Bước 2: đã đăng nhập — tìm kênh của chính mình.
+    // (Personal Channel không dùng /@me → luôn đọc link kênh trong menu avatar)
+    await page
+      .click('ytd-topbar-menu-button #avatar-btn, #avatar-btn, ytd-topbar-menu-button', { timeout: 5_000 })
+      .catch(() => undefined);
+    await page.waitForTimeout(2_500);
+    const ownHandle = await page
+      .evaluate(() => {
+        const links = Array.from(document.querySelectorAll('a[href^="/@"]'));
+        for (const link of links) {
+          const href = link.getAttribute('href') ?? '';
+          if (href.length > 2) return href;
+        }
+        return '';
       })
       .catch(() => '');
-    if (email === '') return { signedIn: false };
-
-    // Bước 2: đã đăng nhập — thử mở trang kênh của chính mình.
-    await page.goto('https://www.youtube.com/@me').catch(() => undefined);
-    await page.waitForTimeout(4_000);
-    const url = page.url();
-    const rawTitle = await page.title().catch(() => '');
-    if (url.includes('accounts.google.com') || rawTitle.startsWith('404')) {
-      // Đã đăng nhập nhưng chưa có kênh ⇒ cần tạo kênh (Brand Account).
+    if (ownHandle === '') {
+      // Không thấy kênh nào ⇒ tài khoản chưa có kênh (cần tạo).
       return { signedIn: true, needsChannel: true };
     }
+    await page.goto(`https://www.youtube.com${ownHandle}`).catch(() => undefined);
+    await page.waitForTimeout(3_500);
+    const url = page.url();
+    const rawTitle = await page.title().catch(() => '');
     const channelMatch = /\/channel\/(UC[\w-]+)/.exec(url);
     const handleMatch = /youtube\.com\/@([\w.\-]+)/.exec(url);
     const name = rawTitle.replace(/\s*[-–—]\s*YouTube\s*$/i, '').trim();
@@ -244,12 +273,12 @@ export async function readYoutubeAccount(
       ? `https://www.youtube.com/channel/${channelMatch[1]}`
       : handleMatch?.[1] !== undefined
         ? `https://www.youtube.com/@${handleMatch[1]}`
-        : undefined;
+        : `https://www.youtube.com${ownHandle}`;
     return {
       signedIn: true,
       ...(name !== '' && name !== 'YouTube' ? { name } : {}),
       ...(channelMatch?.[1] === undefined ? {} : { channelId: channelMatch[1] }),
-      ...(channelUrl === undefined ? {} : { channelUrl })
+      channelUrl
     };
   } catch {
     return { signedIn: false };

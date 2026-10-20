@@ -2,13 +2,13 @@
  * Tạo kênh YouTube (Brand Account) cho tài khoản đã đăng nhập nhưng chưa có
  * kênh — dùng cho module Quản Lý Đa Kênh.
  *
- * Luồng thật: studio.youtube.com → (chưa có kênh) → màn hình "Tạo kênh của
- * bạn" → nhập tên kênh → bấm "Tạo" → vào được Studio ⇒ lấy được
- * channel id (UC…) + tên kênh để lưu vào cụm.
+ * Thực tế (đã kiểm chứng bằng ảnh chụp trình duyệt cụm): khi tài khoản chưa
+ * có kênh, truy cập `youtube.com` sẽ tự mở modal **"How you'll appear"** với
+ * ô *Name*, ô *Handle* và nút *Create Channel* (không phải trang studio/channel
+ * create riêng). Ta điền tên → bấm Create → đọc lại handle/channel id.
  *
- * Selector bám theo DOM thực tế, có nhiều phương án dự phòng vì Google
- * đổi bố cục thỉnh thoảng. Nếu không tự tạo được ⇒ trả lỗi rõ ràng để
- * người dùng tạo tay (không báo sai trạng thái).
+ * Selector bám theo DOM thật: các ô nhập nằm trong custom element nên không
+ * có name/id ⇒ định vị theo thứ tự input hiển thị (bỏ ô tìm kiếm & file).
  */
 
 export type YoutubeChannelCreateResult = {
@@ -22,46 +22,43 @@ type ChannelPage = {
   url(): string;
   title(): Promise<string>;
   waitForTimeout(ms: number): Promise<void>;
-  waitForSelector(selector: string, options?: { timeout?: number }): Promise<unknown>;
-  fill(selector: string, value: string): Promise<void>;
-  click(selector: string): Promise<void>;
-  evaluate<T>(fn: () => T): Promise<T>;
+  goto(url: string, options?: { timeout?: number; waitUntil?: string }): Promise<unknown>;
+  locator(selector: string): {
+    nth(index: number): {
+      fill(value: string): Promise<void>;
+      count(): Promise<number>;
+    };
+    count(): Promise<number>;
+    first(): { click(): Promise<void> };
+  };
+  getByRole(role: string, options: { name: string | RegExp; exact?: boolean }): {
+    first(): { click(): Promise<void>; count(): Promise<number> };
+  };
+  evaluate<T>(fn: (arg?: unknown) => T, arg?: unknown): Promise<T>;
+  click(selector: string, options?: { timeout?: number }): Promise<void>;
   close(): Promise<void>;
 };
 
-const NAME_INPUT_SELECTORS = [
-  'input[name="channelName"]',
-  'input[id="channelName"]',
-  'input[placeholder*="Channel name" i]',
-  'input[placeholder*="Tên kênh" i]',
-  'input[aria-label*="channel name" i]',
-  'input[aria-label*="tên kênh" i]',
-  'ytcp-text-field input'
-];
+const CREATE_MODAL_TEXT = "How you'll appear";
 
-const CREATE_BUTTON_SELECTORS = [
-  'button:has-text("Create")',
-  'button:has-text("Tạo")',
-  'ytcp-button#create-button button',
-  'button[aria-label*="Create" i]',
-  'button[aria-label*="Tạo" i]'
-];
-
-async function firstExisting(page: ChannelPage, selectors: string[]): Promise<string | undefined> {
-  for (const selector of selectors) {
-    try {
-      await page.waitForSelector(selector, { timeout: 2_000 });
-      return selector;
-    } catch {
-      // thử selector tiếp theo
-    }
+async function waitForText(page: ChannelPage, text: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await page
+      .evaluate((needle: unknown) => {
+        const value = typeof needle === 'string' ? needle : '';
+        return document.body?.innerText?.includes(value) ?? false;
+      }, text)
+      .catch(() => false);
+    if (found) return true;
+    await page.waitForTimeout(1_000);
   }
-  return undefined;
+  return false;
 }
 
 /**
- * Mở trang tạo kênh và điền tên → bấm Tạo.
- * `handle` là tuỳ chọn (bỏ trống ⇒ YouTube tự sinh handle).
+ * Mở trang chủ YouTube (modal tạo kênh tự hiện nếu chưa có kênh), điền tên →
+ * bấm "Create Channel" → đọc lại handle/channel id đã tạo.
  */
 export async function createYoutubeChannel(
   handle: { newPage(url?: string): Promise<unknown> },
@@ -71,53 +68,96 @@ export async function createYoutubeChannel(
   if (name === '') return { ok: false, error: 'Cần nhập tên kênh' };
   let page: ChannelPage | undefined;
   try {
+    // Mở "Create channel" của YouTube Studio — URL này chuyển về youtube.com và
+    // tự mở modal "How you'll appear" (đã kiểm chứng bằng ảnh trình duyệt cụm).
     page = await handle.newPage('https://studio.youtube.com/channel/create') as ChannelPage;
-    await page.waitForTimeout(4_000);
+    await page.waitForTimeout(6_000);
     const url = page.url();
     if (url.includes('accounts.google.com')) {
       return { ok: false, error: 'Phiên đăng nhập chưa hoàn tất — hãy đăng nhập lại trong cửa sổ trình duyệt của cụm' };
     }
-    // Nếu đã có kênh ⇒ studio mở thẳng, không có form tạo.
-    const nameInput = await firstExisting(page, NAME_INPUT_SELECTORS);
-    if (nameInput === undefined) {
+    const hasModal = await waitForText(page, CREATE_MODAL_TEXT, 12_000);
+    if (!hasModal) {
+      // Không có modal tạo kênh ⇒ tài khoản đã có kênh: đọc handle/id hiện tại.
+      await page.goto('https://www.youtube.com/@me').catch(() => undefined);
+      await page.waitForTimeout(3_000);
       const current = page.url();
       const channelMatch = /\/channel\/(UC[\w-]+)/.exec(current);
+      const handleMatch = /youtube\.com\/@([\w.\-]+)/.exec(current);
       if (channelMatch?.[1] !== undefined) {
-        const title = await page.title();
+        const title = await page.title().catch(() => '');
         return {
           ok: true,
           channelId: channelMatch[1],
-          channelName: title.replace(/\s*[-–—]\s*YouTube\s*Studio\s*$/i, '').trim()
+          channelName: title.replace(/\s*[-–—]\s*YouTube\s*$/i, '').trim()
         };
       }
-      return { ok: false, error: 'Không tìm thấy form tạo kênh trong YouTube Studio — hãy tạo kênh thủ công 1 lần rồi thử lại' };
+      return {
+        ok: false,
+        error: handleMatch?.[1] === undefined
+          ? 'Không mở được form tạo kênh (tài khoản có thể chưa hoàn tất đăng nhập)'
+          : 'Tài khoản đã có kênh — hãy bấm "Lưu Phiên" để cập nhật thông tin kênh'
+      };
     }
-    await page.fill(nameInput, name);
-    const handleInput = 'input[name="vanityChannelUrl"], input[placeholder*="URL" i]';
-    try {
-      await page.waitForSelector(handleInput, { timeout: 1_500 });
-      if (options.handle !== undefined && options.handle.trim() !== '') {
-        await page.fill(handleInput, options.handle.trim().replace(/^@/, ''));
-      }
-    } catch {
-      // không có ô handle (chế độ mặc định) — bỏ qua
+
+    // Ô nhập: bỏ qua ô tìm kiếm (name=search_query), ô file và ô checkbox;
+    // còn lại đúng 2 ô theo thứ tự DOM: Name rồi Handle.
+    const textInputs = page.locator('input:not([type="file"]):not([type="checkbox"]):not([name="search_query"])');
+    const count = await textInputs.count();
+    if (count === 0) {
+      return { ok: false, error: 'Không tìm thấy ô nhập tên kênh trong modal "How you\'ll appear"' };
     }
-    const createButton = await firstExisting(page, CREATE_BUTTON_SELECTORS);
-    if (createButton === undefined) {
-      return { ok: false, error: 'Không tìm thấy nút "Tạo" trong form tạo kênh' };
+    await textInputs.nth(0).fill(name);
+    const wantedHandle = (options.handle ?? '').trim().replace(/^@/, '');
+    if (count > 1 && wantedHandle !== '') {
+      await textInputs.nth(1).fill(wantedHandle);
     }
-    await page.click(createButton);
-    await page.waitForTimeout(8_000);
+
+    const createButton = page.getByRole('button', { name: 'Create Channel' });
+    if (await createButton.first().count() === 0) {
+      return { ok: false, error: 'Không tìm thấy nút "Create Channel" trong modal tạo kênh' };
+    }
+    await createButton.first().click();
+    await page.waitForTimeout(9_000);
+    // Đọc lại kênh vừa tạo: ưu tiên link kênh trong menu avatar, sau đó tới URL.
+    await page
+      .click('ytd-topbar-menu-button #avatar-btn, #avatar-btn, ytd-topbar-menu-button', { timeout: 5_000 })
+      .catch(() => undefined);
+    await page.waitForTimeout(2_500);
+    const ownHandle = await page
+      .evaluate(() => {
+        const links = Array.from(document.querySelectorAll('a[href^="/@"]'));
+        for (const link of links) {
+          const href = link.getAttribute('href') ?? '';
+          if (href.length > 2) return href;
+        }
+        return '';
+      })
+      .catch(() => '');
     const after = page.url();
-    const title = await page.title();
+    const title = await page.title().catch(() => '');
     const channelMatch = /\/channel\/(UC[\w-]+)/.exec(after);
-    if (channelMatch?.[1] === undefined) {
-      return { ok: false, error: `Tạo kênh chưa hoàn tất (URL: ${after}). Hãy kiểm tra cửa sổ trình duyệt của cụm.` };
+    const handleFromUrl = /youtube\.com\/@([\w.\-]+)/.exec(after);
+    const handleValue = ownHandle !== ''
+      ? ownHandle.replace(/^\//, '')
+      : handleFromUrl?.[1] !== undefined ? `@${handleFromUrl[1]}` : '';
+    if (channelMatch?.[1] === undefined && handleValue === '') {
+      return { ok: false, error: `Đã bấm Create nhưng chưa xác nhận được kênh (URL: ${after}). Kiểm tra cửa sổ trình duyệt của cụm.` };
+    }
+    const channelName = title.replace(/\s*[-–—]\s*YouTube\s*$/i, '').trim();
+    // Tên kênh thật lấy từ trang kênh (tiêu đề Studio chỉ là "Channel dashboard").
+    let realName = channelName !== '' && channelName !== 'YouTube' ? channelName : name;
+    if (channelMatch?.[1] !== undefined) {
+      await page.goto(`https://www.youtube.com/channel/${channelMatch[1]}`).catch(() => undefined);
+      await page.waitForTimeout(3_500);
+      const channelTitle = await page.title().catch(() => '');
+      const cleaned = channelTitle.replace(/\s*[-–—]\s*YouTube\s*$/i, '').trim();
+      if (cleaned !== '' && cleaned !== 'YouTube') realName = cleaned;
     }
     return {
       ok: true,
-      channelId: channelMatch[1],
-      channelName: title.replace(/\s*[-–—]\s*YouTube\s*Studio\s*$/i, '').trim()
+      ...(channelMatch?.[1] === undefined ? {} : { channelId: channelMatch[1] }),
+      channelName: realName
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };

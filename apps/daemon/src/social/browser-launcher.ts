@@ -42,7 +42,12 @@ export async function launchClusterBrowser(input: LaunchClusterBrowserInput): Pr
         ...fingerprintPatch,
         // Đồng bộ giao diện tối với phần mềm: trang + UI trình duyệt đều tối.
         colorScheme: 'dark',
-        args: ['--force-dark-mode'],
+        args: [
+          '--force-dark-mode',
+          // Không hiện bong bóng "Restore pages?" sau khi chrome bị tắt đột ngột.
+          '--disable-session-crashed-bubble',
+          '--hide-crash-restore-bubble'
+        ],
         proxy,
         timeout: 60_000
       });
