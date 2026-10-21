@@ -29,6 +29,7 @@ import {
   type SocialJobRow
 } from './db.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
+import { readProfileSessionFlags } from './session-probe.js';
 import { nextAvailableSlot } from './scheduler.js';
 import { checkProxy } from './proxy-check.js';
 import { createSocialAnalytics } from './analytics.js';
@@ -530,6 +531,27 @@ export function createSocialService(input: SocialServiceInput): SocialService {
 
   function overview(): SocialOverview {
     const jobs = listJobRows(db).map(row => mapJob(row));
+    // Tự sửa trạng thái đăng nhập từ cookie trong profile cụm (không cần mở
+    // trình duyệt) — tránh hiện "Chưa đăng nhập" khi phiên đã tồn tại.
+    for (const row of listClusterRows(db)) {
+      const patch: Parameters<typeof updateClusterRow>[2] = {};
+      if (row.yt_login !== 'ok') {
+        const flags = readProfileSessionFlags(join(profileRoot, row.id));
+        if (flags?.youtube === true) patch.yt_login = 'ok';
+      }
+      if (row.tk_login !== 'ok') {
+        const flags = readProfileSessionFlags(join(profileRoot, row.id));
+        if (flags?.tiktok === true) patch.tk_login = 'ok';
+      }
+      if (row.fb_login !== 'ok') {
+        const flags = readProfileSessionFlags(join(profileRoot, row.id));
+        if (flags?.facebook === true) patch.fb_login = 'ok';
+      }
+      if (Object.keys(patch).length > 0) {
+        patch.updated_at = now();
+        updateClusterRow(db, row.id, patch);
+      }
+    }
     return {
       queue: snapshotQueueState(),
       counts: summarizeCounts(jobs, now()),

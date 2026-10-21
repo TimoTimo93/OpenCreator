@@ -731,7 +731,10 @@ export async function createHongguoComponentManager(
         api = await resolveApiPortAndToken({ force: true });
       }
       apiReady = false;
-      apiLastError = 'Ứng dụng Hồng Quả không phản hồi API. Nếu ứng dụng đang mở từ ngoài OpenCreator, hãy đóng nó và mở lại từ OpenCreator.';
+      // Thông báo đúng nguyên nhân: chưa cài (thiếu kênh phát hành) hay API chết.
+      apiLastError = state.active === undefined
+        ? `Thành phần Hồng Quá chưa được cài đặt. Cần kênh phát hành (channel): tạo file "${channelFilePath}" chứa URL kênh (http(s)://... hoặc file:///.../manifest.json) rồi bấm "Kiểm tra cập nhật" trong Cài đặt → Thành phần runtime.`
+        : 'Ứng dụng Hồng Quả không phản hồi API. Nếu ứng dụng đang mở từ ngoài OpenCreator, hãy đóng nó và mở lại từ OpenCreator.';
       throw new HongguoUpdateError('creator_hongguo_unavailable', apiLastError, 503);
     })();
     ensureInFlight = run.finally(() => {
