@@ -827,7 +827,18 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       if (platform === 'facebook') {
         const hasAccount = await worker.withClusterBrowser(clusterId, async browserHandle =>
           isFacebookSignedIn(browserHandle));
-        if (!hasAccount) {
+        if (hasAccount) {
+          // Đã đăng nhập Facebook ⇒ đồng bộ trạng thái + tên cho UI (cột FB
+          // không được hiện "Chưa đăng nhập" khi phiên đã có).
+          const profile = await worker.withClusterBrowser(clusterId, async browserHandle =>
+            readSocialProfileName(browserHandle, 'facebook'));
+          const patch: Parameters<typeof updateClusterRow>[2] = {
+            fb_login: 'ok',
+            updated_at: new Date().toISOString()
+          };
+          if (profile.name !== undefined) patch.fb_account_name = profile.name;
+          updateClusterRow(db, clusterId, patch);
+        } else {
           // Đăng ký bằng GMAIL THẬT của cụm (phiên Google đang đăng nhập) — không
           // dùng email nhập tay vì mã xác nhận sẽ gửi về hộp thư đó.
           const profileEmail = await worker.withClusterBrowser(clusterId, async browserHandle =>

@@ -162,9 +162,16 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
       const scrim = Array.from(document.querySelectorAll('div.dialog-scrim, tp-yt-iron-overlay-backdrop[opened]'))
         .filter(el => visible(el));
       const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ');
-      const hit = text.match(/.{0,100}(verif|xác minh|trust tier|GOV_ID|số điện thoại|phone number).{0,100}/i);
-      return { overlays: scrim.length, hint: hit?.[0] ?? '' };
-    }).catch(() => ({ overlays: 0, hint: '' }));
+      const limit = text.match(/.{0,80}(daily upload limit|upload limit reached|wait 24 hours|one-time verification).{0,120}/i);
+      const verify = text.match(/.{0,80}(verif|xác minh|trust tier|GOV_ID|số điện thoại|phone number).{0,120}/i);
+      return { overlays: scrim.length, limit: limit?.[0] ?? '', hint: verify?.[0] ?? '' };
+    }).catch(() => ({ overlays: 0, limit: '', hint: '' }));
+    if (dialogInfo.limit !== '') {
+      return {
+        status: 'failed',
+        error: 'YouTube đã chạm giới hạn đăng trong 24 giờ của kênh chưa xác minh — cần xác minh kênh 1 lần (bấm "Verify" trong trình duyệt cụm) hoặc chờ 24 giờ rồi đăng lại.'
+      };
+    }
     if (dialogInfo.overlays > 0 || dialogInfo.hint !== '') {
       return {
         status: 'failed',
@@ -173,7 +180,26 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
     }
     await titleBox.click({ timeout: 20_000, force: true });
   }
-  await fillEditable(titleBox, page, context.job.title.slice(0, 100));
+  // Điền tiêu đề — nếu bị overlay chặn (hộp thoại giới hạn 24h / xác minh
+  // kênh) thì báo đúng nguyên nhân thay vì timeout chung chung.
+  try {
+    await fillEditable(titleBox, page, context.job.title.slice(0, 100));
+  } catch {
+    const limit = await page.evaluate(() => {
+      const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ');
+      return text.match(/.{0,80}(daily upload limit|upload limit reached|wait 24 hours|one-time verification|verify your channel).{0,140}/i)?.[0] ?? '';
+    }).catch(() => '');
+    if (limit !== '') {
+      return {
+        status: 'failed',
+        error: 'YouTube đã chạm giới hạn đăng trong 24 giờ của kênh chưa xác minh — cần xác minh kênh 1 lần (bấm "Verify" trong trình duyệt cụm) hoặc chờ 24 giờ rồi đăng lại.'
+      };
+    }
+    return {
+      status: 'failed',
+      error: 'YouTube đang che bước điền tiêu đề bằng một hộp thoại (giới hạn đăng 24 giờ hoặc xác minh kênh) — hãy mở trình duyệt cụm và xử lý hộp thoại, sau đó bấm lại.'
+    };
+  }
 
   // Mô tả (max 4900 ký tự) nếu khung xuất hiện.
   const descBox = page.locator(sel.desc_box).first();

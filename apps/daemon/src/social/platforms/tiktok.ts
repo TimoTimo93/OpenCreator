@@ -82,6 +82,15 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
   const editor = page.locator(
     "div[data-e2e='caption_container'] [contenteditable='true'], div[data-e2e='caption_container'] textarea, div.public-DraftEditor-content[contenteditable='true']"
   ).first();
+  // Modal/tour có thể xuất hiện trước khi composer dựng xong ⇒ đóng trong vòng
+  // lặp chờ rồi mới tắt kiểm tra bản quyền (nút nằm trong composer).
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (await editor.isVisible().catch(() => false)) break;
+    await dismissBlockingModals(page);
+    await page.waitForTimeout(3_000).catch(() => undefined);
+  }
+  await turnOffCopyrightCheck(page);
+  await dismissBlockingModals(page);
   await editor.waitFor({ state: 'visible', timeout: 45_000 });
   // Dùng click cưỡng chế (force) vì overlay có thể chặn; xoá sẵn tên file mặc
   // định rồi gõ tiêu đề + mô tả + hashtag.

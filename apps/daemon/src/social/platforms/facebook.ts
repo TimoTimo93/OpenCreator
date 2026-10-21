@@ -301,15 +301,31 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
     // cả phần tử cha nên bấm vào cha sẽ không làm gì.
     const mediaLabels = ['Thêm ảnh/video', 'Ảnh/Video', 'Add photo/video', 'Photo/video'];
     const clickMedia = async (): Promise<boolean> => {
+      // Bắt sự kiện filechooser TRƯỚC khi bấm (hộp chọn file native).
+      const chooserPromise = page.waitForEvent('filechooser', { timeout: 20_000 }).catch(() => undefined);
+      let clicked = false;
       for (const label of mediaLabels) {
         const target = page.getByText(label, { exact: true }).first();
         if (await target.count().catch(() => 0) === 0) continue;
-        await target.click({ timeout: 12_000, force: true }).catch(async () => {
-          await target.click({ timeout: 8_000 }).catch(() => undefined);
+        // KHÔNG dùng force: click cưỡng chế không kích hoạt hộp chọn file native.
+        await target.click({ timeout: 12_000 }).catch(async () => {
+          await target.click({ timeout: 8_000, force: true }).catch(() => undefined);
         });
+        clicked = true;
+        break;
+      }
+      if (!clicked) return false;
+      // Ưu tiên input[type=file] ẩn; không có thì dùng filechooser.
+      const anyInput = page.locator("input[type='file']").first();
+      if (await anyInput.count().catch(() => 0) > 0) {
+        await anyInput.waitFor({ state: 'attached', timeout: 15_000 }).catch(() => undefined);
+        await anyInput.setInputFiles(context.job.videoPath).catch(() => undefined);
         return true;
       }
-      return false;
+      const chooser = await chooserPromise;
+      if (chooser === undefined) return false;
+      await chooser.setFiles(context.job.videoPath).catch(() => undefined);
+      return true;
     };
     let mediaClicked = await clickMedia();
     if (!mediaClicked) {
@@ -336,23 +352,6 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
     }
     await page.waitForTimeout(2_000);
     await dismissBusinessModals(page);
-    // Business Suite mới mở hộp chọn file NATIVE (không có input[type=file] ẩn)
-    // ⇒ bắt sự kiện filechooser để đưa file vào.
-    const chooserPromise = page.waitForEvent('filechooser', { timeout: 20_000 }).catch(() => undefined);
-    const fileInput = page.locator("input[type='file']").first();
-    const inputAttached = await fileInput.count().catch(() => 0) > 0;
-    if (inputAttached) {
-      await fileInput.waitFor({ state: 'attached', timeout: 20_000 });
-      await fileInput.setInputFiles(context.job.videoPath);
-    } else {
-      const chooser = await chooserPromise;
-      if (chooser !== undefined) {
-        await chooser.setFiles(context.job.videoPath).catch(() => undefined);
-      } else {
-        return await failedWithScreenshot(page, context, 'Business Suite không mở hộp chọn file (file chooser)');
-      }
-    }
-
     const textBox = page.locator(sel.composer_text_box).first();
     await textBox.waitFor({ state: 'visible', timeout: 45_000 });
     await textBox.click({ timeout: 15_000, force: true }).catch(async () => {
@@ -362,10 +361,20 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
     await page.keyboard.press('Delete').catch(() => undefined);
     await page.keyboard.type(`${context.job.title}\n${context.job.description}`.slice(0, 4_900), { delay: 20 });
 
-    // Đợi video tải xong (nút Đăng nhá nháy / hiển thị).
-    const publishBtn = page.locator(sel.publish_btn).first();
-    await publishBtn.waitFor({ state: 'visible', timeout: 600_000 });
-    await page.waitForTimeout(2_000);
+    // Đợi video tải xong: nút "Đăng" (text chính xác) xuất hiện và bật.
+    let publishReady = false;
+    for (let attempt = 0; attempt < 60 && !publishReady; attempt += 1) {
+      const target = page.getByText('Đăng', { exact: true }).first();
+      if (await target.count().catch(() => 0) > 0) {
+        publishReady = true;
+        break;
+      }
+      await page.waitForTimeout(5_000).catch(() => undefined);
+    }
+    if (!publishReady) {
+      return await failedWithScreenshot(page, context, 'Business Suite: nút "Đăng" không xuất hiện sau khi tải media (video có thể đang xử lý)');
+    }
+    await page.waitForTimeout(3_000);
 
     const gate = validatePlatformGate('facebook', context.job.scheduledAt, context.now());
     let scheduled = false;
