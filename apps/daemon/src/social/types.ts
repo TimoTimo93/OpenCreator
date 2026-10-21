@@ -71,6 +71,8 @@ export type SocialCluster = {
   tkAccountName: string;
   /** Tên tài khoản/Page Facebook đã liên kết. */
   fbAccountName: string;
+  /** Email tài khoản Facebook dùng để đăng nhập tự động (mật khẩu lưu mã hóa, không trả ra API). */
+  fbLoginEmail: string;
   /** GĐ3: bật tự động trả lời bình luận bằng AI. */
   autoReplyEnabled: boolean;
   /** GĐ3: chỉ dẫn riêng cho AI khi soạn câu trả lời. */

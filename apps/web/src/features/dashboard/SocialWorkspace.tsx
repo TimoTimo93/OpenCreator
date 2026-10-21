@@ -280,6 +280,32 @@ export default function SocialWorkspace(props: {
   const openSocialLogin = useCallback((cluster: SocialClusterSummary, platform: SocialPlatformName): Promise<void> =>
     service.openClusterLogin(cluster.id, platform).then(() => undefined), [service]);
 
+  /**
+   * Đăng nhập Facebook cho cụm — chạy ngay (không popup): daemon mở trình duyệt
+   * cụm, điền email/mật khẩu đã lưu (nếu có) và tự ghi trạng thái khi cookie
+   * phiên xuất hiện.
+   */
+  async function submitFacebookLogin(cluster: SocialClusterSummary): Promise<void> {
+    setCreatingAccount(`${cluster.id}:facebook`);
+    pushLog(`🔑 [${cluster.name}] Đang mở trình duyệt cụm để đăng nhập Facebook...`, 'action');
+    try {
+      const result = await service.loginFacebook(cluster.id, cluster.fbLoginEmail ?? '', '');
+      if (result.ok) {
+        const who = result.accountName === undefined || result.accountName === '' ? '' : ` — ${result.accountName}`;
+        pushLog(`✅ [${cluster.name}] Đã đăng nhập Facebook${who} — phiên đã lưu cho cụm này.`, 'action');
+        setToast(`Đăng nhập Facebook thành công${who} — phiên đã lưu cho cụm.`);
+      } else {
+        pushLog(`⚠️ [${cluster.name}] ${result.message ?? 'Facebook chưa đăng nhập được.'}`, 'error');
+        setToast(result.message ?? 'Facebook chưa đăng nhập được — xem hướng dẫn trong bảng điều khiển.');
+      }
+    } catch (cause) {
+      setToast(`Không đăng nhập được Facebook: ${messageOf(cause)}`);
+    } finally {
+      setCreatingAccount('');
+      await load(false);
+    }
+  }
+
   async function submitCreate(
     target: { cluster: SocialClusterSummary; platform: SocialPlatformName; mode: 'channel' | 'account' },
     name: string
@@ -390,7 +416,14 @@ export default function SocialWorkspace(props: {
               clusters={clusters}
               t={t}
               loginPendingPlatform={loginModal !== null ? `${loginModal.cluster.id}:${loginModal.platform}` : ''}
-              onOpenLogin={(cluster, platform) => setLoginModal({ cluster, platform })}
+              onOpenLogin={(cluster, platform) => {
+                // Facebook: đăng nhập tự động trong trình duyệt cụm (không popup).
+                if (platform === 'facebook') {
+                  void submitFacebookLogin(cluster);
+                  return;
+                }
+                setLoginModal({ cluster, platform });
+              }}
               onToggleAutoPublish={(cluster, enabled) => void action(
                 t('dashboard.social.autoPublishSaved'),
                 () => service.updateCluster(cluster.id, { autoPublishAfterTranslate: enabled })
@@ -688,62 +721,6 @@ function proxyChipText(proxyStatus: string, server: string): string {
     case 'no_proxy': return '— (mạng nhà)';
     default: return '⚪ Chưa kiểm tra';
   }
-}
-
-/**
- * H?p tho?i t?o k?nh/t?i kho?n (thay cho window.prompt ? Electron kh?ng h? tr?
- * prompt n?n b?m n?t s? kh?ng c? ph?n h?i g?).
- */
-function CreateAccountDialog(props: {
-  target: { cluster: SocialClusterSummary; platform: SocialPlatformName; mode: 'channel' | 'account'; name: string };
-  busy: boolean;
-  onChange(name: string): void;
-  onClose(): void;
-  onSubmit(name: string): Promise<void>;
-}) {
-  const { target } = props;
-  const label = target.platform === 'youtube' ? 'YouTube' : target.platform === 'tiktok' ? 'TikTok' : 'Facebook';
-  const title = target.mode === 'channel'
-    ? `⚙️ Tạo Kênh YouTube — ${target.cluster.name}`
-    : `➕ Tạo Tài Khoản ${label} — ${target.cluster.name}`;
-  const hint = target.mode === 'channel'
-    ? 'TikTok/Facebook không dùng được dùng tài khoản Google đã đăng nhập; nên tạo kênh sẵ dùng dữ liệu đã đăng nhập.'
-    : target.platform === 'tiktok'
-      ? 'Đăng ký bằng tài khoản TikTok bằng tài khoản Google đã đăng nhập trong trình duyệt củm.'
-      : 'Tạo Page Facebook. Nếu tài khoản Facebook chưa đăng nhập, hãy đđng nhập trong cứa sổ trình duyệt củm trước trước.';
-  return (
-    <div className="social-modal-mask" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="social-modal">
-        <div className="social-modal-head">
-          <h2>{title}</h2>
-          <button type="button" className="social-modal-close" onClick={props.onClose} aria-label="??ng">✕</button>
-        </div>
-        <p className="social-modal-note">{hint}</p>
-        <div className="social-grid-3">
-          <label htmlFor="social-create-name" className="span-2">Tên {target.mode === 'channel' ? 'kênh' : 'tài khoản'}:</label>
-          <input
-            id="social-create-name"
-            className="span-2"
-            type="text"
-            value={target.name}
-            onChange={event => props.onChange(event.target.value)}
-            placeholder={target.mode === 'channel' ? 'Tên kênh YouTube' : 'Tên tài khoản'}
-          />
-        </div>
-        <div className="social-modal-actions">
-          <button type="button" className="social-btn" onClick={props.onClose} disabled={props.busy}>Hủy</button>
-          <button
-            type="button"
-            className="social-btn social-btn-green"
-            disabled={props.busy || target.name.trim() === ''}
-            onClick={() => { void props.onSubmit(target.name.trim()); }}
-          >
-            {props.busy ? 'Đang xừ là...' : target.mode === 'channel' ? '⚕ Tạo kênh' : '⚕ Tạo tài khoản'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function ChannelsPanel(props: {
@@ -2142,6 +2119,8 @@ function ClusterEditor(props: {
   const [fbMode, setFbMode] = useState<'graph_api' | 'browser'>(cluster?.fbMode ?? 'graph_api');
   const [fbPageId, setFbPageId] = useState(cluster?.fbPageId ?? '');
   const [fbPageToken, setFbPageToken] = useState('');
+  const [fbLoginEmail, setFbLoginEmail] = useState(cluster?.fbLoginEmail ?? '');
+  const [fbLoginPassword, setFbLoginPassword] = useState('');
   const [times, setTimes] = useState(cluster?.defaultScheduleTimes.join(', ') ?? '11:30, 19:30, 21:00');
   const [autoReplyPrompt, setAutoReplyPrompt] = useState(cluster?.autoReplyPrompt ?? '');
   const [autoPublishAfterTranslate, setAutoPublishAfterTranslate] = useState(cluster?.autoPublishAfterTranslate ?? false);
@@ -2241,6 +2220,32 @@ function ClusterEditor(props: {
                 />
               </div>
             ) : null}
+            {cluster !== null ? (
+              <div className="social-enqueue-inline">
+                <div>
+                  <label className="social-label" htmlFor="social-cluster-fbemail">Email Facebook (đăng nhập tự động)</label>
+                  <input
+                    id="social-cluster-fbemail"
+                    type="text"
+                    className="social-input-mono"
+                    placeholder="ten@email.com"
+                    value={fbLoginEmail}
+                    onChange={event => setFbLoginEmail(event.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="social-label" htmlFor="social-cluster-fbpass">Mật khẩu Facebook</label>
+                  <input
+                    id="social-cluster-fbpass"
+                    type="password"
+                    className="social-input-mono"
+                    placeholder="Lưu mã hóa trên máy này"
+                    value={fbLoginPassword}
+                    onChange={event => setFbLoginPassword(event.target.value)}
+                  />
+                </div>
+              </div>
+            ) : null}
             <div className="social-enqueue-inline">
               <div>
                 <label className="social-label" htmlFor="social-cluster-yt">{t('dashboard.social.ytChannelUrl')}</label>
@@ -2305,20 +2310,28 @@ function ClusterEditor(props: {
             type="button"
             className="social-btn social-btn-primary"
             disabled={name.trim() === ''}
-            onClick={() => props.onSave({
-              name: name.trim(),
-              ...(seriesName.trim() === '' ? {} : { seriesName: seriesName.trim() }),
-              ...(proxyServer.trim() === '' ? {} : { proxyServer: proxyServer.trim() }),
-              fbMode,
-              ...(fbPageId.trim() === '' ? {} : { fbPageId: fbPageId.trim() }),
-              ...(fbMode === 'graph_api' && newToken !== '' ? { fbPageToken: newToken } : {}),
-              defaultScheduleTimes: times.split(',').map(time => time.trim()).filter(time => /^\d{1,2}:\d{2}$/.test(time)),
-              ytChannelUrl: ytChannelUrl.trim(),
-              tkProfileUrl: tkProfileUrl.trim(),
-              autoReplyEnabled,
-              autoReplyPrompt: autoReplyPrompt.trim(),
-              autoPublishAfterTranslate
-            })}
+            onClick={() => {
+              // Lưu thông tin đăng nhập Facebook riêng (mật khẩu mã hóa ở daemon).
+              if (cluster !== null && (fbLoginEmail.trim() !== '' || fbLoginPassword !== '')) {
+                props.service.saveFacebookCredentials(cluster.id, fbLoginEmail.trim(), fbLoginPassword)
+                  .then(() => props.onMessage(`🔐 [${cluster.name}] Đã lưu thông tin đăng nhập Facebook (mật khẩu mã hóa trên máy này).`, 'action'))
+                  .catch(() => undefined);
+              }
+              props.onSave({
+                name: name.trim(),
+                ...(seriesName.trim() === '' ? {} : { seriesName: seriesName.trim() }),
+                ...(proxyServer.trim() === '' ? {} : { proxyServer: proxyServer.trim() }),
+                fbMode,
+                ...(fbPageId.trim() === '' ? {} : { fbPageId: fbPageId.trim() }),
+                ...(fbMode === 'graph_api' && newToken !== '' ? { fbPageToken: newToken } : {}),
+                defaultScheduleTimes: times.split(',').map(time => time.trim()).filter(time => /^\d{1,2}:\d{2}$/.test(time)),
+                ytChannelUrl: ytChannelUrl.trim(),
+                tkProfileUrl: tkProfileUrl.trim(),
+                autoReplyEnabled,
+                autoReplyPrompt: autoReplyPrompt.trim(),
+                autoPublishAfterTranslate
+              });
+            }}
           >
             💾 {t('dashboard.drama.rangeApply')}
           </button>

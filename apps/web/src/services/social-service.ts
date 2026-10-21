@@ -36,6 +36,8 @@ export type SocialClusterSummary = {
   tkAccountName?: string;
   /** Tên tài khoản/Page Facebook đã liên kết. */
   fbAccountName?: string;
+  /** Email Facebook dùng để đăng nhập tự động cho cụm. */
+  fbLoginEmail?: string;
   /** Đã đăng nhập nhưng tài khoản chưa có kênh YouTube (cần tạo kênh). */
   needsChannel?: boolean;
   autoReplyEnabled: boolean;
@@ -413,6 +415,14 @@ export function createSocialService(client: RuntimeClient) {
     },
     closeClusterBrowser(id: string): Promise<SocialOverview> {
       return client.post(`/social/clusters/${encodeURIComponent(id)}/close-browser`);
+    },
+    /** Đăng nhập Facebook tự động trong trình duyệt cụm (mở form + tự lưu phiên). */
+    loginFacebook(id: string, email: string, password: string): Promise<{ ok: boolean; needsManual?: boolean; message?: string; accountName?: string }> {
+      return client.post(`/social/clusters/${encodeURIComponent(id)}/login/facebook`, { email, password });
+    },
+    /** Lưu email + mật khẩu Facebook của cụm (mật khẩu được mã hóa ở daemon). */
+    saveFacebookCredentials(id: string, email: string, password: string): Promise<{ ok: boolean; email: string }> {
+      return client.put(`/social/clusters/${encodeURIComponent(id)}/login/facebook/credentials`, { email, password });
     },
     enqueue(items: SocialEnqueueItem[]): Promise<SocialEnqueueResult> {
       return client.post('/social/jobs', { items });

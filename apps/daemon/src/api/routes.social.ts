@@ -144,6 +144,29 @@ export async function registerSocialRoutes(
     }
   });
 
+  server.post<{ Params: { id: string }; Body: unknown }>('/social/clusters/:id/login/facebook', async (request, reply) => {
+    const body = typeof request.body === 'object' && request.body !== null ? request.body as Record<string, unknown> : {};
+    const email = typeof body.email === 'string' ? body.email : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    try {
+      // Đăng nhập Facebook tự động: mở trình duyệt cụm, điền form, tự lưu phiên.
+      return await social.loginFacebook(request.params.id, { email, password });
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.put<{ Params: { id: string }; Body: unknown }>('/social/clusters/:id/login/facebook/credentials', async (request, reply) => {
+    const body = typeof request.body === 'object' && request.body !== null ? request.body as Record<string, unknown> : {};
+    const email = typeof body.email === 'string' ? body.email : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    try {
+      return await social.saveFacebookCredentials(request.params.id, { email, password });
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
   server.post<{ Body: unknown }>('/social/jobs', async (request, reply) => {
     try {
       const body = request.body;

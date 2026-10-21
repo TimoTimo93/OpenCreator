@@ -39,6 +39,7 @@ import { aiComposeVideoMeta, aiTestReply, type SocialAiCompose, type SocialAiRep
 import { listDownloadedVideos, type SocialDownloadItem } from './downloads.js';
 import { createYoutubeChannel } from './platforms/youtube-channel.js';
 import { createFacebookPage, signUpTiktokViaGoogle } from './platforms/account-signup.js';
+import { loginFacebook, waitForFacebookSession } from './platforms/facebook-login.js';
 import type { SocialWorker } from './worker.js';
 import {
   SOCIAL_PLATFORM_LOGIN_URLS,
@@ -114,6 +115,13 @@ export type SocialService = {
   createClusterYoutubeChannel(clusterId: string, channelName: string): Promise<{ ok: boolean; channelId?: string; channelName?: string; error?: string }>;
   /** Tạo tài khoản/kênh TikTok (qua Google) hoặc Facebook Page khi cụm chưa có tài khoản. */
   createClusterSocialAccount(clusterId: string, platform: SocialPlatform, options?: { name?: string }): Promise<{ ok: boolean; needsManual?: boolean; message?: string; accountName?: string; accountUrl?: string }>;
+  /**
+   * Đăng nhập Facebook tự động trong trình duyệt cụm: điền email (+mật khẩu nếu
+   * có) và tự lưu phiên khi cookie c_user/xs xuất hiện.
+   */
+  loginFacebook(clusterId: string, options?: { email?: string; password?: string }): Promise<{ ok: boolean; needsManual?: boolean; message?: string; accountName?: string }>;
+  /** Lưu thông tin đăng nhập Facebook cho cụm (mật khẩu mã hóa, không bao giờ trả ra API). */
+  saveFacebookCredentials(clusterId: string, credentials: { email: string; password: string }): Promise<{ ok: boolean; email: string }>;
   /** Nạp video vào hàng đợi; trả summary + số nạp + danh sách path bị bỏ qua. */
   enqueue(requests: readonly SocialEnqueueRequest[]): { summary: SocialOverview; accepted: number; duplicates: string[] };
   pause(): SocialOverview;
@@ -334,21 +342,26 @@ async function readSocialProfileName(
     page = opened as unknown as NonNullable<typeof page>;
     await page.waitForTimeout(5_000);
     // Link trang cá nhân cho biết username (TikTok) / user id (Facebook).
-    const profileLink = await page.evaluate((arg: unknown) => {
-      const target = (arg ?? {}) as { platform: string };
-      const selectors = target.platform === 'tiktok'
-        ? ['a[data-e2e="profile-icon"]', 'a[href^="/@"]']
-        : ['a[href*="profile.php?id="]', 'a[href*="/profile/"]'];
-      for (const selector of selectors) {
-        for (const el of Array.from(document.querySelectorAll(selector))) {
-          const href = (el.getAttribute('href') ?? '').trim();
-          if (href === '') continue;
-          if (target.platform === 'tiktok' && href.replace('/@', '').trim() === '') continue;
-          return href;
+    // Link có thể render muộn ⇒ thử lại vài lần trước khi bỏ cuộc.
+    let profileLink = '';
+    for (let attempt = 0; attempt < 4 && profileLink === ''; attempt += 1) {
+      profileLink = await page.evaluate((arg: unknown) => {
+        const target = (arg ?? {}) as { platform: string };
+        const selectors = target.platform === 'tiktok'
+          ? ['a[data-e2e="profile-icon"]', 'a[href^="/@"]']
+          : ['a[href*="profile.php?id="]', 'a[href*="/profile/"]'];
+        for (const selector of selectors) {
+          for (const el of Array.from(document.querySelectorAll(selector))) {
+            const href = (el.getAttribute('href') ?? '').trim();
+            if (href === '') continue;
+            if (target.platform === 'tiktok' && href.replace('/@', '').trim() === '') continue;
+            return href;
+          }
         }
-      }
-      return '';
-    }, { platform }).catch(() => '');
+        return '';
+      }, { platform }).catch(() => '');
+      if (profileLink === '') await page.waitForTimeout(2_500).catch(() => undefined);
+    }
     if (profileLink !== '') {
       const target = profileLink.startsWith('http')
         ? profileLink
@@ -372,8 +385,12 @@ async function readSocialProfileName(
       }
       return '';
     }, null).catch(() => '');
-    const cleanedTitle = title.replace(/\s*[-–—]\s*(TikTok|Facebook)\s*$/i, '').trim();
-    const label = name !== '' ? name : cleanedTitle;
+    // Username trong URL trang cá nhân (TikTok: /@ten, Facebook: /profile.php?id=…).
+    const urlUser = /\/@([A-Za-z0-9._-]+)/.exec(url)?.[1] ?? '';
+    // Title chung của trang chủ KHÔNG phải tên tài khoản.
+    const genericTitle = /^(tiktok\s*[-–—]\s*make your day|facebook|log in to facebook|facebook – đăng nhập|meta)$/i;
+    const cleanedTitle = genericTitle.test(title.trim()) ? '' : title.replace(/\s*[-–—]\s*(TikTok|Facebook)\s*$/i, '').trim();
+    const label = name !== '' ? name : urlUser !== '' ? urlUser : cleanedTitle;
     return {
       ...(label !== '' && label.length < 80 ? { name: label } : {}),
       ...(url.includes(platform === 'tiktok' ? 'tiktok.com' : 'facebook.com') ? { url } : {})
@@ -420,8 +437,34 @@ export function createSocialService(input: SocialServiceInput): SocialService {
     ...(runYtDlpFn === undefined ? {} : { runYtDlpFn }),
     log: message => { console.log(`[social] ${message}`); }
   });
-  const readLlmConfig = input.readLlmConfig ?? (async (): Promise<SocialLlmConfig | null> => null);
-  const comments = createSocialComments({
+  /**
+   * Theo dõi nền phiên Facebook: người dùng đăng nhập trong cửa sổ trình duyệt
+   * của cụm → daemon tự ghi fb_login='ok' + tên tài khoản (UI polling 4s).
+   */
+  async function watchFacebookSession(
+    clusterId: string,
+    handle: { cookies?(urls: string[]): Promise<Array<{ name: string; value: string; domain: string }>> },
+    email: string
+  ): Promise<void> {
+    try {
+      const signedIn = await waitForFacebookSession(handle as never, 10 * 60_000);
+      if (!signedIn) return;
+      const patch: Parameters<typeof updateClusterRow>[2] = {
+        fb_login: 'ok',
+        updated_at: new Date().toISOString()
+      };
+      if (email !== '') patch.fb_login_email = email;
+      const profile = await worker.withClusterBrowser(clusterId, async browserHandle =>
+        readSocialProfileName(browserHandle, 'facebook'));
+      if (profile.name !== undefined) patch.fb_account_name = profile.name;
+      updateClusterRow(db, clusterId, patch);
+      console.log(`[social] Facebook đã đăng nhập cho cụm ${clusterId}${profile.name === undefined ? '' : ` (${profile.name})`}`);
+    } catch {
+      // Bỏ qua: người dùng có thể đóng trình duyệt trước khi đăng nhập xong.
+    }
+  }
+
+  const readLlmConfig = input.readLlmConfig ?? (async (): Promise<SocialLlmConfig | null> => null);  const comments = createSocialComments({
     db,
     worker,
     decryptToken,
@@ -454,6 +497,7 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       ytAccountId: cluster.ytAccountId,
       tkAccountName: cluster.tkAccountName,
       fbAccountName: cluster.fbAccountName,
+      fbLoginEmail: cluster.fbLoginEmail,
       needsChannel: cluster.needsChannel,
       autoReplyEnabled: cluster.autoReplyEnabled,
       autoReplyPrompt: cluster.autoReplyPrompt,
@@ -791,6 +835,86 @@ export function createSocialService(input: SocialServiceInput): SocialService {
         ...(accountName === undefined ? {} : { accountName }),
         ...(result.accountUrl === undefined ? {} : { accountUrl: result.accountUrl })
       };
+    },
+
+    /**
+     * Đăng nhập Facebook tự động trong trình duyệt của cụm: điền email (+mật
+     * khẩu đã lưu nếu có) rồi bấm "Log in"; daemon theo dõi cookie c_user/xs và
+     * tự ghi trạng thái + tên tài khoản khi đăng nhập thành công.
+     */
+    async loginFacebook(
+      clusterId: string,
+      options: { email?: string; password?: string } = {}
+    ): Promise<{ ok: boolean; needsManual?: boolean; message?: string; accountName?: string }> {
+      const row = getClusterRow(db, clusterId);
+      if (row === undefined) throw new SocialError('social_cluster_not_found', 'Không tìm thấy cụm kênh');
+      const email = (options.email ?? '').trim() !== '' ? (options.email ?? '').trim() : (row.fb_login_email ?? '');
+      const stored = decryptToken(row.fb_login_password_encrypted ?? null);
+      const password = (options.password ?? '').trim() !== '' ? (options.password ?? '').trim() : stored;
+      const result = await worker.withClusterBrowser(clusterId, async browserHandle => {
+        const res = await loginFacebook(browserHandle, {
+          email,
+          password,
+          // Có mật khẩu → chờ tới khi cookie phiên xuất hiện; chưa có mật khẩu
+          // → trả về nhanh để người dùng tự gõ trong cửa sổ trình duyệt.
+          waitMs: password !== '' ? 90_000 : 12_000
+        });
+        if (!res.ok && res.needsManual === true) {
+          // Theo dõi nền: người dùng đăng nhập xong trong cửa sổ → daemon tự lưu
+          // phiên + tên tài khoản (UI tự cập nhật nhờ polling mỗi 4s).
+          void watchFacebookSession(clusterId, browserHandle, email);
+        }
+        return res;
+      });
+      if (!result.ok) {
+        if (result.needsManual === true) {
+          return {
+            ok: false,
+            needsManual: true,
+            message: result.message ?? 'Cần bạn đăng nhập Facebook trong cửa sổ trình duyệt của cụm.'
+          };
+        }
+        throw new SocialError('social_account_login_failed', result.message ?? 'Không đăng nhập được Facebook');
+      }
+      const patch: Parameters<typeof updateClusterRow>[2] = {
+        fb_login: 'ok',
+        updated_at: new Date().toISOString()
+      };
+      if (email !== '') patch.fb_login_email = email;
+      const profile = await worker.withClusterBrowser(clusterId, async browserHandle =>
+        readSocialProfileName(browserHandle, 'facebook'));
+      const accountName = profile.name ?? result.accountName;
+      if (accountName !== undefined) patch.fb_account_name = accountName;
+      updateClusterRow(db, clusterId, patch);
+      return {
+        ok: true,
+        ...(accountName === undefined ? {} : { accountName }),
+        ...(result.message === undefined ? {} : { message: result.message })
+      };
+    },
+
+    /** Lưu email + mật khẩu Facebook của cụm (mật khẩu mã hóa AES-256-GCM). */
+    async saveFacebookCredentials(
+      clusterId: string,
+      credentials: { email: string; password: string }
+    ): Promise<{ ok: boolean; email: string }> {
+      const row = getClusterRow(db, clusterId);
+      if (row === undefined) throw new SocialError('social_cluster_not_found', 'Không tìm thấy cụm kênh');
+      const email = credentials.email.trim();
+      const password = credentials.password.trim();
+      if (email === '' && password === '') {
+        throw new SocialError('social_credentials_empty', 'Cần nhập email hoặc mật khẩu Facebook');
+      }
+      const patch: Parameters<typeof updateClusterRow>[2] = {
+        updated_at: new Date().toISOString()
+      };
+      if (email !== '') patch.fb_login_email = email;
+      // Mật khẩu trống ⇒ xóa mật khẩu đã lưu (đăng nhập thủ công trong cửa sổ).
+      patch.fb_login_password_encrypted = password === ''
+        ? null
+        : encryptSecret(password, secretKeyPath);
+      updateClusterRow(db, clusterId, patch);
+      return { ok: true, email };
     },
 
     /**

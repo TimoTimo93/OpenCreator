@@ -21,7 +21,7 @@ export type SocialAccountSignupResult = {
   accountUrl?: string;
 };
 
-type SignupPage = {
+export type SignupPage = {
   url(): string;
   title(): Promise<string>;
   waitForTimeout(ms: number): Promise<void>;
@@ -51,7 +51,7 @@ type SignupPage = {
   close(): Promise<void>;
 };
 
-type SignupHandle = {
+export type SignupHandle = {
   newPage(url?: string): Promise<unknown>;
   pages?(): Promise<unknown[]>;
   cookies?(urls: string[]): Promise<Array<{ name: string; value: string; domain: string }>>;

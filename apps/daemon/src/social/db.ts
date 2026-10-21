@@ -172,6 +172,9 @@ function migrateColumns(db: SocialDB): void {
   // Tên tài khoản TikTok/Facebook (để cột hiển thị "● <tên>" như YouTube).
   addColumn('social_clusters', 'tk_account_name', "tk_account_name TEXT NOT NULL DEFAULT ''");
   addColumn('social_clusters', 'fb_account_name', "fb_account_name TEXT NOT NULL DEFAULT ''");
+  // Thông tin đăng nhập Facebook (mật khẩu được mã hóa AES-256-GCM).
+  addColumn('social_clusters', 'fb_login_email', "fb_login_email TEXT NOT NULL DEFAULT ''");
+  addColumn('social_clusters', 'fb_login_password_encrypted', 'fb_login_password_encrypted TEXT');
   addColumn('social_clusters', 'auto_reply_enabled', 'auto_reply_enabled INTEGER NOT NULL DEFAULT 0');
   addColumn('social_clusters', 'auto_reply_prompt', "auto_reply_prompt TEXT NOT NULL DEFAULT ''");
   // GĐ4: công tắc tự nạp đăng sau khi dịch xong (điều khiển từ daemon).
@@ -228,6 +231,8 @@ export type SocialClusterRow = {
   yt_account_id: string | null;
   tk_account_name: string | null;
   fb_account_name: string | null;
+  fb_login_email: string | null;
+  fb_login_password_encrypted: string | null;
   auto_reply_enabled: number | null;
   auto_reply_prompt: string | null;
   auto_publish_after_translate: number | null;
@@ -301,6 +306,7 @@ export function mapCluster(row: SocialClusterRow): SocialCluster {
     ytAccountId: row.yt_account_id ?? '',
     tkAccountName: row.tk_account_name ?? '',
     fbAccountName: row.fb_account_name ?? '',
+    fbLoginEmail: row.fb_login_email ?? '',
     needsChannel: (row.yt_login === 'ok') && (row.yt_account_id ?? '') === '',
     autoReplyEnabled: row.auto_reply_enabled === 1,
     autoReplyPrompt: row.auto_reply_prompt ?? '',
@@ -405,6 +411,8 @@ export function createClusterRow(
     yt_account_id: '',
     tk_account_name: '',
     fb_account_name: '',
+    fb_login_email: '',
+    fb_login_password_encrypted: null,
     fb_mode: data.fbMode,
     fb_page_id: data.fbPageId,
     fb_page_token_encrypted: data.fbPageTokenEncrypted,
@@ -468,6 +476,8 @@ export function updateClusterRow(
     yt_account_id: string;
     tk_account_name: string;
     fb_account_name: string;
+    fb_login_email: string;
+    fb_login_password_encrypted: string | null;
     auto_reply_enabled: number;
     auto_reply_prompt: string;
     auto_publish_after_translate: number;
