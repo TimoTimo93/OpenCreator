@@ -1689,8 +1689,19 @@ function ComposerBlock(props: {
     ...filteredDownloads.map(item => ({ key: `d:${item.path}`, kind: 'downloads' as const, item }))
   ];
 
-  function mediaTile(entry: (typeof mergedMedia)[number]) {
-    const selected = path.trim() !== '' && entry.item.path === path.trim();
+  /** Mở thư mục chứa video đã dịch xong (chờ đăng) bằng Windows Explorer. */
+  function openTranslatedFolder(): void {
+    const creator = props.creatorService;
+    if (creator === undefined || creator === null) return;
+    const selected = path.trim() !== '' ? path.trim() : translatedVideos?.[0]?.path ?? '';
+    if (selected === '') {
+      void creator.revealDownloadFolder().catch(() => undefined);
+      return;
+    }
+    void creator.revealDownloadFolder(selected).catch(() => undefined);
+  }
+
+  function mediaTile(entry: (typeof mergedMedia)[number]) {    const selected = path.trim() !== '' && entry.item.path === path.trim();
     const onPick = () => entry.kind === 'translated'
       ? pickTranslated(entry.item)
       : pickDownload(entry.item);
@@ -1741,23 +1752,31 @@ function ComposerBlock(props: {
               aria-expanded={libraryOpen}
               onClick={() => setLibraryOpen(true)}
             >
-              <span>🔍 Tìm trong thư viện</span>
+              <span>📂 Chọn video đã dịch xong</span>
             </button>
           </div>
         ) : (
           <>
             <div className="social-inline-row">
-              <label className="social-label" htmlFor="social-composer-path" style={{ margin: 0, flexShrink: 0 }}>
-                Vị trí video (MP4)
-              </label>
-              <input
-                id="social-composer-path"
-                type="text"
-                className="social-input-mono"
-                placeholder="D:/downloads/tap-5.mp4"
-                value={path}
-                onChange={event => setPath(event.target.value)}
-              />
+              <button
+                type="button"
+                className="social-btn social-btn-sm"
+                title="Mở thư mục chứa các video đã dịch xong (chờ đăng) bằng Windows Explorer"
+                disabled={translatedVideos === null || translatedVideos.length === 0}
+                onClick={openTranslatedFolder}
+              >
+                📁 Mở thư mục video đã dịch
+              </button>
+              <span className="social-media-name" style={{ flex: 1, minWidth: 0 }}>
+                {path.trim() === '' ? 'Chưa chọn video' : fileNameOf(path)}
+              </span>
+              <button
+                type="button"
+                className="social-btn social-btn-sm"
+                onClick={() => { setLibraryOpen(false); setSearch(''); }}
+              >
+                ✕ Đóng
+              </button>
             </div>
             <input
               type="search"

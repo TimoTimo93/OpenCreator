@@ -293,11 +293,10 @@ describe('SocialWorkspace — composer đa kênh', () => {
       </LanguageProvider>
     );
     fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
-    // Ô nhập đường dẫn nằm trong thư viện (khớp demo) → mở thư viện trước
-    fireEvent.click(await screen.findByRole('button', { name: /Tìm trong thư viện/ }));
+    // Video đã chọn hiện dưới dạng tên file (không còn ô dán đường dẫn)
+    fireEvent.click(await screen.findByRole('button', { name: /Chọn video đã dịch xong/ }));
     await waitFor(() => {
-      const input = screen.getByLabelText('Vị trí video (MP4)') as HTMLInputElement;
-      expect(input.value).toBe('D:/downloads/tap-5.mp4');
+      expect(screen.getAllByText('tap-5.mp4').length).toBeGreaterThan(0);
     });
     // media picker đã nạp danh sách video đã tải
     expect(screen.getByText('Tập 5')).toBeInTheDocument();
@@ -313,9 +312,9 @@ describe('SocialWorkspace — composer đa kênh', () => {
       </LanguageProvider>
     );
     fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /Tìm trong thư viện/ }));
-    const pathInput = await screen.findByLabelText('Vị trí video (MP4)');
-    fireEvent.change(pathInput, { target: { value: 'D:/downloads/tap-5.mp4' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Chọn video đã dịch xong/ }));
+    // Chọn video từ lưới thư viện (không dán đường dẫn)
+    fireEvent.click(await screen.findByRole('button', { name: /Tập 5/ }));
     fireEvent.click(await screen.findByRole('button', { name: /Chưa chọn nhóm nào/ }));
     const checkbox = await screen.findByRole('checkbox', { name: 'Long Hổ Riệu' });
     fireEvent.click(checkbox);
@@ -519,7 +518,7 @@ describe('SocialWorkspace — composer nguồn "Video đã dịch"', () => {
     } as never;
   }
 
-  it('media grid hiển thị ✨ Đã dịch cho video dịch + tile "Tìm trong thư viện"; chọn video điền path', async () => {
+  it('media grid hiển thị ✨ Đã dịch cho video dịch + nút chọn video đã dịch xong; chọn video điền path', async () => {
     const { client } = fakeClient();
     render(
       <LanguageProvider initialPreference="vi-VN">
@@ -538,13 +537,14 @@ describe('SocialWorkspace — composer nguồn "Video đã dịch"', () => {
     );
     fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
     // Tile thư viện + trạng thái "✨ Đã dịch — chờ đăng" như demo
-    expect(await screen.findByRole('button', { name: /Tìm trong thư viện/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Chọn video đã dịch xong/ })).toBeInTheDocument();
     expect(await screen.findByText('✨ Đã dịch — chờ đăng')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /tap-1\.mp4/ }));
-    // Ô đường dẫn nằm trong thư viện (mở thư viện để kiểm tra)
-    fireEvent.click(screen.getByRole('button', { name: /Tìm trong thư viện/ }));
-    const pathInput = await screen.findByLabelText('Vị trí video (MP4)') as HTMLInputElement;
-    expect(pathInput.value).toBe('D:/dich/tap-1.mp4');
+    // Mở thư viện: có nút mở thư mục video đã dịch + tên file đã chọn (không còn ô dán link)
+    fireEvent.click(screen.getByRole('button', { name: /Chọn video đã dịch xong/ }));
+    expect(await screen.findByRole('button', { name: /Mở thư mục video đã dịch/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Vị trí video (MP4)')).not.toBeInTheDocument();
+    expect(screen.getAllByText('tap-1.mp4').length).toBeGreaterThan(0);
   });
 
   it('composer khi không có creatorService hiện tile thư viện + video tải về (không crash)', async () => {
@@ -555,7 +555,7 @@ describe('SocialWorkspace — composer nguồn "Video đã dịch"', () => {
       </LanguageProvider>
     );
     fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
-    await screen.findByRole('button', { name: /Tìm trong thư viện/ });
+    await screen.findByRole('button', { name: /Chọn video đã dịch xong/ });
     expect(screen.queryByText('✨ Đã dịch — chờ đăng')).not.toBeInTheDocument();
     expect(screen.getByText('Tập 5')).toBeInTheDocument();
   });
