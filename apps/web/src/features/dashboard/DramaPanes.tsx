@@ -986,18 +986,70 @@ export function DramaQueuePane(props: DramaPaneProps) {
     });
   }, []);
 
-  /** Nút "Thêm cả bộ vào dịch": chỉ hiện khi toàn bộ tập của nhóm đã tải xong. */
-  const openSeriesInTranslation = useCallback((group: { name: string; tasks: HongguoDramaTask[] }) => {
-    const firstDone = group.tasks.find(task => queueStatusKey(task.status) === 'completed' && (task.savePath ?? '') !== '');
-    const path = firstDone?.savePath;
-    if (path === undefined || path === '') return;
-    setPendingTranslationSource({
-      path,
-      title: group.name,
-      ...(group.name !== '' ? { series: { title: group.name } } : {})
-    });
-    window.location.hash = '#/workbench?tool=video-translation';
+  /**
+   * v2 — Nút "Thêm cả bộ vào dịch": gom TẤT CẢ tập đã tải xong của bộ
+   * (path + số tập vid_index + seriesKey) nạp thẳng vào hàng chờ dịch cả bộ
+   * (batchMode → dịch xong cả bộ tự ghép full movie rồi mới nạp đăng), hiện
+   * toast "Đã nạp N tập" rồi chuyển sang trang Dịch video.
+   */
+  const [batchNotice, setBatchNotice] = useState('');
+  const [batchPending, setBatchPending] = useState(false);
+  const batchToastTimer = useRef<ReturnType<typeof setTimeout>>();
+  const showBatchToast = useCallback((text: string) => {
+    setBatchNotice(text);
+    clearTimeout(batchToastTimer.current);
+    batchToastTimer.current = setTimeout(() => setBatchNotice(''), 4000);
   }, []);
+
+  const enqueueSeriesInTranslation = useCallback(async (group: { key: string; name: string; tasks: HongguoDramaTask[] }) => {
+    const done = group.tasks.filter(task => queueStatusKey(task.status) === 'completed' && (task.savePath ?? '') !== '');
+    const firstPath = done[0]?.savePath;
+    if (firstPath === undefined || firstPath === '') return;
+    // Chưa cắm backend (dev/browser) → hành vi cũ: hand-off 1 tập cho 
+    // trang Dịch tự dựng cả bộ tại đó.
+    if (service === null || done.length === 0) {
+      setPendingTranslationSource({
+        path: firstPath,
+        title: group.name,
+        ...(group.name !== '' ? { series: { title: group.name } } : {})
+      });
+      window.location.hash = '#/workbench?tool=video-translation';
+      return;
+    }
+    setBatchPending(true);
+    try {
+      const response = await service.enqueueTranslationBatch({
+        items: done.map(task => {
+          const path = task.savePath as string;
+          const title = task.title ?? task.videoInfo?.title ?? task.filename ?? path.split(/[\\/]/).pop() ?? path;
+          return {
+            path,
+            title,
+            ...(typeof task.hongguoInfo?.vid_index === 'number'
+              ? { episodeIndex: task.hongguoInfo.vid_index }
+              : {}),
+            seriesKey: group.key,
+            batchMode: true
+          };
+        }),
+        ...(group.name.trim() === '' ? {} : { seriesName: group.name.trim() })
+      });
+      const queuedCount = response.items.filter(item => item.seriesKey === group.key).length;
+      showBatchToast(t('dashboard.drama.queueGroupTranslateQueued', { count: queuedCount }));
+      setTimeout(() => {
+        window.location.hash = '#/workbench?tool=video-translation';
+      }, 700);
+    } catch (cause) {
+      showBatchToast(t('dashboard.drama.queueGroupTranslateFailed', { message: cause instanceof Error ? cause.message : String(cause) }));
+    } finally {
+      setBatchPending(false);
+    }
+  }, [service, showBatchToast, t]);
+
+  /** Nút "Thêm cả bộ vào dịch": chỉ hiện khi toàn bộ tập của nhóm đã tải xong. */
+  const openSeriesInTranslation = useCallback((group: { key: string; name: string; tasks: HongguoDramaTask[] }) => {
+    void enqueueSeriesInTranslation(group);
+  }, [enqueueSeriesInTranslation]);
 
   /** Một dòng tác vụ — dùng lại cho cả bản nhóm (compact) và bản đơn. */
   const renderTaskRow = useCallback((task: HongguoDramaTask, index: number, compact: boolean) => {
@@ -1111,6 +1163,10 @@ export function DramaQueuePane(props: DramaPaneProps) {
           />
         ) : null}
 
+        {batchNotice !== '' ? (
+          <p className="drama-queue-toast" role="status">{batchNotice}</p>
+        ) : null}
+
 
   {tasks.length > 0 ? (
     <div className="drama-queue-groups">
@@ -1143,6 +1199,7 @@ export function DramaQueuePane(props: DramaPaneProps) {
               <button
                 type="button"
                 className="drama-btn drama-btn-sm drama-queue-translate drama-queue-group-translate-all"
+                disabled={batchPending}
                 onClick={() => openSeriesInTranslation(group)}
               >
                 <Languages size={14} aria-hidden="true" />

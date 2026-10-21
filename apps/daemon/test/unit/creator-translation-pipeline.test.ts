@@ -1,4 +1,5 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, normalize } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -112,6 +113,8 @@ function makeFakeDispatcher(jobs: Map<string, FakeJobEntry>, stageDelayMs: numbe
         const videoPath = sourceArtifact === undefined
           ? join(entry.job.projectId, 'out.mp4')
           : `${String(sourceArtifact.path)}.dub.mp4`;
+        // Giả lập thật: artifact xuất là file có nội dung (merge copy file này).
+        void writeFile(videoPath, 'fake-dubbed-video').catch(() => undefined);
         entry.artifacts.push({
           id: `artifact_h_${entry.artifacts.length + 1}`,
           jobId,
@@ -168,6 +171,14 @@ async function makeService(options: {
     title: string;
     episodeIndex?: number;
   }) => Promise<void>;
+  /** v2: hook ghép xong (full movie sẵn sàng upload). */
+  onMerged?: (info: {
+    seriesKey: string | null;
+    projectId: string | null;
+    videoPath: string;
+    title: string;
+    episodeCount: number;
+  }) => Promise<void>;
   getProject?: (projectId: string) => { projectId: string } | undefined;
 } = {}): Promise<{
   service: ReturnType<typeof build>;
@@ -205,6 +216,7 @@ async function makeService(options: {
       ...(options.getProject === undefined ? {} : { getProject: options.getProject })
     },
     ...(options.onEpisodeCompleted === undefined ? {} : { onEpisodeCompleted: options.onEpisodeCompleted }),
+    ...(options.onMerged === undefined ? {} : { onMerged: options.onMerged }),
     ffmpegPath: 'ffmpeg',
     ffprobePath: 'ffprobe',
     ensureRuntimeReady: async () => undefined,
@@ -240,8 +252,9 @@ async function waitForSettle(service: {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     await new Promise(resolvePromise => setTimeout(resolvePromise, 50));
     summary = service.getSummary();
+    const mergeStatus = summary.merges[0]?.status ?? 'idle';
     if (summary.counts.queued === 0 && summary.counts.running === 0
-      && (summary.merge.status === 'completed' || summary.merge.status === 'failed'
+      && (mergeStatus === 'completed' || mergeStatus === 'failed'
         || summary.counts.completed === 0)) {
       return summary;
     }
@@ -268,9 +281,10 @@ describe('translation pipeline service', () => {
     const summary = await waitForSettle(service);
     expect(summary.counts.completed).toBe(2);
     expect(summary.counts.failed).toBe(0);
-    expect(summary.merge.status).toBe('completed');
-    expect(summary.merge.episodeCount).toBe(2);
-    expect(summary.items.every(item => item.merged && item.mergeRunId === summary.merge.runId)).toBe(true);
+    const groupMerge = summary.merges.find(entry => entry.seriesKey === 'series-A');
+    expect(groupMerge?.status).toBe('completed');
+    expect(groupMerge?.episodeCount).toBe(2);
+    expect(summary.items.every(item => item.merged && item.mergeRunId === groupMerge?.runId)).toBe(true);
     // Ghép: tập 1 (tap-01... .dub.mp4) trước tập 2.
     expect(mergeCalls).toHaveLength(1);
     const expectedFirst = `${sourcePaths[1]!}.dub.mp4`;
@@ -294,9 +308,13 @@ describe('translation pipeline service', () => {
     expect(after.counts.completed).toBe(1);
     const failedItem = after.items.find(item => item.status === 'failed');
     expect(failedItem?.error).toContain('Không đọc được file nguồn');
-    // Merge: chỉ ghép phần đã hoàn thành.
-    expect(mergeCalls).toHaveLength(1);
-    expect(mergeCalls[0]).toHaveLength(1);
+    // Merge: chỉ ghép phần đã hoàn thành; nhóm chỉ còn 1 phân đoạn → copy thẳng
+    // (không gọi ffmpeg).
+    expect(mergeCalls).toHaveLength(0);
+    const groupMerge = after.merges.find(entry => entry.seriesKey === null);
+    expect(groupMerge?.status).toBe('completed');
+    expect(groupMerge?.episodeCount).toBe(1);
+    expect(groupMerge?.uploadReady).toContain('upload-pending');
   });
 
   it('paused chặn chạy; resume tiếp tục', async () => {
@@ -337,6 +355,133 @@ describe('translation pipeline service', () => {
     const { service } = await makeService();
     await service.recover();
     expect(service.getSummary().items).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2 "dịch cả bộ" — thứ tự dịch theo số tập, ghép theo bộ, tự nạp full movie
+// ---------------------------------------------------------------------------
+
+describe('translation pipeline v2 — dịch cả bộ', () => {
+  async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error('waitFor timeout');
+      await new Promise(resolvePromise => setTimeout(resolvePromise, 20));
+    }
+  }
+
+  it('nạp tập 100 trước rồi cả bộ 1..N → STILL dịch theo thứ tự số tập tăng dần', async () => {
+    const hookCalls: Array<{ episodeIndex?: number }> = [];
+    const { service, dataDir, sourcePaths } = await makeService({
+      onEpisodeCompleted: async info => {
+        hookCalls.push({ episodeIndex: info.episodeIndex });
+      }
+    });
+    // Thêm các file nguồn riêng (khử trùng xử lý theo đường dẫn — cần file distinct).
+    const extraPaths = await Promise.all(['tap-100.mp4', 'tap-01x.mp4', 'tap-02x.mp4', 'tap-03x.mp4']
+      .map(async name => {
+        const path = join(dataDir, name);
+        await writeFile(path, 'fake-video');
+        return path;
+      }));
+    // Nạp lộn xộn: ep 100 trước, rồi 3, rồi 1..2.
+    service.enqueue([{ path: extraPaths[0]!, title: 'Tập 100', seriesKey: 'series-A', episodeIndex: 100 }]);
+    await waitFor(() => service.getSummary().counts.running === 1);
+    service.enqueue([
+      { path: extraPaths[1]!, title: 'Tập 3', seriesKey: 'series-A', episodeIndex: 3 },
+      { path: extraPaths[2]!, title: 'Tập 1', seriesKey: 'series-A', episodeIndex: 1 },
+      { path: extraPaths[3]!, title: 'Tập 2', seriesKey: 'series-A', episodeIndex: 2 }
+    ]);
+    void sourcePaths;
+    await waitForSettle(service);
+    // ep100 đang running xong trước (đã chiếm slot), sau đó đúng 1 → 2 → 3.
+    expect(hookCalls.map(call => call.episodeIndex)).toEqual([100, 1, 2, 3]);
+  });
+
+  it('batch items bỏ qua nạp đăng tung tập; onMerged gọi đúng 1 lần với FULL MOVIE', async () => {
+    const hookCalls: Array<{ title: string }> = [];
+    const mergedCalls: Array<{ seriesKey: string | null; projectId: string | null; videoPath: string; title: string; episodeCount: number }> = [];
+    const { service, sourcePaths } = await makeService({
+      onEpisodeCompleted: async info => {
+        hookCalls.push({ title: info.title });
+      },
+      onMerged: async info => {
+        mergedCalls.push(info);
+      },
+      getProject: projectId => ({ projectId, name: 'Mối Tình Đầu' })
+    });
+    service.enqueue([
+      { path: sourcePaths[0]!, title: 'Tập 1', seriesKey: 'series-A', episodeIndex: 1, projectId: 'project_9', batchMode: true },
+      { path: sourcePaths[1]!, title: 'Tập 2', seriesKey: 'series-A', episodeIndex: 2, projectId: 'project_9', batchMode: true }
+    ]);
+    await waitForSettle(service);
+    // KHÔNG nạp đăng từng tập — chờ ghép xong cả bộ.
+    expect(hookCalls).toHaveLength(0);
+    const groupMerge = service.getSummary().merges.find(entry => entry.seriesKey === 'series-A');
+    expect(groupMerge?.status).toBe('completed');
+    expect(groupMerge?.episodeCount).toBe(2);
+    expect(groupMerge?.uploadReady).toContain('upload-pending');
+    await waitFor(() => mergedCalls.length === 1);
+    expect(mergedCalls[0]!.title).toBe('Mối Tình Đầu');
+    expect(mergedCalls[0]!.projectId).toBe('project_9');
+    expect(mergedCalls[0]!.seriesKey).toBe('series-A');
+    expect(mergedCalls[0]!.videoPath).toContain('upload-pending');
+    expect(mergedCalls[0]!.episodeCount).toBe(2);
+    // Mục batch không đánh dấu socialEnqueuedAt (không nạp tung tập) nhưng merged ✓.
+    expect(service.getSummary().items.every(item => item.merged && item.socialEnqueuedAt == null)).toBe(true);
+  });
+
+  it('2 series ghép 2 phiên riêng — không trộn 2 bộ', async () => {
+    const mergedKeys: Array<string | null> = [];
+    const { service, sourcePaths } = await makeService({
+      onMerged: async info => {
+        mergedKeys.push(info.seriesKey);
+      }
+    });
+    service.enqueue([
+      { path: sourcePaths[0]!, title: 'S1-Tập 1', seriesKey: 'series-1', episodeIndex: 1, batchMode: true },
+      { path: sourcePaths[1]!, title: 'S2-Tập 1', seriesKey: 'series-2', episodeIndex: 1, batchMode: true }
+    ]);
+    await waitForSettle(service);
+    const merges = service.getSummary().merges;
+    expect(merges).toHaveLength(2);
+    const s1 = merges.find(entry => entry.seriesKey === 'series-1');
+    const s2 = merges.find(entry => entry.seriesKey === 'series-2');
+    expect(s1?.status).toBe('completed');
+    expect(s2?.status).toBe('completed');
+    expect(mergedKeys).toEqual(expect.arrayContaining(['series-1', 'series-2']));
+  });
+
+  it('mkdir upload-pending ngay khi pipeline khởi động', async () => {
+    const { dataDir } = await makeService();
+    expect(existsSync(join(dataDir, 'upload-pending'))).toBe(true);
+  });
+
+  it('migrate state cũ: `merge` đơn → merges[0] với seriesKey null', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'oc-pipeline-legacy-'));
+    trackTempDir(dataDir);
+    const pipelineDir = join(dataDir, 'translation-pipeline');
+    await mkdir(pipelineDir, { recursive: true });
+    await writeFile(join(pipelineDir, 'pipeline.json'), JSON.stringify({
+      items: [],
+      paused: false,
+      merge: {
+        status: 'completed',
+        runId: 'legacy-run',
+        outputPath: 'D:/old/merged.mp4',
+        uploadReady: 'D:/old/upload-ready.mp4',
+        episodeCount: 5,
+        skipped: [],
+        error: null
+      }
+    }), 'utf8');
+    const { service } = await makeService({ dataDir });
+    const summary = service.getSummary();
+    expect(summary.merges).toHaveLength(1);
+    expect(summary.merges[0]!.seriesKey).toBeNull();
+    expect(summary.merges[0]!.status).toBe('completed');
+    expect(summary.merges[0]!.episodeCount).toBe(5);
   });
 });
 

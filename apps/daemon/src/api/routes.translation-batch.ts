@@ -32,7 +32,9 @@ const execFileAsync = promisify(execFile);
  * - POST /creator/translation-batch/merge    → ghép toàn bộ tập đã dịch thành
  *                                              `<Tên phim>-full.mp4` trong Exports
  *                                              của project đích (projectId ưu tiên,
- *                                              kế đến seriesName, rồi mặc định)
+ *                                              kế đến seriesName, rồi mặc định);
+ *                                              có `seriesKey` → chỉ ghép đúng bộ đó
+ * - POST /creator/translation-batch/retry    → dịch lại 1 tập failed/canceled
  * - POST /creator/translation-batch/reveal   → mở thư mục / chọn file trong Explorer
  *                                              (file xuất, video ghép...)
  *
@@ -215,6 +217,12 @@ export async function registerTranslationBatchRoutes(
         ...(typeof candidate.episodeIndex === 'number' && Number.isFinite(candidate.episodeIndex)
           ? { episodeIndex: Math.trunc(candidate.episodeIndex) }
           : {}),
+        // v2: seriesKey định danh bộ phim (để dashboard/ghép nhóm đúng bộ) +
+        // batchMode = nạp theo cả bộ → chỉ ghép xong mới nạp đăng (full movie).
+        ...(typeof candidate.seriesKey === 'string' && candidate.seriesKey.trim() !== ''
+          ? { seriesKey: candidate.seriesKey.trim() }
+          : {}),
+        ...(candidate.batchMode === true ? { batchMode: true } : {}),
         // projectId mang theo từng item (web đã resolve) — pipeline giữ nguyên
         // item fields khi lưu state; không có → route tự gắn theo seriesName dưới.
         ...(typeof candidate.projectId === 'string' && candidate.projectId.trim() !== ''
@@ -281,8 +289,13 @@ export async function registerTranslationBatchRoutes(
       return reply.code(400).send(apiError('VALIDATION_FAILED', 'seriesName is required'));
     }
     const summary = pipeline.getSummary();
+    // v2: chỉ ghép phân đoạn của ĐÚNG bộ khi web gửi seriesKey — chống trộn 2 bộ.
+    const bodySeriesKey = typeof body.seriesKey === 'string' && body.seriesKey.trim() !== ''
+      ? body.seriesKey.trim()
+      : undefined;
     const completed = summary.items
       .filter(item => item.status === 'completed' && item.outputVideoPath !== null)
+      .filter(item => bodySeriesKey === undefined || (item.seriesKey ?? null) === bodySeriesKey)
       .sort((left, right) => {
         const leftIndex = left.episodeIndex ?? Number.POSITIVE_INFINITY;
         const rightIndex = right.episodeIndex ?? Number.POSITIVE_INFINITY;
@@ -350,6 +363,22 @@ export async function registerTranslationBatchRoutes(
       seriesName: fullMovie.seriesName,
       projectId: batchProject?.id ?? null,
       folder: batchProject?.folder ?? null
+    };
+  });
+
+  /** v2 — Dịch lại 1 tập lỗi/canceled trong hàng đợi (per-episode retry). */
+  server.post<{ Body: unknown }>('/creator/translation-batch/retry', async (request, reply) => {
+    if (pipeline === undefined) return unavailable(reply);
+    const body = typeof request.body === 'object' && request.body !== null
+      ? request.body as Record<string, unknown>
+      : {};
+    if (typeof body.id !== 'string' || body.id.trim() === '') {
+      return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.id (episode id) is required'));
+    }
+    const summary = pipeline.retry(body.id.trim());
+    return {
+      ...summary,
+      progress: batchProgress(summary.items)
     };
   });
 

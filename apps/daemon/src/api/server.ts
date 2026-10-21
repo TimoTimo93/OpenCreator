@@ -1698,7 +1698,7 @@ export async function buildServer(input: BuildServerInput) {
         // GĐ4: project đích do A3 chỉ định khi nạp (item.projectId).
         getProject: projectId => {
           const project = projectManager.getProject(projectId);
-          return project === undefined ? undefined : { projectId: project.id };
+          return project === undefined ? undefined : { projectId: project.id, name: project.name };
         }
       },
       ffmpegPath: creatorFfmpegPath,
@@ -1729,9 +1729,32 @@ export async function buildServer(input: BuildServerInput) {
           console.log(`[translation-pipeline] tự nạp đăng: xếp ${result.accepted} job cho ${result.clusters.length} cụm bật tự nạp (${fullTitle})`);
         }
       },
+      // v2 "dịch cả bộ" — ghép xong 1 bộ: thông báo + tự nạp FULL MOVIE (thay
+      // cho tung tập) vào hàng đợi của các cụm đang bật autoPublishAfterTranslate.
+      onMerged: async info => {
+        const fullTitle = `${info.title} (Full Movie)`;
+        notificationService.enqueueGenericEvent({
+          kind: 'translation_full_movie_merged',
+          title: `Đã ghép xong: ${fullTitle}`,
+          body: `Ghép ${info.episodeCount} tập thành full movie — video đang nằm trong thư mục đợi upload đa kênh.`,
+          dedupeKey: `translation_full_movie_merged:${info.videoPath}`
+        });
+        const automation = socialAutomation;
+        if (automation === undefined) return;
+        const result = automation.enqueueAfterTranslate({
+          path: info.videoPath,
+          title: fullTitle,
+          episodeIndex: null,
+          projectId: info.projectId
+        });
+        if (result.accepted > 0) {
+          console.log(`[translation-pipeline] tự nạp full movie: xếp ${result.accepted} job cho ${result.clusters.length} cụm bật tự nạp (${fullTitle})`);
+        }
+      },
       onUpdate: summary => {
         // Web hỗ trợ lâu dài sẽ theo dõi sự kiện SSE riêng; log gọn cho diag.
-        console.log(`[translation-pipeline] queued=${summary.counts.queued} running=${summary.counts.running} completed=${summary.counts.completed} failed=${summary.counts.failed} merge=${summary.merge.status}`);
+        const merges = summary.merges.map(m => `${m.seriesKey ?? 'lẻ'}:${m.status}`).join(',') || 'không-có-nhóm';
+        console.log(`[translation-pipeline] queued=${summary.counts.queued} running=${summary.counts.running} completed=${summary.counts.completed} failed=${summary.counts.failed} merges=[${merges}]`);
       }
     });
     await translationPipeline.recover().catch(error => {

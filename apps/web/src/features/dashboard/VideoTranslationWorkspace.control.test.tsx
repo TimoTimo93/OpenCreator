@@ -1643,6 +1643,115 @@ describe('VideoTranslationWorkspace task controls', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// v2 — panel "Danh sách dịch cả bộ" bên trái (lấy từ /creator/translation-batch)
+// ---------------------------------------------------------------------------
+
+const batchItem = (input: {
+  id: string; episodeIndex: number; title: string;
+  status: string; error?: string | null; outputVideoPath?: string | null;
+}): Record<string, unknown> => ({
+  id: input.id,
+  sourcePath: `D:\\hongguo\\${input.id}.mp4`,
+  title: input.title,
+  seriesKey: 'honggua:1',
+  episodeIndex: input.episodeIndex,
+  addedAt: `2026-01-01T00:00:${String(input.episodeIndex).padStart(2, '0')}Z`,
+  status: input.status,
+  jobId: null,
+  error: input.error ?? null,
+  outputVideoPath: input.outputVideoPath ?? null,
+  durationSeconds: null,
+  merged: false,
+  mergeRunId: null
+});
+
+function batchStatusFixture(): Record<string, unknown> {
+  return {
+    items: [
+      batchItem({ id: 'e100', episodeIndex: 100, title: '《Bão》 Tập 100', status: 'queued' }),
+      batchItem({ id: 'e1', episodeIndex: 1, title: '《Bão》 Tập 1', status: 'completed', outputVideoPath: 'D:\\out\\tap-1.dub.mp4' }),
+      batchItem({ id: 'e2', episodeIndex: 2, title: '《Bão》 Tập 2', status: 'failed', error: 'Lỗi mạng' }),
+      batchItem({ id: 'e3', episodeIndex: 3, title: '《Bão》 Tập 3', status: 'running' })
+    ],
+    paused: false,
+    counts: { queued: 1, running: 1, completed: 1, failed: 1 },
+    progress: { total: 4, queued: 1, running: 1, completed: 1, failed: 1, canceled: 0, allDone: false, percent: 25 },
+    merges: [{ seriesKey: 'honggua:1', status: 'idle', outputPath: null, uploadReady: null, episodeCount: null, error: null }],
+    uploadFolder: 'D:\\data\\upload-pending'
+  };
+}
+
+describe('VideoTranslationWorkspace — panel dịch cả bộ bên trái (v2)', () => {
+  it('hiện trái: sắp tập 1→N tăng dần, chip từng tập, Dịch lại hàng lỗi, ghép "Chờ ghép"', async () => {
+    const revealTranslationBatch = vi.fn(async () => ({ ok: true }));
+    const retryTranslationBatchItem = vi.fn(async () => batchStatusFixture());
+    const service = {
+      applyAction: vi.fn(),
+      runAgentTurn: vi.fn(),
+      getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
+      getTranslationBatch: vi.fn(async () => batchStatusFixture()),
+      revealTranslationBatch,
+      retryTranslationBatchItem
+    };
+    const renderView = render(<LanguageProvider initialPreference="vi-VN"><CreatorSessionProvider
+      initialJob={job({ status: 'draft', revision: 1, stages: [], state: { currentStep: 0, furthestStep: 0, workspacePhase: 'configure' } })}
+      service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+    ><VideoTranslationWorkspace onBack={vi.fn()} runtimeDependencies={{ service } as never} /></CreatorSessionProvider></LanguageProvider>);
+    try {
+      const panel = await screen.findByRole('complementary', { name: 'Danh sách dịch cả bộ' });
+      // Thứ tự tập 1 → N (không theo thứ tự nạp).
+      const titles = [...panel.querySelectorAll('.video-translation-batch-episode-title')].map(node => node.textContent);
+      expect(titles).toEqual(['《Bão》 Tập 1', '《Bão》 Tập 2', '《Bão》 Tập 3', '《Bão》 Tập 100']);
+      // Tiến độ nhóm hiển thị: x/4 tập + chưa "Chờ ghép" khi còn tập đang chạy.
+      expect(within(panel).getByText('Đã dịch 1/4 tập xong')).toBeInTheDocument();
+      expect(within(panel).queryByText('Chờ ghép')).not.toBeInTheDocument();
+      // Chip trạng thái từng tập.
+      expect(within(panel).getByText('Xong')).toBeInTheDocument();
+      // Hàng lỗi có nút Dịch lại → gọi retry đúng id.
+      fireEvent.click(within(panel).getByRole('button', { name: 'Dịch lại' }));
+      await waitFor(() => expect(retryTranslationBatchItem).toHaveBeenCalledWith('e2'));
+      // Hàng xong có nút Mở thư mục → mở đúng file output.
+      fireEvent.click(within(panel).getByRole('button', { name: 'Mở thư mục' }));
+      await waitFor(() => expect(revealTranslationBatch).toHaveBeenCalledWith('D:\\out\\tap-1.dub.mp4', 'file'));
+      renderView.unmount();
+
+      // Cả bộ dừng ở trạng thái terminal → chip "Chờ ghép" xuất hiện (auto-merge sẽ vào).
+      const allDoneFixture = {
+        ...batchStatusFixture(),
+        items: [
+          batchItem({ id: 'e1', episodeIndex: 1, title: '《Bão》 Tập 1', status: 'completed', outputVideoPath: 'D:\\out\\tap-1.dub.mp4' }),
+          batchItem({ id: 'e2', episodeIndex: 2, title: '《Bão》 Tập 2', status: 'completed', outputVideoPath: 'D:\\out\\tap-2.dub.mp4' })
+        ],
+        counts: { queued: 0, running: 0, completed: 2, failed: 0 },
+        progress: { total: 2, queued: 0, running: 0, completed: 2, failed: 0, canceled: 0, allDone: true, percent: 100 }
+      };
+      const getTranslationBatchAllDone = vi.fn(async () => allDoneFixture);
+      const secondService = {
+        applyAction: vi.fn(),
+        runAgentTurn: vi.fn(),
+        getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
+        getTranslationBatch: getTranslationBatchAllDone,
+        revealTranslationBatch,
+        retryTranslationBatchItem
+      };
+      const second = render(<LanguageProvider initialPreference="vi-VN"><CreatorSessionProvider
+        initialJob={job({ status: 'draft', revision: 1, stages: [], state: { currentStep: 0, furthestStep: 0, workspacePhase: 'configure' } })}
+        service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+      ><VideoTranslationWorkspace onBack={vi.fn()} runtimeDependencies={{ service: secondService } as never} /></CreatorSessionProvider></LanguageProvider>);
+      try {
+        const panel = await screen.findByRole('complementary', { name: 'Danh sách dịch cả bộ' });
+        await waitFor(() => expect(within(panel).getByText('Chờ ghép')).toBeInTheDocument());
+        expect(within(panel).getByText('Đã dịch 2/2 tập xong')).toBeInTheDocument();
+      } finally {
+        second.unmount();
+      }
+    } finally {
+      renderView.unmount();
+    }
+  });
+});
+
 function job(input: {
   status: CreatorJob['status'];
   revision: number;

@@ -510,6 +510,7 @@ export type NotificationOutboxKind =
   | 'schedule_waiting_approval'
   // Sự kiện generic (không gắn thread/run — dịch xong 1 tập, đăng đa kênh xong).
   | 'translation_episode_done'
+  | 'translation_full_movie_merged'
   | 'social_job_done'
   | 'social_job_failed';
 

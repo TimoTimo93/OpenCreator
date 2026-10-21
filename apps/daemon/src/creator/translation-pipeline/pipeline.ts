@@ -51,10 +51,18 @@ export type PipelineEpisode = {
    * lặp khi daemon khởi động lại (recover chỉ đuổi mục CHƯA đánh dấu).
    */
   socialEnqueuedAt?: string | null;
+  /**
+   * v2 "dịch cả bộ": mục nạp theo cả bộ (DramaPanes "Thêm cả bộ vào dịch" /
+   * composer). Mục batch KHÔNG tự nạp đăng từng tập — chờ ghép xong cả bộ rồi
+   * hook `onMerged` nạp full movie (chống đăng dư tung tập).
+   */
+  batchMode?: boolean;
 };
 
 export type TranslationPipelineMerge = {
   status: 'idle' | 'running' | 'completed' | 'failed';
+  /** Nhóm ghép theo bộ — mỗi seriesKey một trạng thái ghép riêng (không trộn 2 bộ). */
+  seriesKey: string | null;
   runId: string | null;
   outputPath: string | null;
   uploadReady: string | null;
@@ -66,7 +74,8 @@ export type TranslationPipelineMerge = {
 export type TranslationPipelineState = {
   items: PipelineEpisode[];
   paused: boolean;
-  merge: TranslationPipelineMerge;
+  /** Một mục ghép cho MỖI bộ (seriesKey) — cá biệt: null = nhóm lẻ (không thuộc bộ nào). */
+  merges: TranslationPipelineMerge[];
 };
 
 export type TranslationPipelineSummary = TranslationPipelineState & {
@@ -81,6 +90,8 @@ export type PipelineEnqueueRequest = {
   episodeIndex?: number | null;
   /** GĐ4: project đích (A3 gửi kèm khi nạp cả bộ); rỗng/không có → project mặc định. */
   projectId?: string;
+  /** v2: nạp theo cả bộ → dịch xong toàn bộ mới ghép + nạp đăng full movie. */
+  batchMode?: boolean;
 };
 
 export type TranslationPipelineService = {
@@ -123,8 +134,9 @@ export type TranslationPipelineServiceInput = {
     /**
      * GĐ4: kiểm project theo id (item.projectId do A3 nạp kèm). Không có →
      * translateEpisode fallback về project mặc định (không chết giữa chừng).
+     * v2: trả thêm `name` để hook onMerged lấy tên phim cho full movie.
      */
-    getProject?(projectId: string): { projectId: string } | undefined;
+    getProject?(projectId: string): { projectId: string; name?: string } | undefined;
   };
   ffmpegPath: string | undefined;
   ffprobePath: string | undefined;
@@ -141,6 +153,18 @@ export type TranslationPipelineServiceInput = {
     videoPath: string;
     title: string;
     episodeIndex?: number;
+  }): Promise<void>;
+  /**
+   * v2 "dịch cả bộ" — hook chạy mỗi khi ghép CỘT không lỗi một bộ (uploadReady
+   * nằm trong `<dataDir>/upload-pending`). server.ts dùng để THÔNG BÁO + tự nạp
+   * FULL MOVIE vào hàng đợi đăng đa kênh. Lỗi ở đây không đổi trạng thái ghép.
+   */
+  onMerged?(info: {
+    seriesKey: string | null;
+    projectId: string | null;
+    videoPath: string;
+    title: string;
+    episodeCount: number;
   }): Promise<void>;
   /** Đè kiểm tra media khi kiểm thử (mặc định: ffprobe thật). */
   probeSourceMedia?(path: string): Promise<MediaProbe>;
@@ -175,6 +199,9 @@ export function createTranslationPipelineService(
   let closed = false;
   let pumpRunning = false;
   let mergeRunning = false;
+  // v2: đảm bảo thư mục đợi upload tồn tại ngay khi pipeline lên — không chờ
+  // tới lúc ghép xong mới tạo (web/luồng đa kênh cần xem trước thư mục này).
+  void mkdir(uploadFolder, { recursive: true }).catch(() => undefined);
 
   function ensureTools(): void {
     if (input.ffmpegPath === undefined) {
@@ -186,7 +213,7 @@ export function createTranslationPipelineService(
   }
 
   function defaultState(): TranslationPipelineState {
-    return { items: [], paused: false, merge: idleMerge() };
+    return { items: [], paused: false, merges: [] };
   }
 
   /** Đọc state từ đĩa; state hỏng → bắt đầu mới (không chặn daemon). */
@@ -206,11 +233,14 @@ export function createTranslationPipelineService(
       return defaultState();
     }
     if (typeof parsed !== 'object' || parsed === null) return defaultState();
-    const state = parsed as TranslationPipelineState;
+    // Cast mở rộng cho state cũ (chứa `merge` đơn) — migration về `merges[]`.
+    const state = parsed as TranslationPipelineState & { merge?: TranslationPipelineMerge };
     return {
       items: Array.isArray(state.items) ? state.items.filter(isEpisode) : [],
       paused: state.paused === true,
-      merge: isMerge(state.merge) ? state.merge : idleMerge()
+      // Migration: state cũ có 1 `merge` duy nhất → thành nhóm seriesKey null;
+      // state mới đọc mảng `merges` (mỗi bộ một mục).
+      merges: normalizeMerges(state.merges, state.merge)
     };
   }
 
@@ -255,6 +285,9 @@ export function createTranslationPipelineService(
       let summary: TranslationPipelineSummary | undefined;
       mutateSync(draft => {
         const seen = new Set(draft.items.map(item => item.sourcePath));
+        // Các bộ bị đụng tới trong lượt nạp này — nạp đợt mới → phiên ghép mới
+        // cho CHÍNH nhóm đó (không xoá ghép của bộ khác).
+        const touchedSeries = new Set<string | null>();
         for (const request of requests) {
           const path = normalizePath(request.path);
           if (path === '' || seen.has(path)) continue;
@@ -265,11 +298,15 @@ export function createTranslationPipelineService(
           const episodeIndex = typeof request.episodeIndex === 'number' && Number.isFinite(request.episodeIndex)
             ? Math.trunc(request.episodeIndex)
             : parseEpisodeIndex(request.title, baseName(request.path));
+          const seriesKey = typeof request.seriesKey === 'string' && request.seriesKey.trim() !== ''
+            ? request.seriesKey.trim()
+            : null;
+          touchedSeries.add(seriesKey);
           draft.items.push({
             id: randomUUID(),
             sourcePath: path,
             title: request.title !== undefined && request.title !== '' ? request.title : baseName(request.path),
-            seriesKey: request.seriesKey ?? null,
+            seriesKey,
             episodeIndex,
             addedAt: now(),
             status: 'queued',
@@ -282,12 +319,13 @@ export function createTranslationPipelineService(
             projectId: typeof request.projectId === 'string' && request.projectId.trim() !== ''
               ? request.projectId.trim()
               : null,
-            socialEnqueuedAt: null
+            socialEnqueuedAt: null,
+            batchMode: request.batchMode === true
           });
           accepted += 1;
         }
-        // Nạp đợt mới → phiên ghép mới, không dính kết quả cũ.
-        if (accepted > 0) draft.merge = idleMerge();
+        // Nạp đợt mới → phiên ghép mới, không dính kết quả cũ (chỉ nhóm bị nạp).
+        for (const seriesKey of touchedSeries) setMerge(draft, seriesKey, idleMerge(seriesKey));
         summary = summarize(draft);
       });
       void accepted;
@@ -329,7 +367,8 @@ export function createTranslationPipelineService(
         item.durationSeconds = null;
         item.merged = false;
         item.mergeRunId = null;
-        draft.merge = idleMerge();
+        // Reset ghép của ĐÚNG nhóm của tập này (không đụng bộ khác).
+        setMerge(draft, item.seriesKey, idleMerge(item.seriesKey));
       });
       void pump();
       return summarize(readState());
@@ -342,7 +381,9 @@ export function createTranslationPipelineService(
           item.status === 'queued' || item.status === 'running'
         );
         removed = before - draft.items.length;
-        if (draft.items.length === 0) draft.merge = idleMerge();
+        // Gỡ trạng thái ghép của nhóm không còn item nào.
+        const remainingKeys = new Set(draft.items.map(item => item.seriesKey ?? null));
+        draft.merges = draft.merges.filter(mergeState => remainingKeys.has(mergeState.seriesKey));
       });
       return { summary: summarize(readState()), removed };
     },
@@ -359,7 +400,10 @@ export function createTranslationPipelineService(
         for (const item of draft.items) {
           if (item.status === 'running') item.status = 'queued';
         }
-        if (draft.merge.status === 'running') draft.merge = idleMerge();
+        // Ghép bị ngắt giữa chừng khi daemon tắt → đặt lại trạng thái (tự ghép lại sau).
+        draft.merges = draft.merges.map(mergeState =>
+          mergeState.status === 'running' ? idleMerge(mergeState.seriesKey) : mergeState
+        );
       });
       void (async () => {
         // GĐ4: mục đã hoàn thành mà CHƯA nạp đăng (hook rớt giữa chừng trước
@@ -391,8 +435,43 @@ export function createTranslationPipelineService(
     };
   }
 
+  /**
+   * Lấy/trạng thái ghép của 1 nhóm (theo seriesKey). Nhóm chưa từng ghép →
+   * trạng thái idle tạm (không ghi đĩa) để web đọc phep tuyệt đối.
+   */
+  function mergeOf(state: TranslationPipelineState, seriesKey: string | null): TranslationPipelineMerge {
+    return state.merges.find(mergeState => mergeState.seriesKey === seriesKey) ?? idleMerge(seriesKey);
+  }
+
+  /** Ghi/xoá trạng thái ghép của NHÓM chỉ định trong draft (upsert). */
+  function setMerge(draft: TranslationPipelineState, seriesKey: string | null, value: TranslationPipelineMerge): void {
+    const index = draft.merges.findIndex(mergeState => mergeState.seriesKey === seriesKey);
+    if (index === -1) {
+      draft.merges.push(value);
+      return;
+    }
+    draft.merges[index] = value;
+  }
+
+  /**
+   * Chọn tập kế tiếp: `episodeIndex` NHỎ NHẤT trước (dịch từ tập 1 đến tập cuối
+   * bất kể thứ tự nạp). Tập không có số tập xếp sau; số tập bằng nhau hoà theo
+   * thời điểm nạp. Đây chính là yêu cầu "dịch theo thứ tự từ bé đến lớn".
+   */
   function findQueued(state: TranslationPipelineState): PipelineEpisode | undefined {
-    return state.items.find(item => item.status === 'queued');
+    let next: PipelineEpisode | undefined;
+    for (const item of state.items) {
+      if (item.status !== 'queued') continue;
+      if (next === undefined) {
+        next = item;
+        continue;
+      }
+      const nextIndex = next.episodeIndex ?? Number.POSITIVE_INFINITY;
+      const itemIndex = item.episodeIndex ?? Number.POSITIVE_INFINITY;
+      if (itemIndex < nextIndex) next = item;
+      else if (itemIndex === nextIndex && item.addedAt.localeCompare(next.addedAt) < 0) next = item;
+    }
+    return next;
   }
 
   async function pump(): Promise<void> {
@@ -528,6 +607,9 @@ export function createTranslationPipelineService(
     if (input.onEpisodeCompleted === undefined) return;
     const current = readState().items.find(candidate => candidate.id === episodeId);
     if (current === undefined) return;
+    // v2 "dịch cả bộ": mục batch KHÔNG tự nạp đăng tung tập (mỗi tập chỉ 1-2
+    // phút) — chờ ghép cả bộ xong, hook `onMerged` sẽ nạp full movie thay vào.
+    if (current.batchMode === true && current.seriesKey !== null) return;
     if (current.socialEnqueuedAt !== undefined && current.socialEnqueuedAt !== null
       && current.socialEnqueuedAt !== '') return;
     try {
@@ -545,6 +627,8 @@ export function createTranslationPipelineService(
     if (input.onEpisodeCompleted === undefined) return;
     for (const item of readState().items) {
       if (item.status !== 'completed' || item.outputVideoPath === null) continue;
+      // Mục batch đợi ghép xong mới nạp (khoan đăng tung tập).
+      if (item.batchMode === true && item.seriesKey !== null) continue;
       if (item.socialEnqueuedAt !== undefined && item.socialEnqueuedAt !== null
         && item.socialEnqueuedAt !== '') continue;
       await afterEpisodeCompleted(item.id, {
@@ -632,45 +716,91 @@ export function createTranslationPipelineService(
     return createHash('sha256').update(bytes).digest('hex');
   }
 
-  /** Tự ghép khi hàng đợi trống (MERGE_ON_QUEUE_DRAIN). */
+  /** Nhóm items theo seriesKey (null = nhóm lẻ) — chống trộn 2 bộ khi ghép. */
+  function groupBySeries(state: TranslationPipelineState): Map<string | null, PipelineEpisode[]> {
+    const groups = new Map<string | null, PipelineEpisode[]>();
+    for (const item of state.items) {
+      const key = item.seriesKey ?? null;
+      let group = groups.get(key);
+      if (group === undefined) {
+        group = [];
+        groups.set(key, group);
+      }
+      group.push(item);
+    }
+    return groups;
+  }
+
+  /** Tự ghép khi MỖI nhóm đủ điều kiện (queue rỗng + mọi phân đoạn xong). */
   async function runMergeAuto(): Promise<void> {
     if (mergeRunning) return;
-    const state = readState();
-    if (state.merge.status === 'completed') return;
-    if (state.items.filter(item => item.status === 'completed').length < 1) return;
-    await runMerge(false);
+    const groups = groupBySeries(readState());
+    for (const [seriesKey, group] of groups) {
+      // Còn tập chờ/đang dịch trong NHÓM này → chưa ghép nhóm đó.
+      if (group.some(item => item.status === 'queued' || item.status === 'running')) continue;
+      const completed = group.filter(item =>
+        item.status === 'completed' && item.outputVideoPath !== null
+      );
+      if (completed.length === 0) continue;
+      // Đã ghép hết (mọi phân đoạn đã dấu merged) → bỏ qua, chống ghép lại vô ích.
+      if (completed.every(item => item.merged)) continue;
+      await runMerge(false, seriesKey);
+      if (closed) return;
+    }
   }
 
   /**
-   * Ghép các phân đoạn hoàn thành; `force` = bấm nút ngay cả khi hàng đợi còn
-   * việc (chỉ ghép phần đã xong). Merge chạy rồi thì trả về nguyên cũ.
+   * Ghép các phân đoạn hoàn thành CỦA MỘT NHÓM (seriesKey). `force` = bấm nút
+   * ngay cả khi hàng đợi còn việc (chỉ ghép phần đã xong). `seriesKey === null`
+   * = nhóm lẻ; `seriesKey === undefined` = ghép tất cả các nhóm lần lượt.
    */
-  async function runMerge(force: boolean): Promise<void> {
+  async function runMerge(force: boolean, seriesKey?: string | null): Promise<void> {
     if (mergeRunning) return;
     const state = readState();
-    if (state.merge.status === 'running') return;
-    if (state.items.some(item => item.status === 'running') && !force) return;
-    const completed = state.items
-      .filter(item => item.status === 'completed' && item.outputVideoPath !== null);
-    if (completed.length === 0) {
-      if (force) {
-        mutateSync(draft => {
-          draft.merge = {
-            status: 'failed',
-            runId: null,
-            outputPath: null,
-            uploadReady: null,
-            episodeCount: null,
-            skipped: [],
-            error: 'Chưa có phân đoạn nào đã dịch xong để ghép'
-          };
-        });
+    if (state.merges.some(mergeState => mergeState.status === 'running')) return;
+    const groups = groupBySeries(state);
+    const targets = seriesKey === undefined ? [...groups.keys()] : [seriesKey];
+    for (const target of targets) {
+      const group = groups.get(target) ?? [];
+      if (group.some(item => item.status === 'running') && !force) continue;
+      const completed = group.filter(item =>
+        item.status === 'completed' && item.outputVideoPath !== null
+      );
+      if (completed.length === 0) {
+        if (force) {
+          mutateSync(draft => {
+            setMerge(draft, target, {
+              status: 'failed',
+              seriesKey: target ?? null,
+              runId: null,
+              outputPath: null,
+              uploadReady: null,
+              episodeCount: null,
+              skipped: [],
+              error: 'Chưa có phân đoạn nào đã dịch xong để ghép'
+            });
+          });
+        }
+        continue;
       }
-      return;
+      mergeRunning = true;
+      try {
+        await mergeGroup(target, group, completed);
+      } finally {
+        mergeRunning = false;
+      }
     }
-    mergeRunning = true;
+  }
+
+  /** Ghép 1 nhóm: hiểu rõ mở trạng thái → ffmpeg (hoặc copy 1 tập) → nạp onMerged. */
+  async function mergeGroup(
+    seriesKey: string | null,
+    group: PipelineEpisode[],
+    completed: PipelineEpisode[]
+  ): Promise<void> {
+    ensureTools();
     const runId = randomUUID();
-    const skipped = state.items
+    const skipped = group
       .filter(item => item.status !== 'completed')
       .map(item => ({
         title: item.title,
@@ -678,15 +808,16 @@ export function createTranslationPipelineService(
         reason: item.error ?? `trạng thái ${item.status}`
       }));
     mutateSync(draft => {
-      draft.merge = {
+      setMerge(draft, seriesKey, {
         status: 'running',
+        seriesKey,
         runId,
         outputPath: null,
         uploadReady: null,
         episodeCount: null,
         skipped,
         error: null
-      };
+      });
     });
     try {
       await mkdir(pipelineDir, { recursive: true });
@@ -696,61 +827,117 @@ export function createTranslationPipelineService(
         episodeIndex: item.episodeIndex,
         positionHint: index + 1
       }));
-      const outputPath = join(pipelineDir, `merged-${runId}.mp4`);
-      const report = (input.mergeSegments !== undefined
-        ? await input.mergeSegments({
-            ffmpegPath: input.ffmpegPath!,
-            ffprobePath: input.ffprobePath!,
-            segments,
-            outputPath
-          })
-        : await mergeVideoSegments({
-            ffmpegPath: input.ffmpegPath!,
-            ffprobePath: input.ffprobePath!,
-            segments,
-            outputPath
-          }));
+      let report: { outputPath: string; durationSeconds: number };
+      if (segments.length === 1) {
+        // Bộ chỉ có 1 tập: mergeVideoSegments yêu cầu ≥2 phân đoạn — bỏ ffmpeg,
+        // lấy thẳng phân đoạn đó làm full movie (công bằng, không báo lỗi).
+        report = {
+          outputPath: segments[0]!.path,
+          durationSeconds: completed[0]!.durationSeconds ?? 0
+        };
+      } else {
+        const outputPath = join(pipelineDir, `merged-${runId}.mp4`);
+        const merged = (input.mergeSegments !== undefined
+          ? await input.mergeSegments({
+              ffmpegPath: input.ffmpegPath!,
+              ffprobePath: input.ffprobePath!,
+              segments,
+              outputPath
+            })
+          : await mergeVideoSegments({
+              ffmpegPath: input.ffmpegPath!,
+              ffprobePath: input.ffprobePath!,
+              segments,
+              outputPath
+            }));
+        report = { outputPath: merged.outputPath, durationSeconds: merged.durationSeconds };
+      }
       if (!Number.isFinite(report.durationSeconds)) {
         throw new Error('Video ghép không đọc được thời lượng');
       }
       await mkdir(uploadFolder, { recursive: true });
-      const uploadPath = join(uploadFolder, `pending-${baseName(outputPath)}`);
+      // Tên đầy đủ cho file full movie load vào hàng đợi đa kênh.
+      const title = fullMovieTitle(seriesKey, group);
+      const uploadPath = join(uploadFolder, `pending-full-${runId}.mp4`);
       await rm(uploadPath, { force: true });
       await copyFile(report.outputPath, uploadPath);
       mutateSync(draft => {
         for (const item of draft.items) {
+          if ((item.seriesKey ?? null) !== seriesKey) continue;
           if (item.status === 'completed') {
             item.merged = true;
             item.mergeRunId = runId;
           }
         }
-        draft.merge = {
+        setMerge(draft, seriesKey, {
           status: 'completed',
+          seriesKey,
           runId,
           outputPath: report.outputPath,
           uploadReady: uploadPath,
           episodeCount: segments.length,
           skipped,
           error: null
-        };
+        });
       });
+      // v2: hook nạp full movie vào hàng đợi đăng đa kênh. Lỗi hook không đổi trạng thái ghép.
+      if (input.onMerged !== undefined) {
+        const projectId = representativeProjectId(seriesKey, group);
+        try {
+          await input.onMerged({
+            seriesKey,
+            projectId,
+            videoPath: uploadPath,
+            title,
+            episodeCount: segments.length
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(`[translation-pipeline] tự nạp full movie thất bại: ${message}`);
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[translation-pipeline] ghép video thất bại: ${message}`);
       mutateSync(draft => {
-        draft.merge = {
+        setMerge(draft, seriesKey, {
           status: 'failed',
+          seriesKey,
           runId,
           outputPath: null,
           uploadReady: null,
           episodeCount: null,
           skipped,
           error: message
-        };
+        });
       });
-    } finally {
-      mergeRunning = false;
     }
+  }
+
+  /** projectId đại diện của nhóm (item đầu có projectId hợp lệ). */
+  function representativeProjectId(seriesKey: string | null, group: PipelineEpisode[]): string | null {
+    if (input.projects.getProject === undefined) return null;
+    for (const item of group) {
+      const requested = item.projectId?.trim();
+      if (requested === undefined || requested === '') continue;
+      const project = input.projects.getProject(requested);
+      if (project !== undefined) return project.projectId;
+    }
+    return null;
+  }
+
+  /** Tên full movie: tên project của nhóm (server trả `name`) → tên item đầu. */
+  function fullMovieTitle(seriesKey: string | null, group: PipelineEpisode[]): string {
+    if (input.projects.getProject !== undefined) {
+      for (const item of group) {
+        const requested = item.projectId?.trim();
+        if (requested === undefined || requested === '') continue;
+        const project = input.projects.getProject(requested);
+        if (project?.name !== undefined && project.name !== '') return project.name;
+      }
+    }
+    const first = [...group].sort(compareMergeOrder)[0];
+    return first?.title ?? `bộ-${seriesKey ?? 'lẻ'}`;
   }
 
   function compareMergeOrder(left: PipelineEpisode, right: PipelineEpisode): number {
@@ -772,9 +959,10 @@ export function createTranslationPipelineService(
 // Helpers dùng chung (export để test)
 // ---------------------------------------------------------------------------
 
-export function idleMerge(): TranslationPipelineMerge {
+export function idleMerge(seriesKey: string | null = null): TranslationPipelineMerge {
   return {
     status: 'idle',
+    seriesKey,
     runId: null,
     outputPath: null,
     uploadReady: null,
@@ -782,6 +970,51 @@ export function idleMerge(): TranslationPipelineMerge {
     skipped: [],
     error: null
   };
+}
+
+/** Chuẩn hoá mảng merges từ đĩa; legacy 1 `merge` → nhóm seriesKey null. */
+export function normalizeMerges(
+  value: unknown,
+  legacy: unknown
+): TranslationPipelineMerge[] {
+  const normalized: TranslationPipelineMerge[] = [];
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const mergeState = normalizeMergeEntry(entry);
+      if (mergeState !== null) normalized.push(mergeState);
+    }
+  }
+  // Chưa từng có dạng mới mà đĩa còn giữ dạng cũ → migrate giữ nguyên kết quả cũ.
+  if (normalized.length === 0 && normalizeMergeEntry(legacy) !== null) {
+    const mergeState = normalizeMergeEntry(legacy)!;
+    normalized.push({ ...mergeState, seriesKey: mergeState.seriesKey ?? null });
+  }
+  return normalized;
+}
+
+function normalizeMergeEntry(value: unknown): TranslationPipelineMerge | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as Partial<TranslationPipelineMerge>;
+  if (typeof candidate.status !== 'string') return null;
+  return {
+    status: candidate.status === 'running' || candidate.status === 'completed' || candidate.status === 'failed'
+      ? candidate.status
+      : 'idle',
+    seriesKey: typeof candidate.seriesKey === 'string' ? candidate.seriesKey : null,
+    runId: typeof candidate.runId === 'string' ? candidate.runId : null,
+    outputPath: typeof candidate.outputPath === 'string' ? candidate.outputPath : null,
+    uploadReady: typeof candidate.uploadReady === 'string' ? candidate.uploadReady : null,
+    episodeCount: typeof candidate.episodeCount === 'number' ? candidate.episodeCount : null,
+    skipped: Array.isArray(candidate.skipped) ? candidate.skipped : [],
+    error: typeof candidate.error === 'string' ? candidate.error : null
+  };
+}
+
+function isEpisode(value: unknown): value is PipelineEpisode {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Partial<PipelineEpisode>;
+  return typeof candidate.id === 'string' && typeof candidate.sourcePath === 'string'
+    && typeof candidate.status === 'string';
 }
 
 export function baseName(path: string): string {
@@ -801,17 +1034,4 @@ function normalizePath(path: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolvePromise => setTimeout(resolvePromise, ms));
-}
-
-function isEpisode(value: unknown): value is PipelineEpisode {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as Partial<PipelineEpisode>;
-  return typeof candidate.id === 'string' && typeof candidate.sourcePath === 'string'
-    && typeof candidate.status === 'string';
-}
-
-function isMerge(value: unknown): value is TranslationPipelineMerge {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as TranslationPipelineMerge;
-  return typeof candidate.status === 'string';
 }

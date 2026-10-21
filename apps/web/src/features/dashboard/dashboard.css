@@ -12645,6 +12645,215 @@
   cursor: pointer;
 }
 
+/* v2 — bước "Thêm video": panel DANH SÁCH DỊCH CẢ BỘ nằm bên trái, nguồn video bên phải. */
+.video-translation-batch-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.video-translation-batch-main {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.video-translation-batch-list {
+  flex: 0 0 340px;
+  max-width: 340px;
+  align-self: stretch;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  max-height: 640px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.video-translation-batch-group {
+  display: grid;
+  gap: 8px;
+}
+
+.video-translation-batch-group-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.video-translation-batch-group-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.video-translation-batch-group-head span {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.video-translation-batch-merge-chip {
+  margin: 0;
+  padding: 6px 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-translation-batch-merge-chip[data-status='completed'] {
+  border-color: color-mix(in srgb, #34c05e 55%, var(--border));
+  color: color-mix(in srgb, #34c05e 76%, var(--text));
+}
+
+.video-translation-batch-merge-chip[data-status='running'] {
+  border-color: color-mix(in srgb, #3f7ce0 55%, var(--border));
+  color: color-mix(in srgb, #3f7ce0 76%, var(--text));
+}
+
+.video-translation-batch-merge-chip[data-status='failed'] {
+  border-color: color-mix(in srgb, #e04a45 55%, var(--border));
+  color: color-mix(in srgb, #e04a45 80%, var(--text));
+}
+
+.video-translation-batch-episodes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.video-translation-batch-episodes li {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.video-translation-batch-episodes li[data-status='running'] {
+  border-color: color-mix(in srgb, #3f7ce0 55%, var(--border));
+}
+
+.video-translation-batch-episodes li[data-status='failed'] {
+  border-color: color-mix(in srgb, #e04a45 55%, var(--border));
+}
+
+.video-translation-batch-episodes li[data-status='completed'] {
+  border-color: color-mix(in srgb, #34c05e 38%, var(--border));
+}
+
+.video-translation-batch-episode-cover {
+  width: 38px;
+  height: 38px;
+  overflow: hidden;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-raised, var(--surface));
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.video-translation-batch-episode-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-translation-batch-episode-body {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.video-translation-batch-episode-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.video-translation-batch-episode-meta {
+  color: var(--muted);
+  font-size: 11.5px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-status {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+}
+
+.chip-status-queued { color: var(--muted); }
+.chip-status-running {
+  border-color: color-mix(in srgb, #3f7ce0 55%, var(--border));
+  color: color-mix(in srgb, #3f7ce0 76%, var(--text));
+}
+.chip-status-completed {
+  border-color: color-mix(in srgb, #34c05e 55%, var(--border));
+  color: color-mix(in srgb, #34c05e 76%, var(--text));
+}
+.chip-status-failed {
+  border-color: color-mix(in srgb, #e04a45 55%, var(--border));
+  color: color-mix(in srgb, #e04a45 80%, var(--text));
+}
+
+.video-translation-batch-episode-actions {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.video-translation-batch-episode-actions button {
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 1100px) {
+  .video-translation-batch-layout {
+    flex-direction: column-reverse;
+  }
+  .video-translation-batch-list {
+    flex: 0 1 auto;
+    max-width: none;
+    max-height: 420px;
+  }
+}
+
+
 .video-translation-recent-title {
   margin: 0;
   color: var(--muted);

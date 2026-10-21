@@ -38,10 +38,23 @@ export type TranslationBatchEpisode = {
   mergeRunId: string | null;
 };
 
+export type TranslationBatchMergeState = {
+  /** Nhóm bộ (seriesKey) — mỗi bộ một trạng thái ghép riêng. */
+  seriesKey: string | null;
+  status: string;
+  runId?: string | null;
+  outputPath: string | null;
+  uploadReady: string | null;
+  episodeCount: number | null;
+  error: string | null;
+};
+
 export type TranslationBatchStatus = {
   items: TranslationBatchEpisode[];
   paused: boolean;
   counts: { queued: number; running: number; completed: number; failed: number };
+  /** Một trạng thái ghép cho mỗi bộ — chống trộn 2 bộ khi ghép. */
+  merges: TranslationBatchMergeState[];
   progress: {
     total: number;
     queued: number;
@@ -51,13 +64,6 @@ export type TranslationBatchStatus = {
     canceled: number;
     allDone: boolean;
     percent: number;
-  };
-  merge: {
-    status: string;
-    outputPath: string | null;
-    uploadReady: string | null;
-    episodeCount: number | null;
-    error: string | null;
   };
   fullMovie?: {
     status: string;
@@ -70,7 +76,15 @@ export type TranslationBatchStatus = {
 };
 
 export type TranslationBatchEnqueueRequest = {
-  items: Array<{ path: string; title?: string; episodeIndex?: number }>;
+  items: Array<{
+    path: string;
+    title?: string;
+    episodeIndex?: number;
+    /** v2 — định danh bộ để ghép đúng bộ, đúng thứ tự; bỏ trống = nhóm lẻ. */
+    seriesKey?: string;
+    /** v2 — nạp theo cả bộ: chờ ghép xong rồi mới nạp đăng full movie. */
+    batchMode?: boolean;
+  }>;
   seriesName?: string;
 };
 
@@ -173,8 +187,18 @@ export function createRuntimeDependencyService(client: ClientLike) {
     enqueueTranslationBatch(request: TranslationBatchEnqueueRequest): Promise<TranslationBatchStatus> {
       return client.post('/creator/translation-batch/enqueue', request) as Promise<TranslationBatchStatus>;
     },
-    mergeTranslationBatch(seriesName?: string): Promise<{ status: string; outputPath: string | null; episodeCount: number | null; seriesName: string | null }> {
-      return client.post('/creator/translation-batch/merge', { seriesName }) as Promise<{ status: string; outputPath: string | null; episodeCount: number | null; seriesName: string | null }>;
+    mergeTranslationBatch(
+      seriesName?: string,
+      seriesKey?: string
+    ): Promise<{ status: string; outputPath: string | null; episodeCount: number | null; seriesName: string | null }> {
+      return client.post('/creator/translation-batch/merge', {
+        ...(seriesName === undefined ? {} : { seriesName }),
+        ...(seriesKey === undefined ? {} : { seriesKey })
+      }) as Promise<{ status: string; outputPath: string | null; episodeCount: number | null; seriesName: string | null }>;
+    },
+    /** v2 — dịch lại 1 tập failed/canceled trong hàng đợi dịch cả bộ. */
+    retryTranslationBatchItem(episodeId: string): Promise<TranslationBatchStatus> {
+      return client.post('/creator/translation-batch/retry', { id: episodeId }) as Promise<TranslationBatchStatus>;
     },
     /** Mở thư mục chứa file (Windows: Explorer chọn file). */
     revealTranslationBatch(path: string, mode: 'file' | 'directory' = 'file'): Promise<{ ok: boolean }> {

@@ -28,7 +28,7 @@ function dramaMocks() {
       progress: {
         total: 0, queued: 0, running: 0, completed: 0, failed: 0, canceled: 0, allDone: true, percent: 0
       },
-      merge: { status: 'idle', outputPath: null, uploadReady: null, episodeCount: null, error: null },
+      merges: [{ seriesKey: null, status: 'idle', outputPath: null, uploadReady: null, episodeCount: null, error: null }],
       uploadFolder: ''
     })),
     enqueueTranslationBatch: vi.fn(async () => ({
@@ -38,11 +38,21 @@ function dramaMocks() {
       progress: {
         total: 0, queued: 0, running: 0, completed: 0, failed: 0, canceled: 0, allDone: true, percent: 0
       },
-      merge: { status: 'idle', outputPath: null, uploadReady: null, episodeCount: null, error: null },
+      merges: [{ seriesKey: null, status: 'idle', outputPath: null, uploadReady: null, episodeCount: null, error: null }],
       uploadFolder: ''
     })),
     mergeTranslationBatch: vi.fn(async () => ({
       status: 'idle', outputPath: null, episodeCount: null, seriesName: null
+    })),
+    retryTranslationBatchItem: vi.fn(async () => ({
+      items: [],
+      paused: false,
+      counts: { queued: 0, running: 0, completed: 0, failed: 0 },
+      progress: {
+        total: 0, queued: 0, running: 0, completed: 0, failed: 0, canceled: 0, allDone: true, percent: 0
+      },
+      merges: [],
+      uploadFolder: ''
     })),
     revealTranslationBatch: vi.fn(async () => ({ ok: true })),
     renameProject: vi.fn(async (projectId: string, name: string) => ({ project: { id: projectId, name } }))

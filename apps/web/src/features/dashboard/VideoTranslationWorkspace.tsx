@@ -31,7 +31,7 @@ import { LocalTranscriptionNotice } from './LocalTranscriptionNotice.js';
 import { useLocalizedCopy, type LocalizeCopy } from '../../i18n/useLocalizedCopy.js';
 import type { CreatorServicesSettingsService } from '../../services/creator-services-service.js';
 import type { VideoMetadataService } from '../../services/video-metadata-service.js';
-import type { TranslationBatchStatus } from '../../services/runtime-dependency-service.js';
+import type { TranslationBatchEpisode, TranslationBatchStatus } from '../../services/runtime-dependency-service.js';
 import VideoTranslationAgentPanel from './VideoTranslationAgentPanel.js';
 import CreatorResizableLayout from './CreatorResizableLayout.js';
 import CreatorTaskSummary from './CreatorTaskSummary.js';
@@ -1984,8 +1984,8 @@ export default function VideoTranslationWorkspace(props: {
                 ? { episodeIndex: task.hongguoInfo.vid_index }
                 : {})
             };
-          })
-          .slice(0, 50));
+          }));
+          // v2: bỏ giới hạn 50 — nạp hết mọi tập đã tải của bộ (daemon tự cap 500).
       })
       .catch(() => { if (active) setRecentDownloads([]); })
       .finally(() => { if (active) setRecentDownloadsLoading(false); });
@@ -2939,7 +2939,8 @@ export default function VideoTranslationWorkspace(props: {
 
   const batchService = props.runtimeDependencies?.service;
 
-  // Theo dõi trạng thái hàng chờ dịch + ghép (poll nhẹ mỗi 5 giây).
+  // Theo dõi trạng thái hàng chờ dịch + ghép (poll nhẹ mỗi 2 giây — v2 dịch
+  // từng tập tuần tự; 2s đủ mượt để thấy từng tập đổi trạng thái).
   useEffect(() => {
     if (batchService === undefined) return;
     let active = true;
@@ -2949,7 +2950,7 @@ export default function VideoTranslationWorkspace(props: {
         .then(response => { if (active) setBatchStatus(response); })
         .catch(() => { if (active) setBatchStatus(undefined); })
         .finally(() => {
-          if (active) batchPollTimerRef.current = setTimeout(poll, 5000);
+          if (active) batchPollTimerRef.current = setTimeout(poll, 2000);
         });
     };
     poll();
@@ -2973,15 +2974,22 @@ export default function VideoTranslationWorkspace(props: {
     }
   }, [recentDownloads]);
 
-  // Các tập ĐÃ TẢI của cùng bộ phim đang làm việc.
+  // Các tập ĐÃ TẢI của cùng bộ phim đang làm việc — sắp tăng dần theo số tập
+  // (v2: panel bên trái hiển thị "danh sách cần dịch" theo thứ tự tập 1 → cuối).
   const seriesVideos = useMemo(() => {
     if (activeSeries === undefined) return [];
-    return recentDownloads.filter(item => {
+    const filtered = recentDownloads.filter(item => {
       if (activeSeries.id !== null && activeSeries.id !== '') return item.seriesId === activeSeries.id;
       if (activeSeries.title !== null && activeSeries.title !== '') {
         return item.seriesTitle === activeSeries.title;
       }
       return false;
+    });
+    return [...filtered].sort((left, right) => {
+      const leftIndex = left.episodeIndex ?? Number.POSITIVE_INFINITY;
+      const rightIndex = right.episodeIndex ?? Number.POSITIVE_INFINITY;
+      if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+      return left.title.localeCompare(right.title, undefined, { numeric: true });
     });
   }, [activeSeries, recentDownloads]);
 
@@ -3008,11 +3016,16 @@ export default function VideoTranslationWorkspace(props: {
     setBatchNotice('');
     try {
       void applySeriesName();
+      // v2: mang seriesKey + batchMode — dịch xong cả bộ sẽ TỰ ghép full movie
+      // rồi mới nạp đăng (không đăng tung tập), và ghép luôn đúng bộ/thứ tự.
+      const seriesKey = activeSeries?.id ?? activeSeries?.title ?? undefined;
       const response = await service.enqueueTranslationBatch({
         items: seriesVideos.map(video => ({
           path: video.path,
           title: video.title,
-          ...(video.episodeIndex === undefined ? {} : { episodeIndex: video.episodeIndex })
+          ...(video.episodeIndex === undefined ? {} : { episodeIndex: video.episodeIndex }),
+          ...(seriesKey === undefined || seriesKey === null ? {} : { seriesKey }),
+          batchMode: true
         })),
         ...(seriesNameInput.trim() === '' ? {} : { seriesName: seriesNameInput.trim() })
       });
@@ -3064,6 +3077,144 @@ export default function VideoTranslationWorkspace(props: {
     } finally {
       setOpenFolderPendingId(undefined);
     }
+  }
+
+  /**
+   * v2 — Panel BÊN TRÁI "Danh sách dịch cả bộ": liệt kê từng tập theo thứ tự
+   * 1 → cuối, trạng thái từng tập (chờ/đang/xong/lỗi) + chip ghép ("Chờ ghép",
+   * "Đang ghép", full movie sẵn sàng), nút Dịch lại cho hàng lỗi và Mở thư mục
+   * cho hàng xong. Dữ liệu từ `/creator/translation-batch` (poll 2s ở trên).
+   */
+  function renderBatchSeriesPanel() {
+    if (batchService === undefined) return null;
+    const items = batchStatus?.items ?? [];
+    const groups = new Map<string | null, TranslationBatchStatus['items']>();
+    for (const item of items) {
+      const key = (item as { seriesKey?: string | null }).seriesKey ?? null;
+      let group = groups.get(key);
+      if (group === undefined) {
+        group = [];
+        groups.set(key, group);
+      }
+      group.push(item);
+    }
+    if (groups.size === 0) return null;
+    const labelOf = (key: string | null): string => {
+      if (key === null) return l('单个散段', 'Loose items (no series)');
+      if (activeSeries?.id !== undefined && key === activeSeries.id) {
+        return seriesNameInput.trim() !== '' ? seriesNameInput.trim() : activeSeries.title ?? key;
+      }
+      if (activeSeries?.title !== undefined && key === activeSeries.title) {
+        return seriesNameInput.trim() !== '' ? seriesNameInput.trim() : key;
+      }
+      // Khớp nhóm theo seriesKey của hand-off (vd "honggua:123").
+      const stripped = key.replace(/^(honggua|title|solo):/, '').trim();
+      return stripped !== '' ? stripped : key;
+    };
+    const coverOf = (item: { sourcePath: string }): string | undefined =>
+      seriesVideos.find(video => video.path === item.sourcePath)?.cover;
+    const episodeLabelOf = (item: TranslationBatchEpisode): string => {
+      if (item.episodeIndex !== null) return l(`第 ${item.episodeIndex} 集`, `Episode ${item.episodeIndex}`);
+      return l('未识别集数', 'Unknown episode number');
+    };
+    const statusLabelOf = (status: string): string => {
+      switch (status) {
+        case 'queued': return l('等待翻译', 'Waiting to translate');
+        case 'running': return l('正在翻译', 'Translating');
+        case 'completed': return l('已完成', 'Done');
+        case 'failed': return l('失败', 'Failed');
+        case 'canceled': return l('已取消', 'Canceled');
+        default: return status;
+      }
+    };
+    const sorted = (group: TranslationBatchStatus['items']): TranslationBatchStatus['items'] =>
+      [...group].sort((left, right) => {
+        const leftIndex = left.episodeIndex ?? Number.POSITIVE_INFINITY;
+        const rightIndex = right.episodeIndex ?? Number.POSITIVE_INFINITY;
+        if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+        return left.addedAt.localeCompare(right.addedAt);
+      });
+    const mergeOf = (key: string | null): TranslationBatchStatus['merges'][number] | undefined =>
+      batchStatus?.merges.find(mergeState => mergeState.seriesKey === key);
+    const revealOutput = async (item: TranslationBatchEpisode): Promise<void> => {
+      if (item.outputVideoPath === null || item.outputVideoPath === '') return;
+      try {
+        await batchService.revealTranslationBatch(item.outputVideoPath, 'file');
+      } catch {
+        setBatchNotice(l('无法打开文件夹，请重试。', 'Could not open the folder. Try again.'));
+      }
+    };
+    const retryItem = async (item: TranslationBatchEpisode): Promise<void> => {
+      try {
+        const response = await batchService.retryTranslationBatchItem(item.id);
+        setBatchStatus(response);
+      } catch (cause) {
+        setBatchNotice(creatorErrorMessage(cause, l));
+      }
+    };
+    return (
+      <aside className="video-translation-batch-list" aria-label={l('整部翻译列表', 'Series translation list')}>
+        {[...groups.entries()].map(([key, groupItems]) => {
+          const done = groupItems.filter(item => item.status === 'completed').length;
+          const allGroupDone = groupItems.every(item =>
+            item.status === 'completed' || item.status === 'failed' || item.status === 'canceled'
+          );
+          const mergeState = mergeOf(key);
+          const mergeChip = mergeState === undefined || mergeState.status === 'idle'
+            ? (allGroupDone ? l('等待合并', 'Waiting to merge') : undefined)
+            : mergeState.status === 'running' ? l('正在合并完整影片...', 'Merging the full movie...')
+              : mergeState.status === 'completed'
+                ? (mergeState.uploadReady !== null
+                  ? l(`完整影片已就绪：${mergeState.uploadReady.split(/[\\/]/).pop() ?? ''}`, `Full movie ready: ${mergeState.uploadReady.split(/[\\/]/).pop()}`)
+                  : l('完整影片已就绪', 'Full movie ready'))
+                : l(`合并完整影片失败：${mergeState.error ?? ''}`, `Merging the full movie failed: ${mergeState.error ?? ''}`);
+          return (
+            <div className="video-translation-batch-group" data-series={key ?? 'solo'} key={key ?? 'solo'}>
+              <div className="video-translation-batch-group-head">
+                <strong title={labelOf(key)}>{labelOf(key)}</strong>
+                <span>{l(`已译 ${done}/${groupItems.length} 集`, `${done}/${groupItems.length} episodes done`)}</span>
+              </div>
+              {mergeChip !== undefined ? (
+                <p className="video-translation-batch-merge-chip" data-status={mergeState?.status ?? 'idle'}>{mergeChip}</p>
+              ) : null}
+              <ul className="video-translation-batch-episodes">
+                {sorted(groupItems).map(item => {
+                  const cover = coverOf(item);
+                  return (
+                    <li key={item.id} data-status={item.status}>
+                      <span className="video-translation-batch-episode-cover">
+                        {cover !== undefined && cover !== ''
+                          ? <img src={cover} alt="" loading="lazy" />
+                          : <span className="video-translation-batch-episode-index">{item.episodeIndex ?? '·'}</span>}
+                      </span>
+                      <span className="video-translation-batch-episode-body">
+                        <span className="video-translation-batch-episode-title" title={item.title}>{item.title}</span>
+                        <span className="video-translation-batch-episode-meta">
+                          {episodeLabelOf(item)} · <span className={`chip-status chip-status-${item.status}`}>{statusLabelOf(item.status)}</span>
+                          {item.status === 'failed' && item.error !== null ? ` · ${item.error}` : ''}
+                        </span>
+                      </span>
+                      <span className="video-translation-batch-episode-actions">
+                        {item.status === 'failed' || item.status === 'canceled' ? (
+                          <button type="button" onClick={() => void retryItem(item)}>
+                            {l('重译', 'Retry translation')}
+                          </button>
+                        ) : null}
+                        {item.status === 'completed' && item.outputVideoPath !== null ? (
+                          <button type="button" onClick={() => void revealOutput(item)}>
+                            {l('打开文件夹', 'Mở thư mục')}
+                          </button>
+                        ) : null}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })}
+      </aside>
+    );
   }
 
   /** Bảng "dịch cả bộ": thêm cả bộ + tiến độ tổng + trạng thái ghép full movie. */
@@ -3121,7 +3272,7 @@ export default function VideoTranslationWorkspace(props: {
                 {l('合并完整影片', 'Merge the full movie')}
               </button>
             ) : null}
-            {fullMovie?.status === 'running' || batchStatus?.merge.status === 'running' ? (
+            {fullMovie?.status === 'running' || batchStatus?.merges.some(mergeState => mergeState.status === 'running') ? (
               <p role="status">{l('正在合并完整影片...', 'Merging the full movie...')}</p>
             ) : null}
             {fullMovie?.status === 'completed' && fullMovie.outputPath !== null ? (
@@ -3759,7 +3910,9 @@ export default function VideoTranslationWorkspace(props: {
           ) : null}
 
           {workspacePhase === 'configure' && currentStep === 0 ? (
-            <>
+            <div className="video-translation-batch-layout">
+              {renderBatchSeriesPanel()}
+              <div className="video-translation-batch-main">
             <VideoSourceInput
               showSupportedPlatforms
               showSourceMode
@@ -3810,7 +3963,8 @@ export default function VideoTranslationWorkspace(props: {
               />
             ) : null}
             {renderBatchPanel()}
-            </>
+              </div>
+            </div>
           ) : null}
 
           {workspacePhase === 'configure' && currentStep === 1 ? (

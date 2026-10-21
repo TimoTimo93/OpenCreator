@@ -214,4 +214,49 @@ describe('DramaQueuePane gom nhóm theo bộ phim', () => {
       view.unmount();
     }
   });
+
+  it('v2 — bấm "Thêm cả bộ vào dịch" nạp THẬT toàn bộ tập của bộ (seriesKey + batchMode), toast rồi nhảy sang Dịch', async () => {
+    const enqueueTranslationBatch = vi.fn(async () => ({
+      items: [
+        { id: 'e1', seriesKey: 'honggua:999', title: '《Hoàng Hậu Ngự Cảnh》 Tập 001', episodeIndex: 1, status: 'queued' },
+        { id: 'e2', seriesKey: 'honggua:999', title: '《Hoàng Hậu Ngự Cảnh》 Tập 002', episodeIndex: 2, status: 'queued' }
+      ],
+      merges: [],
+      uploadFolder: ''
+    }));
+    const service = {
+      getDramaStatus: vi.fn(async () => ({ hongguo: { installed: true, downloadsRoot: 'D:\\hongguo' } })),
+      getDramaDownloadTasks: vi.fn(async () => ({
+        tasks: [queueTask('999', 'Hoàng Hậu Ngự Cảnh', 0, 'completed'), queueTask('999', 'Hoàng Hậu Ngự Cảnh', 1, 'completed')]
+      })),
+      translateDramaTitles: vi.fn(async () => ({ translations: {} })),
+      enqueueTranslationBatch
+    };
+    const view = render(
+      <LanguageProvider initialPreference="vi-VN">
+        <DramaQueuePane runtimeDependencies={{ service } as never} />
+      </LanguageProvider>
+    );
+    try {
+      const translateAll = await screen.findByRole('button', { name: 'Thêm cả bộ vào dịch' });
+      fireEvent.click(translateAll);
+      // Gọi nạp đúng: ĐỦ các tập completed, seriesKey nhóm + batchMode → dịch xong tự ghép full movie.
+      await waitFor(() => expect(enqueueTranslationBatch).toHaveBeenCalledTimes(1));
+      const request = (((enqueueTranslationBatch as unknown as { mock: { calls: Array<Array<unknown>> } }).mock.calls[0]?.[0] ?? {}) as {
+        items?: Array<{ path: string; seriesKey: string; batchMode: boolean; episodeIndex: number }>;
+        seriesName?: string;
+      });
+      expect(request.items).toHaveLength(2);
+      expect(request.items!.map(item => item.episodeIndex)).toEqual([1, 2]);
+      expect(request.items!.every(item => item.seriesKey === 'honggua:999')).toBe(true);
+      expect(request.items!.every(item => item.batchMode === true)).toBe(true);
+      expect(request.seriesName).toBe('Hoàng Hậu Ngự Cảnh');
+      // Toast xác nhận đã nạp đủ N tập.
+      await waitFor(() => expect(screen.getByText(/Đã nạp 2 tập vào hàng chờ dịch/)).toBeInTheDocument());
+      // Tự chuyển sang trang Dịch video.
+      await waitFor(() => expect(window.location.hash).toBe('#/workbench?tool=video-translation'), { timeout: 3000 });
+    } finally {
+      view.unmount();
+    }
+  });
 });

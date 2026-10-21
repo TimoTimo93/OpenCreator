@@ -32,7 +32,7 @@ export type NotificationService = {
    * xong/thất bại). Dedupe theo dedupeKey: nạp trùng → giữ nguyên bản đầu tiên.
    */
   enqueueGenericEvent(input: {
-    kind: 'translation_episode_done' | 'social_job_done' | 'social_job_failed';
+    kind: 'translation_episode_done' | 'translation_full_movie_merged' | 'social_job_done' | 'social_job_failed';
     title: string;
     body: string;
     dedupeKey: string;
