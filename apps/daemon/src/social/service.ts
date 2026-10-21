@@ -39,6 +39,8 @@ import { aiComposeVideoMeta, aiTestReply, type SocialAiCompose, type SocialAiRep
 import { listDownloadedVideos, type SocialDownloadItem } from './downloads.js';
 import { createYoutubeChannel } from './platforms/youtube-channel.js';
 import { createFacebookPage, signUpTiktokViaGoogle } from './platforms/account-signup.js';
+import { createFacebookAccountWithGmail, isFacebookSignedIn } from './platforms/facebook-account.js';
+import { readGmailAccountEmail, readGmailConfirmationCode } from './platforms/gmail.js';
 import { loginFacebook, waitForFacebookSession } from './platforms/facebook-login.js';
 import type { SocialWorker } from './worker.js';
 import {
@@ -320,6 +322,11 @@ export function readAccountName(
   }
 }
 
+/** Mật khẩu Facebook sinh tự động (đủ mạnh, gửi lại cho người dùng trong thông báo). */
+function generateFacebookPassword(): string {
+  return `Fb${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /**
  * Đọc tên/URL tài khoản TikTok|Facebook sau khi đăng nhập (mở trang cá nhân
  * để đọc tên hiển thị trong DOM). Không đọc được thì trả rỗng, không báo sai.
@@ -344,8 +351,9 @@ async function readSocialProfileName(
     // Link trang cá nhân cho biết username (TikTok) / user id (Facebook).
     // Link có thể render muộn ⇒ thử lại vài lần trước khi bỏ cuộc.
     let profileLink = '';
+    let profileLinkText = '';
     for (let attempt = 0; attempt < 4 && profileLink === ''; attempt += 1) {
-      profileLink = await page.evaluate((arg: unknown) => {
+      const found = await page.evaluate((arg: unknown) => {
         const target = (arg ?? {}) as { platform: string };
         const selectors = target.platform === 'tiktok'
           ? ['a[data-e2e="profile-icon"]', 'a[href^="/@"]']
@@ -355,11 +363,16 @@ async function readSocialProfileName(
             const href = (el.getAttribute('href') ?? '').trim();
             if (href === '') continue;
             if (target.platform === 'tiktok' && href.replace('/@', '').trim() === '') continue;
-            return href;
+            return {
+              href,
+              text: (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60)
+            };
           }
         }
-        return '';
-      }, { platform }).catch(() => '');
+        return { href: '', text: '' };
+      }, { platform }).catch(() => ({ href: '', text: '' }));
+      profileLink = found.href;
+      profileLinkText = found.text;
       if (profileLink === '') await page.waitForTimeout(2_500).catch(() => undefined);
     }
     if (profileLink !== '') {
@@ -390,7 +403,14 @@ async function readSocialProfileName(
     // Title chung của trang chủ KHÔNG phải tên tài khoản.
     const genericTitle = /^(tiktok\s*[-–—]\s*make your day|facebook|log in to facebook|facebook – đăng nhập|meta)$/i;
     const cleanedTitle = genericTitle.test(title.trim()) ? '' : title.replace(/\s*[-–—]\s*(TikTok|Facebook)\s*$/i, '').trim();
-    const label = name !== '' ? name : urlUser !== '' ? urlUser : cleanedTitle;
+    // Tên của các nút/nhãn điều hướng KHÔNG phải tên tài khoản.
+    const navWords = /^(trang chủ|thông báo|tin nhắn|home|notifications|messages|settings|cài đặt|tìm bạn bè|trang cá nhân của bạn|bảng tin|menu|watch|reels|shop|groups|marketplace|chơi game)$/i;
+    const linkName = profileLinkText !== '' && !navWords.test(profileLinkText) ? profileLinkText : '';
+    const pageName = name !== '' && !navWords.test(name) ? name : '';
+    // TikTok hiển thị theo @username (đúng như demo), Facebook theo tên hiển thị.
+    const label = platform === 'tiktok' && urlUser !== ''
+      ? `@${urlUser}`
+      : linkName !== '' ? linkName : pageName !== '' ? pageName : urlUser !== '' ? urlUser : cleanedTitle;
     return {
       ...(label !== '' && label.length < 80 ? { name: label } : {}),
       ...(url.includes(platform === 'tiktok' ? 'tiktok.com' : 'facebook.com') ? { url } : {})
@@ -802,6 +822,45 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       const name = requestedName !== ''
         ? requestedName
         : row.series_name !== '' ? row.series_name : row.name;
+      // Facebook: chưa có tài khoản ⇒ đăng ký bằng Gmail của cụm (cùng phiên
+      // Google đã đăng nhập) rồi mới tạo Page.
+      if (platform === 'facebook') {
+        const hasAccount = await worker.withClusterBrowser(clusterId, async browserHandle =>
+          isFacebookSignedIn(browserHandle));
+        if (!hasAccount) {
+          // Đăng ký bằng GMAIL THẬT của cụm (phiên Google đang đăng nhập) — không
+          // dùng email nhập tay vì mã xác nhận sẽ gửi về hộp thư đó.
+          const profileEmail = await worker.withClusterBrowser(clusterId, async browserHandle =>
+            readGmailAccountEmail(browserHandle));
+          const email = profileEmail !== '' ? profileEmail : (row.fb_login_email ?? '').trim();
+          console.log(`[social] Facebook signup: profileEmail="${profileEmail}" rowEmail="${row.fb_login_email ?? ''}" → dùng "${email}"`);
+          const storedPassword = decryptToken(row.fb_login_password_encrypted ?? null);
+          const password = storedPassword.trim() !== '' ? storedPassword : generateFacebookPassword();
+          const created = await worker.withClusterBrowser(clusterId, async browserHandle =>
+            createFacebookAccountWithGmail(
+              browserHandle,
+              { name, email, password },
+              { readConfirmationCode: () => readGmailConfirmationCode(browserHandle, 'Facebook') }
+            ));
+          if (!created.ok) {
+            if (created.needsManual === true) {
+              return {
+                ok: false,
+                needsManual: true,
+                message: created.message ?? 'Cần bạn hoàn tất đăng ký Facebook trong cửa sổ trình duyệt của cụm.'
+              };
+            }
+            throw new SocialError('social_account_create_failed', created.message ?? 'Không tạo được tài khoản Facebook');
+          }
+          // Lưu mật khẩu (mã hóa) để các lần đăng nhập sau tự động.
+          updateClusterRow(db, clusterId, {
+            fb_login: 'ok',
+            fb_login_email: email,
+            fb_login_password_encrypted: encryptSecret(password, secretKeyPath),
+            updated_at: new Date().toISOString()
+          });
+        }
+      }
       const result = await worker.withClusterBrowser(clusterId, async browserHandle =>
         platform === 'tiktok'
           ? signUpTiktokViaGoogle(browserHandle)
@@ -829,6 +888,7 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       } else if (accountName !== undefined) {
         patch.fb_account_name = accountName;
       }
+      if (platform === 'facebook' && result.pageId !== undefined) patch.fb_page_id = result.pageId;
       updateClusterRow(db, clusterId, patch);
       return {
         ok: true,

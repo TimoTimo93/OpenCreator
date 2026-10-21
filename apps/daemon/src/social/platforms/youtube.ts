@@ -66,25 +66,79 @@ export async function uploadYoutubeStudio(context: SocialExecutionContext): Prom
   }
 }
 
+/**
+ * Đóng các overlay/modal của YouTube Studio đang chặn thao tác (consent,
+ * "Welcome", tour hướng dẫn…) — nếu không, mọi click sau đó đều bị overlay
+ * chặn và upload fail.
+ */
+async function dismissStudioOverlays(page: Page): Promise<void> {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    // Tour điều hướng của Studio có nút "Skip navigation" → bấm để tắt.
+    const skipNav = page.locator("button[aria-label='Skip navigation'], button[aria-label*='Bỏ qua' i]").first();
+    if (await skipNav.isVisible().catch(() => false)) {
+      await skipNav.click({ timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(800).catch(() => undefined);
+      continue;
+    }
+    const open = await page.evaluate(() => {
+      const visible = (el: Element): boolean => (el as HTMLElement).offsetParent !== null;
+      const backdrops = Array.from(document.querySelectorAll('tp-yt-iron-overlay-backdrop[opened]'));
+      const dialogs = Array.from(document.querySelectorAll('ytcp-popup-container tp-yt-iron-overlay, ytcp-popup-container'))
+        .filter(el => visible(el));
+      return backdrops.length + dialogs.length;
+    }).catch(() => 0);
+    if (!open || open === 0) return;
+    // Ưu tiên bấm nút đóng (X) trong overlay; không có thì dùng Escape.
+    const closeBtn = page.locator('tp-yt-iron-overlay tp-yt-icon-button button, tp-yt-iron-overlay button[aria-label*="Close" i], tp-yt-iron-overlay button[aria-label*="Đóng" i]').first();
+    if (await closeBtn.isVisible().catch(() => false)) {
+      await closeBtn.click({ timeout: 5_000 }).catch(() => undefined);
+    } else {
+      await page.keyboard.press('Escape').catch(() => undefined);
+    }
+    await page.waitForTimeout(1_200).catch(() => undefined);
+  }
+}
+
 async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSelectors): Promise<SocialExecutionResult> {
   const videoPath = context.job.videoPath;
   if (videoPath === '' || !(await exists(videoPath))) {
     return { status: 'failed', error: `File video không tồn tại: ${videoPath}` };
   }
-  // Bấm Tạo → Tải video lên (nếu nút dựng lại thành menu).
-  const createBtn = page.locator(sel.create_btn).first();
-  if (await createBtn.isVisible().catch(() => false)) {
-    await createBtn.click();
-    await page.waitForTimeout(1_000);
-    const uploadItem = page.locator(sel.upload_menu_item).first();
-    if (await uploadItem.isVisible().catch(() => false)) {
-      await uploadItem.click();
-      await page.waitForTimeout(1_500);
+  await dismissStudioOverlays(page);
+  // Ô file của Studio luôn bị ẩn ⇒ phải chờ 'attached' chứ không phải 'visible'.
+  const fileInput = page.locator(sel.file_input).first();
+  if (await fileInput.count().catch(() => 0) === 0) {
+    // Mở hộp thoại tải video: nút "Upload videos" ở trang video, hoặc Create → Tải video lên.
+    const uploadVideos = page.locator("button[aria-label='Upload videos'], button[aria-label='Tải video lên']").first();
+    if (await uploadVideos.isVisible().catch(() => false)) {
+      await uploadVideos.click({ timeout: 15_000 }).catch(() => undefined);
+      await page.waitForTimeout(2_500).catch(() => undefined);
+    } else {
+      const createBtn = page.locator(sel.create_btn).first();
+      if (await createBtn.isVisible().catch(() => false)) {
+        await createBtn.click({ timeout: 15_000 }).catch(() => undefined);
+        await page.waitForTimeout(1_000);
+        const uploadItem = page.locator(sel.upload_menu_item).first();
+        if (await uploadItem.isVisible().catch(() => false)) {
+          await uploadItem.click({ timeout: 10_000 }).catch(() => undefined);
+          await page.waitForTimeout(1_500);
+        }
+      }
+    }
+    await dismissStudioOverlays(page);
+  }
+  // Hộp thoại "Upload videos" mới chỉ tạo ô input sau khi bấm "Select files".
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await fileInput.count().catch(() => 0) > 0) break;
+    const selectFiles = page.locator("button[aria-label='Select files'], button:has-text('Select files'), button:has-text('Chọn tệp')").first();
+    if (await selectFiles.isVisible().catch(() => false)) {
+      await selectFiles.click({ timeout: 8_000 }).catch(() => undefined);
+      await page.waitForTimeout(1_500).catch(() => undefined);
+    } else {
+      break;
     }
   }
-  // Đẩy file vào input file.
-  const fileInput = page.locator(sel.file_input).first();
-  await fileInput.waitFor({ state: 'visible', timeout: 30_000 });
+  await fileInput.waitFor({ state: 'attached', timeout: 45_000 });
   await fileInput.setInputFiles(videoPath);
   await page.waitForTimeout(5_000);
 

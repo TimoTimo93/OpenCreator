@@ -66,7 +66,7 @@
   "facebook_browser": {
     "business_home_url": "https://business.facebook.com/latest/home",
     "create_post_btn": "div[role='button']:has-text('Tạo bài viết'), div[role='button']:has-text('Create post'), div[aria-label*='Tạo']:visible",
-    "photo_video_option": "span:has-text('Ảnh/Video'), span:has-text('Photo/video')",
+    "photo_video_option": "span:has-text('Ảnh/Video'), span:has-text('Photo/video'), div[role='button']:has-text('Thêm ảnh/video'), div[role='button']:has-text('Add photo/video'), span:has-text('Thêm ảnh/video')",
     "reel_option": "div[role='tab']:has-text('Reel'), span:has-text('Tạo Reel'), span:has-text('Create reel'), div[role='button']:has-text('Reel')",
     "file_input": "input[type='file'][accept*='video']",
     "composer_text_box": "div[role='textbox'][contenteditable='true']",

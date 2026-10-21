@@ -66,6 +66,8 @@ export type SocialBrowserHandle = {
   alive?(): Promise<boolean>;
   /** Đọc cookie của context (dùng xác minh phiên đăng nhập cụm). */
   cookies?(urls: string[]): Promise<Array<{ name: string; value: string; domain: string }>>;
+  /** Xóa cookie theo mẫu domain (dùng dọn phiên đăng ký dở của 1 nền tảng). */
+  clearCookies?(domainPattern: RegExp): Promise<void>;
   /** Danh sách tab/popup đang mở trong context (Google hay mở popup riêng). */
   pages?(): Promise<unknown[]>;
   close(): Promise<void>;

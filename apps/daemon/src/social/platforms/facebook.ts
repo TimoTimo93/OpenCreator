@@ -54,7 +54,9 @@ async function uploadViaGraphApi(context: SocialExecutionContext): Promise<Socia
     return fail(`File video không tồn tại: ${context.job.videoPath}`);
   }
   if (fileSize <= 0) return fail('File rỗng, không thể upload');
-  if (context.fbToken.trim() === '') return fail('Chưa cấu hình Page Access Token Facebook cho cụm');
+  if (context.fbToken.trim() === '') {
+    return fail('Chưa cấu hình Page Access Token Facebook cho cụm — hãy nhập Page ID + Page Access Token trong "Sửa cụm", hoặc chuyển cụm sang chế độ "Business Suite" (trình duyệt) để đăng bằng phiên Facebook đã đăng nhập.');
+  }
   if (context.cluster.fbPageId.trim() === '') return fail('Chưa cấu hình Page ID Facebook cho cụm');
 
   // Ràng buộc hẹn giờ: chỉ schedule nếu trong khoảng [10 phút, 75 ngày].
@@ -202,6 +204,44 @@ async function callFacebook(
 // Browser (Meta Business Suite)
 // ---------------------------------------------------------------------------
 
+/**
+ * Đóng các modal của Meta Business Suite đang che UI (ví dụ hộp minh hoạ
+ * GeoIllustrationModal lúc mở lần đầu) — nếu không mọi click sau đó đều bị
+ * chặn và upload fail.
+ */
+async function dismissBusinessModals(page: Page): Promise<void> {
+  const skipLabels = [/^bỏ qua$/i, /^skip$/i, /^đóng$/i, /^close$/i, /^không$/i, /^not now$/i, /^bỏ qua tất cả$/i, /^skip all$/i, /^got it$/i, /^hiểu rồi$/i, /^bắt đầu$/i, /^start$/i, /^tiếp tục$/i, /^continue$/i];
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const open = await page.evaluate(() => {
+      const visible = (el: Element): boolean => (el as HTMLElement).offsetParent !== null;
+      const modals = Array.from(document.querySelectorAll(
+        '[data-surface*="Modal"], [data-visualcompletion="ignore"][role="dialog"], [role="dialog"]'
+      )).filter(el => visible(el));
+      return modals.length;
+    }).catch(() => 0);
+    if (!open || open === 0) return;
+    const buttons = page.locator('[role="dialog"] button, [data-surface*="Modal"] button, [aria-label*="Close" i], [aria-label*="Đóng" i]');
+    const count = await buttons.count().catch(() => 0);
+    let clicked = false;
+    for (let index = 0; index < count; index += 1) {
+      const text = (await buttons.nth(index).innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+      if (text === '' || !skipLabels.some(pattern => pattern.test(text))) continue;
+      await buttons.nth(index).click({ timeout: 5_000 }).catch(() => undefined);
+      clicked = true;
+      break;
+    }
+    if (!clicked) {
+      const close = buttons.first();
+      if (await close.isVisible().catch(() => false)) {
+        await close.click({ timeout: 5_000 }).catch(() => undefined);
+      } else {
+        await page.keyboard.press('Escape').catch(() => undefined);
+      }
+    }
+    await page.waitForTimeout(1_500).catch(() => undefined);
+  }
+}
+
 async function uploadViaBrowser(context: SocialExecutionContext): Promise<SocialExecutionResult> {
   const fail = (error: string): SocialExecutionResult => ({ status: 'failed', error });
   if (context.browser === undefined) return fail('Trình duyệt cụm chưa mở');
@@ -220,13 +260,15 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
       : '';
     await page.goto(new URL(sel.business_home_url + pageIdQuery).toString(), { waitUntil: 'domcontentloaded', timeout: 60_000 });
     await page.waitForTimeout(4_000);
+    await dismissBusinessModals(page);
 
     const createBtn = page.locator(sel.create_post_btn).first();
     if (!(await createBtn.isVisible().catch(() => false))) {
       return await failedWithScreenshot(page, context, 'Không tìm thấy nút "Tạo bài viết" trên Business Suite (giao diện đổi?)');
     }
-    await createBtn.click();
+    await createBtn.click({ timeout: 20_000 }).catch(() => undefined);
     await page.waitForTimeout(1_500);
+    await dismissBusinessModals(page);
 
     // postType 'reel' (chế độ browser): ưu tiên composer Reel nếu menu có —
     // không thấy thì quay lại luồng bài viết thường (best-effort). 'story'
@@ -241,10 +283,20 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
 
     const photoVideo = page.locator(sel.photo_video_option).first();
     if (!(await photoVideo.isVisible().catch(() => false))) {
-      return await failedWithScreenshot(page, context, 'Không thấy tùy chọn "Ảnh/Video"');
+      // Business Suite mới: nút media là "Thêm ảnh/video" (nằm trong composer).
+      const altMedia = page.locator("div[role='button']:has-text('Thêm ảnh/video'), div[role='button']:has-text('Add photo/video')").first();
+      if (await altMedia.isVisible().catch(() => false)) {
+        await altMedia.click({ timeout: 15_000 }).catch(() => undefined);
+        await page.waitForTimeout(1_500);
+        await dismissBusinessModals(page);
+      } else {
+        return await failedWithScreenshot(page, context, 'Không thấy tùy chọn thêm ảnh/video trong Business Suite');
+      }
+    } else {
+      await photoVideo.click({ timeout: 15_000 }).catch(() => undefined);
+      await page.waitForTimeout(1_500);
+      await dismissBusinessModals(page);
     }
-    await photoVideo.click();
-    await page.waitForTimeout(1_500);
 
     const fileInput = page.locator(sel.file_input).first();
     await fileInput.waitFor({ state: 'attached', timeout: 30_000 });

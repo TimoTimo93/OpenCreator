@@ -70,13 +70,18 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
   const fileInput = page.locator(sel.file_input).first();
   await fileInput.waitFor({ state: 'attached', timeout: 30_000 });
   await fileInput.setInputFiles(videoPath);
+  // TikTok hay bật modal "Bật kiểm tra nội dung tự động?" ngay sau khi chọn
+  // file ⇒ đóng trước khi điền caption (modal chặn click).
+  await page.waitForTimeout(2_500).catch(() => undefined);
+  await dismissBlockingModals(page);
 
   // 2. Caption + hashtag: điền sau khung soạn thảo xuất hiện.
   const editor = page.locator(sel.caption_editor).first();
   await editor.waitFor({ state: 'visible', timeout: 45_000 });
-  await editor.click();
+  await editor.click({ timeout: 20_000 });
   await page.waitForTimeout(800);
   await typeWithHashtags(page, context.job.title, context.job.description.slice(0, 2_000));
+  await dismissBlockingModals(page);
   // Popup cửa sổ chia màn hình (split window) sau khi nhập caption (bỏ
   // nếu có) — rút gọn từ luồng `tiktok-uploader` cộng đồng.
   await page.waitForTimeout(1_000);
@@ -138,6 +143,46 @@ async function clickIfVisible(page: Page, selector: string): Promise<void> {
 
 async function dismissPopups(page: Page, sel: TkSelectors): Promise<void> {
   await clickIfVisible(page, sel.cookie_banner_btn);
+}
+
+/**
+ * Đóng các modal của TikTok Studio đang chặn thao tác (ví dụ "Bật kiểm tra
+ * nội dung tự động?" sau khi chọn file) — overlay này chặn mọi click nên
+ * upload fail. Ưu tiên nút "bỏ qua" (Hủy / Bỏ qua / Không / Not now),
+ * không có thì dùng Escape.
+ */
+async function dismissBlockingModals(page: Page): Promise<void> {
+  const skipLabels = [/^hủy$/i, /^hủy bỏ qua$/i, /^bỏ qua$/i, /^không$/i, /^để sau$/i, /^not now$/i, /^skip$/i, /^cancel$/i, /^close$/i, /^đóng$/i, /^next$/i, /^tiếp$/i, /^tiếp tục$/i, /^done$/i, /^hoàn tất$/i, /^xong$/i];
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const open = await page.evaluate(() => {
+      const visible = (el: Element): boolean => (el as HTMLElement).offsetParent !== null;
+      const overlays = Array.from(document.querySelectorAll(
+        '.TUXModal-overlay, [data-floating-ui-portal] [role="dialog"], #react-joyride-portal, [data-test-id="joyride"]'
+      )).filter(el => visible(el));
+      return overlays.length;
+    }).catch(() => 0);
+    if (!open || open === 0) return;
+    const buttons = page.locator('.TUXModal-overlay button, [data-floating-ui-portal] [role="dialog"] button, #react-joyride-portal button');
+    const count = await buttons.count().catch(() => 0);
+    let clicked = false;
+    for (let index = 0; index < count; index += 1) {
+      const text = (await buttons.nth(index).innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+      if (text === '' || !skipLabels.some(pattern => pattern.test(text))) continue;
+      await buttons.nth(index).click({ timeout: 5_000 }).catch(() => undefined);
+      clicked = true;
+      break;
+    }
+    if (!clicked) {
+      // Tour của TikTok (react-joyride) thường có nút "Skip"/"Bỏ qua" ở góc.
+      const joyrideSkip = page.locator("#react-joyride-portal [data-test-id*='skip' i], #react-joyride-portal button:has-text('Skip'), #react-joyride-portal button:has-text('Bỏ qua')").first();
+      if (await joyrideSkip.isVisible().catch(() => false)) {
+        await joyrideSkip.click({ timeout: 5_000 }).catch(() => undefined);
+      } else {
+        await page.keyboard.press('Escape').catch(() => undefined);
+      }
+    }
+    await page.waitForTimeout(1_200).catch(() => undefined);
+  }
 }
 
 /** Điền caption từng từ; từ #hashtag gõ chậm kèm Enter để pop-up tag kịp mở. */

@@ -121,6 +121,16 @@ function createHandle(context: BrowserContext): SocialBrowserHandle {
       const list = await context.cookies(urls);
       return list.map(cookie => ({ name: cookie.name, value: cookie.value, domain: cookie.domain }));
     },
+    async clearCookies(domainPattern: RegExp): Promise<void> {
+      const list = await context.cookies();
+      const targets = list
+        .filter(cookie => domainPattern.test(cookie.domain))
+        .map(cookie => ({ name: cookie.name, domain: cookie.domain, path: cookie.path }));
+      for (const target of targets) {
+        await context.clearCookies({ name: target.name, domain: target.domain, path: target.path })
+          .catch(() => undefined);
+      }
+    },
     async close(): Promise<void> {
       try {
         await context.close();

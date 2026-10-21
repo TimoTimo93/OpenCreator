@@ -13,8 +13,11 @@
  * mở để người dùng tự xác minh, không báo sai rằng đã tạo xong.
  */
 
+import { createFacebookPage as createFacebookPageWithName } from './facebook-account.js';
 export type SocialAccountSignupResult = {
   ok: boolean;
+  /** ID Page vừa tạo (Facebook). */
+  pageId?: string;
   needsManual?: boolean;
   message?: string;
   accountName?: string;
@@ -32,15 +35,17 @@ export type SignupPage = {
       fill(value: string): Promise<void>;
       click(options?: { timeout?: number }): Promise<void>;
       count(): Promise<number>;
+      press(key: string): Promise<void>;
       selectOption(value: string | string[] | { index: number }): Promise<void>;
     };
     count(): Promise<number>;
-    first(): { click(options?: { timeout?: number }): Promise<void>; count(): Promise<number> };
+    first(): { click(options?: { timeout?: number }): Promise<void>; count(): Promise<number>; press(key: string): Promise<void> };
   };
   getByRole(role: string, options: { name: string | RegExp; exact?: boolean }): {
     first(): { click(options?: { timeout?: number }): Promise<void>; count(): Promise<number> };
   };
   getByText(text: string | RegExp, options?: { exact?: boolean }): {
+    count(): Promise<number>;
     first(): {
       click(options?: { timeout?: number }): Promise<void>;
       count(): Promise<number>;
@@ -422,49 +427,18 @@ export async function signUpTiktokViaGoogle(handle: SignupHandle): Promise<Socia
   }
 }
 
-/** Facebook: đã đăng nhập FB thì tạo Page (kênh); chưa có tài khoản thì báo rõ. */
+/** Facebook: đã đăng nhập FB thì tạo Page (kênh); xem platforms/facebook-account.ts */
 export async function createFacebookPage(
   handle: SignupHandle,
   options: { name: string }
 ): Promise<SocialAccountSignupResult> {
-  const name = options.name.trim();
-  if (name === '') return { ok: false, message: 'Cần nhập tên Page' };
-  let page: SignupPage | undefined;
-  let manualRequired = false;
-  try {
-    page = await handle.newPage('https://www.facebook.com/pages/create/') as SignupPage;
-    await page.waitForTimeout(7_000);
-    const url = page.url();
-    if (url.includes('login') || url.includes('accounts.google.com')) {
-      manualRequired = true;
-      return {
-        ok: false,
-        needsManual: true,
-        message: 'Facebook không cho tạo tài khoản mới bằng tài khoản Google (Google đã chặn). Hãy tạo tài khoản Facebook bằng email/SĐT khác, đăng nhập trong cửa sổ trình duyệt của cụm, rồi bấm lại để tạo Page.'
-      };
-    }
-    if (await hasCaptcha(page)) {
-      manualRequired = true;
-      return { ok: false, needsManual: true, message: 'Facebook yêu cầu xác minh — hãy hoàn tất trong cửa sổ trình duyệt của cụm.' };
-    }
-    const nameInput = page.locator('input[name="page_name"], input[placeholder*="Page name" i], input[aria-label*="page name" i]');
-    if (await nameInput.count() === 0) {
-      manualRequired = true;
-      return { ok: false, needsManual: true, message: 'Không tìm thấy ô tên Page trong Facebook — hãy tạo Page thủ công trong cửa sổ trình duyệt của cụm.' };
-    }
-    await nameInput.nth(0).fill(name);
-    await clickText(page, 'Create Page');
-    await page.waitForTimeout(5_000).catch(() => undefined);
-    await clickText(page, 'Next');
-    await page.waitForTimeout(3_000).catch(() => undefined);
-    await clickText(page, 'Next');
-    await page.waitForTimeout(3_000).catch(() => undefined);
-    await clickText(page, 'Done');
-    await page.waitForTimeout(5_000).catch(() => undefined);
-    return { ok: true, accountName: name, accountUrl: page.url() };
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
-  } finally {
-    if (!manualRequired) await page?.close().catch(() => undefined);
-  }
+  const result = await createFacebookPageWithName(handle, options);
+  return {
+    ok: result.ok,
+    ...(result.needsManual === undefined ? {} : { needsManual: result.needsManual }),
+    ...(result.message === undefined ? {} : { message: result.message }),
+    ...(result.accountName === undefined ? {} : { accountName: result.accountName }),
+    ...(result.accountUrl === undefined ? {} : { accountUrl: result.accountUrl }),
+    ...(result.pageId === undefined ? {} : { pageId: result.pageId })
+  };
 }
