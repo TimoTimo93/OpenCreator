@@ -259,6 +259,7 @@ import { createCodexAppServerHost } from '../codex/app-server-host-2026-07-28.js
 import { registerCreatorRoutes } from './routes.creator.js';
 import { registerCreatorRuntimeRoutes } from './routes.creator-runtime.js';
 import { registerCreatorDramaRoutes } from './routes.creator-drama.js';
+import { createDramaDownloadBridge } from '../creator/hongguo/download-bridge.js';
 import { registerTranslationPipelineRoutes } from './routes.creator-translation-pipeline.js';
 import { registerTranslationBatchRoutes } from './routes.translation-batch.js';
 import { registerSocialRoutes } from './routes.social.js';
@@ -1740,6 +1741,17 @@ export async function buildServer(input: BuildServerInput) {
     console.warn(`Translation pipeline init failed: ${formatError(error)}`);
   }
   await registerTranslationPipelineRoutes(server, translationPipeline);
+  // Cầu nối Hồng Quá → Dịch video: mỗi tập tải từ Hồng Quá xong sẽ tự được
+  // nối vào hàng đợi dịch (dịch xong pipeline tự nạp vào hàng đợi đăng).
+  if (translationPipeline !== undefined && creatorHongguoComponentManager !== undefined) {
+    const dramaBridge = createDramaDownloadBridge({
+      listTasks: async () => creatorHongguoComponentManager!.apiFetch('/api/v1/download-tasks'),
+      enqueue: requests => translationPipeline!.enqueue(requests),
+      log: message => console.log(message)
+    });
+    dramaBridge.start();
+    server.addHook('onClose', () => dramaBridge.stop());
+  }
   await registerTranslationBatchRoutes(server, {
     pipeline: translationPipeline,
     ffmpegPath: creatorFfmpegPath,
