@@ -143,8 +143,19 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
   await page.waitForTimeout(5_000);
 
   // Tiêu đề (max 100 ký tự).
+  // Kênh mới có "trust tiers wizard" (yêu cầu xác minh) chặn mọi thao tác.
+  const wizard = page.locator('yt-trust-tiers-wizard-dialog, yt-trust-tiers-advanced-wizard').first();
+  if (await wizard.isVisible().catch(() => false)) {
+    return {
+      status: 'failed',
+      error: 'YouTube yêu cầu xác minh kênh mới (trust tiers) trước khi đăng tiếp — hãy mở trình duyệt cụm để xác minh (số điện thoại/giấy tờ), sau đó bấm lại.'
+    };
+  }
   const titleBox = page.locator(sel.title_box).first();
   await titleBox.waitFor({ state: 'visible', timeout: 45_000 });
+  await titleBox.click({ timeout: 20_000, force: true }).catch(async () => {
+    await titleBox.click({ timeout: 10_000 }).catch(() => undefined);
+  });
   await fillEditable(titleBox, page, context.job.title.slice(0, 100));
 
   // Mô tả (max 4900 ký tự) nếu khung xuất hiện.

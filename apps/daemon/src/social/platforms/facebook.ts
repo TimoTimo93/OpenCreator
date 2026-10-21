@@ -290,7 +290,16 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
         await page.waitForTimeout(1_500);
         await dismissBusinessModals(page);
       } else {
-        return await failedWithScreenshot(page, context, 'Không thấy tùy chọn thêm ảnh/video trong Business Suite');
+        const buttons = await page.evaluate(() => {
+          const visible = (el: Element): boolean => (el as HTMLElement).offsetParent !== null;
+          return JSON.stringify(Array.from(document.querySelectorAll('[role="button"], button'))
+            .filter(el => visible(el))
+            .map(el => (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 24))
+            .filter(text => text !== '')
+            .slice(0, 12));
+        }).catch(() => '[]');
+        console.log(`[social] Facebook: không thấy nút thêm media — các nút đang có: ${buttons}`);
+        return await failedWithScreenshot(page, context, 'Không thấy tùy chọn thêm ảnh/video trong Business Suite (giao diện có thể đã đổi)');
       }
     } else {
       await photoVideo.click({ timeout: 15_000 }).catch(() => undefined);

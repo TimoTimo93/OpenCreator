@@ -71,24 +71,37 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
   await fileInput.waitFor({ state: 'attached', timeout: 30_000 });
   await fileInput.setInputFiles(videoPath);
   // TikTok hay bật modal "Bật kiểm tra nội dung tự động?" ngay sau khi chọn
-  // file ⇒ đóng trước khi điền caption (modal chặn click).
-  await page.waitForTimeout(2_500).catch(() => undefined);
+  // file ⇒ tắt công tắc "Music copyright check" trước (nằm trong copyright_container).
+  await turnOffCopyrightCheck(page);
+  await page.waitForTimeout(1_500).catch(() => undefined);
   await dismissBlockingModals(page);
 
   // 2. Caption + hashtag: điền sau khung soạn thảo xuất hiện.
-  const editor = page.locator(sel.caption_editor).first();
+  // KHOANH đúng khung caption (data-e2e=caption_container) — selector rộng
+  // trước đây bắt nhầm ô contenteditable trong thanh điều hướng ⇒ gõ sai chỗ.
+  const editor = page.locator(
+    "div[data-e2e='caption_container'] [contenteditable='true'], div[data-e2e='caption_container'] textarea, div.public-DraftEditor-content[contenteditable='true']"
+  ).first();
   await editor.waitFor({ state: 'visible', timeout: 45_000 });
-  // TikTok hay mở modal phủ toàn trang (vd. bật kiểm tra nội dung, tour) →
-  // dùng Escape để gỡ, rồi click cưỡng chế (force) để không bị overlay chặn.
-  await dismissBlockingModals(page);
-  await page.keyboard.press('Escape').catch(() => undefined);
-  await page.waitForTimeout(600).catch(() => undefined);
+  // Dùng click cưỡng chế (force) vì overlay có thể chặn; xoá sẵn tên file mặc
+  // định rồi gõ tiêu đề + mô tả + hashtag.
   await editor.click({ timeout: 20_000, force: true }).catch(async () => {
     await editor.click({ timeout: 10_000 }).catch(() => undefined);
   });
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Control+A').catch(() => undefined);
+  await page.keyboard.press('Delete').catch(() => undefined);
+  await page.waitForTimeout(300);
   await typeWithHashtags(page, context.job.title, context.job.description.slice(0, 2_000));
   await dismissBlockingModals(page);
+  // Kiểm tra mô tả đã gõ đúng chưa (tránh bấm Đăng khi form rỗng).
+  const caption = await editor.textContent().catch(() => '');
+  if (context.job.title.trim() !== '' && !(caption ?? '').includes(context.job.title.trim().slice(0, 12))) {
+    return {
+      status: 'failed',
+      error: `TikTok: không gõ được mô tả (nội dung hiện tại: "${(caption ?? '').slice(0, 60)}") — hãy mở trình duyệt cụm và nhập tay.`
+    };
+  }
   // Popup cửa sổ chia màn hình (split window) sau khi nhập caption (bỏ
   // nếu có) — rút gọn từ luồng `tiktok-uploader` cộng đồng.
   await page.waitForTimeout(1_000);
@@ -118,7 +131,10 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
 
   // 5. Đăng / Lên lịch.
   await dismissBlockingModals(page);
-  const postBtn = page.locator(sel.post_btn).first();
+  const postBtn = page.locator("button[data-e2e='post_video_button']").first();
+  if (await postBtn.count().catch(() => 0) === 0) {
+    return { status: 'failed', error: 'TikTok: không tìm thấy nút "Post" (data-e2e=post_video_button) trong trình soạn thảo.' };
+  }
   await postBtn.scrollIntoViewIfNeeded().catch(() => undefined);
   await postBtn.click({ timeout: 20_000, force: true }).catch(async () => {
     await postBtn.click({ timeout: 10_000 }).catch(() => undefined);
@@ -152,7 +168,7 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
       console.log(`[social] TikTok: chưa đăng được — các nút đang hiện: ${buttons}`);
       const composer = await page.evaluate(() => {
         const main = document.querySelector('div[role="main"]');
-        return ((main?.innerText ?? '').replace(/\s+/g, ' ')).slice(0, 400);
+        return ((main?.textContent ?? '').replace(/\s+/g, ' ')).slice(0, 400);
       }).catch(() => '');
       return {
         status: 'failed',
@@ -174,6 +190,32 @@ async function clickIfVisible(page: Page, selector: string): Promise<void> {
       await target.click();
       await page.waitForTimeout(600);
     }
+  } catch {
+    // Không chặn luồng đăng.
+  }
+}
+
+/**
+ * Tắt công tắc "Music copyright check" của TikTok Studio — bật nó sẽ bật modal
+ * "Bật kiểm tra nội dung tự động?" che màn hình và chặn mọi thao tác.
+ */
+async function turnOffCopyrightCheck(page: Page): Promise<void> {
+  try {
+    const state = await page.evaluate(() => {
+      const container = document.querySelector("div[data-e2e='copyright_container']");
+      if (container === null) return 'none';
+      const toggle = container.querySelector("[role='switch'], input[type='checkbox'], [aria-checked]");
+      if (toggle === null) return 'none';
+      const aria = toggle.getAttribute('aria-checked');
+      if (aria === 'true') return 'on';
+      if (toggle instanceof HTMLInputElement) return toggle.checked ? 'on' : 'off';
+      if (aria === 'false') return 'off';
+      return 'unknown';
+    }).catch(() => 'none');
+    if (state !== 'on') return;
+    const toggle = page.locator("div[data-e2e='copyright_container'] [role='switch'], div[data-e2e='copyright_container'] input[type='checkbox']").first();
+    await toggle.click({ timeout: 8_000, force: true }).catch(() => undefined);
+    await page.waitForTimeout(1_200).catch(() => undefined);
   } catch {
     // Không chặn luồng đăng.
   }
