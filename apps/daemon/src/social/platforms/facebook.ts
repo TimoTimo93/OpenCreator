@@ -409,12 +409,33 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
       return await failedWithScreenshot(page, context, 'Không tìm thấy nút "Đăng" trong composer Business Suite');
     }
     await page.waitForTimeout(8_000);
-    return { status: scheduled ? 'scheduled' : 'published' };
+    // Rút ID bài đăng (video) từ URL/trang sau khi đăng.
+    const videoId = await readFacebookVideoId(page);
+    return { status: scheduled ? 'scheduled' : 'published', ...(videoId !== '' ? { videoId } : {}) };
   } catch (error) {
     return await failedWithScreenshot(page, context, error instanceof Error ? error.message : String(error));
   } finally {
     await page.close().catch(() => undefined);
   }
+}
+
+/** Rút ID bài đăng Facebook (videos/posts/reel) từ trang hiện tại. */
+async function readFacebookVideoId(page: Page): Promise<string> {
+  const found = await page.evaluate(() => {
+    const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ');
+    const textMatch = text.match(/facebook\.com\/(?:[^/\s]+\/)*(?:videos|posts|reel)\/(\d{6,25})/);
+    if (textMatch !== null) return textMatch[1];
+    const links = Array.from(document.querySelectorAll('a[href*="/videos/"], a[href*="/posts/"], a[href*="/reel/"]'));
+    for (const link of links) {
+      const match = (link.getAttribute('href') ?? '').match(/\/(?:videos|posts|reel)\/(\d{6,25})/);
+      if (match !== null) return match[1];
+    }
+    const url = new URL(location.href);
+    const inUrl = url.pathname.match(/\/(?:videos|posts|reel)\/(\d{6,25})/);
+    if (inUrl !== null) return inUrl[1];
+    return '';
+  }).catch(() => '');
+  return found ?? '';
 }
 
 async function failedWithScreenshot(page: Page, context: SocialExecutionContext, message: string): Promise<SocialExecutionResult> {

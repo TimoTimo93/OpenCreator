@@ -297,13 +297,31 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
     // Không chặn luồng.
   }
   await page.waitForTimeout(3_000);
+  // Lấy ID video đã đăng (màn hình thành công hiện "Video link: https://youtu.be/<id>").
+  const videoId = await readYoutubeVideoId(page);
   // Kiểm chứng: video phải được publish (không còn là "Draft") — nếu không thì
   // báo lỗi thay vì trả "published" (trước đây app báo thành công dù chỉ lưu nháp).
   const draft = await verifyYoutubeNotDraft(page, context.job.title);
   if (draft === 'draft') {
     return { status: 'failed', error: 'YouTube lưu video thành "Draft" (chưa công khai) — cần chọn "Công khai" ở bước Quyền xem rồi bấm Save/Đăng lại.' };
   }
-  return { status: scheduledAtLocal !== null ? 'scheduled' : 'published' };
+  return { status: scheduledAtLocal !== null ? 'scheduled' : 'published', ...(videoId !== '' ? { videoId } : {}) };
+}
+
+/** Rút ID video YouTube từ trang hiện tại (link xem trước hoặc URL). */
+async function readYoutubeVideoId(page: Page): Promise<string> {
+  const found = await page.evaluate(() => {
+    const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ');
+    const short = text.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+    if (short !== null) return short[1];
+    const long = text.match(/youtube\.com\/watch\?v=([A-Za-z0-9_-]{11})/);
+    if (long !== null) return long[1];
+    const url = new URL(location.href);
+    const v = url.searchParams.get('v');
+    if (v !== null && /^[A-Za-z0-9_-]{11}$/.test(v)) return v;
+    return '';
+  }).catch(() => '');
+  return found ?? '';
 }
 
 /** Mở danh sách video của kênh và kiểm tra video vừa đăng có còn là "Draft" không. */

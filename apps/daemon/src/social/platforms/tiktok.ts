@@ -162,6 +162,8 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
   // trả "published" (trước đây app báo thành công dù TikTok không có bài).
   const confirmed = await page.locator(sel.post_confirmation).first()
     .isVisible().catch(() => false);
+  // Rút ID video từ trang xác nhận / URL sau khi đăng.
+  const videoId = await readTikTokVideoId(page);
   if (!confirmed) {
     const url = page.url();
     if (url.includes('upload')) {
@@ -185,7 +187,21 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
       };
     }
   }
-  return { status: scheduled ? 'scheduled' : 'published' };
+  return { status: scheduled ? 'scheduled' : 'published', ...(videoId !== '' ? { videoId } : {}) };
+}
+
+/** Rút ID video TikTok (URL /video/<id> hoặc /reel/<id>) từ trang hiện tại. */
+async function readTikTokVideoId(page: Page): Promise<string> {
+  const found = await page.evaluate(() => {
+    const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ');
+    const match = text.match(/tiktok\.com\/(?:@[\w.]+\/)?(?:video|reel)\/(\d{10,25})/);
+    if (match !== null) return match[1];
+    const url = new URL(location.href);
+    const inUrl = url.pathname.match(/\/(?:video|reel)\/(\d{10,25})/);
+    if (inUrl !== null) return inUrl[1];
+    return '';
+  }).catch(() => '');
+  return found ?? '';
 }
 
 /**
