@@ -469,11 +469,20 @@ export function createTranslationPipelineService(
     await runStageWait(job.id, 'subtitle');
     await runStageWait(job.id, 'tts');
     await runStageWait(job.id, 'render-horizontal');
-    const video = requireJob(job.id).artifacts.find(artifact =>
-      artifact.kind === 'horizontal_video'
-      && artifact.status === 'completed'
-      && artifact.path !== null
-    );
+    // Artifact "horizontal_video" được ghi sau khi stage báo xong (đôi lúc
+    // stage chạy lại và artifact cũ bị đánh dấu "stale") ⇒ chờ artifact
+    // completed có path thay vì đọc ảnh chụp một lần.
+    let video: CreatorArtifact | undefined;
+    for (let attempt = 0; attempt < 30 && video === undefined; attempt += 1) {
+      video = requireJob(job.id).artifacts.find(artifact =>
+        artifact.kind === 'horizontal_video'
+        && artifact.status === 'completed'
+        && artifact.path !== null
+      );
+      if (video === undefined) {
+        await new Promise(resolve => setTimeout(resolve, 1_500));
+      }
+    }
     if (video === undefined || video.path === null) {
       throw new Error('Dịch xong nhưng không tìm thấy video ngang trong artifacts');
     }
