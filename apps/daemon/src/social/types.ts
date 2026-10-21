@@ -67,6 +67,10 @@ export type SocialCluster = {
   needsChannel: boolean;
   /** GĐ3: URL profile TikTok (dùng để quét thống kê). */
   tkProfileUrl: string;
+  /** Tên tài khoản TikTok đã liên kết (đọc từ trang profile sau khi đăng nhập). */
+  tkAccountName: string;
+  /** Tên tài khoản/Page Facebook đã liên kết. */
+  fbAccountName: string;
   /** GĐ3: bật tự động trả lời bình luận bằng AI. */
   autoReplyEnabled: boolean;
   /** GĐ3: chỉ dẫn riêng cho AI khi soạn câu trả lời. */

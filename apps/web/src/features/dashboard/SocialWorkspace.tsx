@@ -802,7 +802,11 @@ function ChannelsPanel(props: {
                     {PLATFORMS.map(platform => {
                       const status = cluster.loginStatus[platform];
                       const key = `${cluster.id}:${platform}`;
-                      const accountName = platform === 'youtube' ? cluster.ytAccountName ?? '' : '';
+                      const accountName = platform === 'youtube'
+                        ? cluster.ytAccountName ?? ''
+                        : platform === 'tiktok'
+                          ? cluster.tkAccountName ?? ''
+                          : cluster.fbAccountName ?? '';
                       const accountId = platform === 'youtube' ? cluster.ytAccountId ?? '' : '';
                       const linked = status === 'ok';
                       return (
@@ -813,7 +817,9 @@ function ChannelsPanel(props: {
                                 <span className="social-login-dot" aria-hidden="true" />
                                 {accountName !== '' ? (
                                   <span className="social-login-account">{accountName}</span>
-                                ) : null}
+                                ) : (
+                                  <span className="social-login-account">{t('dashboard.social.loginOk')}</span>
+                                )}
                               </span>
                             ) : (
                               <span className={`social-login social-login-${status}`}>
@@ -846,17 +852,19 @@ function ChannelsPanel(props: {
                               </button>
                             ) : null}
                             {platform === 'tiktok' || platform === 'facebook' ? (
-                              <button
-                                type="button"
-                                className="social-btn social-btn-sm social-btn-green"
-                                data-testid={`social-create-account-${cluster.id}-${platform}`}
-                                title={platform === 'tiktok'
-                                  ? 'Đăng ký tài khoản TikTok bằng tài khoản Google đã đăng nhập'
-                                  : 'Tạo Page Facebook cho tài khoản đã đăng nhập'}
-                                onClick={() => props.onCreateAccount(cluster, platform)}
-                              >
-                                ➕ Tạo tài khoản
-                              </button>
+                              linked ? null : (
+                                <button
+                                  type="button"
+                                  className="social-btn social-btn-sm social-btn-green"
+                                  data-testid={`social-create-account-${cluster.id}-${platform}`}
+                                  title={platform === 'tiktok'
+                                    ? 'Đăng ký tài khoản TikTok bằng tài khoản Google đã đăng nhập'
+                                    : 'Tạo Page Facebook cho tài khoản đã đăng nhập'}
+                                  onClick={() => props.onCreateAccount(cluster, platform)}
+                                >
+                                  ➕ Tạo tài khoản
+                                </button>
+                              )
                             ) : null}
                           </span>
                         </td>

@@ -32,6 +32,10 @@ export type SocialClusterSummary = {
   ytAccountName?: string;
   /** ID kênh YouTube đã liên kết (UC...). */
   ytAccountId?: string;
+  /** Tên tài khoản TikTok đã liên kết. */
+  tkAccountName?: string;
+  /** Tên tài khoản/Page Facebook đã liên kết. */
+  fbAccountName?: string;
   /** Đã đăng nhập nhưng tài khoản chưa có kênh YouTube (cần tạo kênh). */
   needsChannel?: boolean;
   autoReplyEnabled: boolean;

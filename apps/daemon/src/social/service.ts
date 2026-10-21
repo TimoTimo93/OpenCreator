@@ -313,8 +313,8 @@ export function readAccountName(
 }
 
 /**
- * ??c t?n/URL t?i kho?n TikTok|Facebook sau khi ??ng nh?p (m? trang ch? v? d?
- * t?n hi?n th? trong DOM). Kh?ng ??c ???c ? b? tr?ng, kh?ng b?o sai.
+ * Đọc tên/URL tài khoản TikTok|Facebook sau khi đăng nhập (mở trang cá nhân
+ * để đọc tên hiển thị trong DOM). Không đọc được thì trả rỗng, không báo sai.
  */
 async function readSocialProfileName(
   handle: { newPage(url?: string): Promise<unknown> },
@@ -325,6 +325,7 @@ async function readSocialProfileName(
     url(): string;
     title(): Promise<string>;
     waitForTimeout(ms: number): Promise<void>;
+    goto(url: string, options?: { timeout?: number; waitUntil?: string }): Promise<unknown>;
     evaluate<T>(fn: (arg?: unknown) => T, arg?: unknown): Promise<T>;
     close(): Promise<void>;
   } | undefined;
@@ -332,14 +333,37 @@ async function readSocialProfileName(
     const opened = await handle.newPage(home);
     page = opened as unknown as NonNullable<typeof page>;
     await page.waitForTimeout(5_000);
+    // Link trang cá nhân cho biết username (TikTok) / user id (Facebook).
+    const profileLink = await page.evaluate((arg: unknown) => {
+      const target = (arg ?? {}) as { platform: string };
+      const selectors = target.platform === 'tiktok'
+        ? ['a[data-e2e="profile-icon"]', 'a[href^="/@"]']
+        : ['a[href*="profile.php?id="]', 'a[href*="/profile/"]'];
+      for (const selector of selectors) {
+        for (const el of Array.from(document.querySelectorAll(selector))) {
+          const href = (el.getAttribute('href') ?? '').trim();
+          if (href === '') continue;
+          if (target.platform === 'tiktok' && href.replace('/@', '').trim() === '') continue;
+          return href;
+        }
+      }
+      return '';
+    }, { platform }).catch(() => '');
+    if (profileLink !== '') {
+      const target = profileLink.startsWith('http')
+        ? profileLink
+        : new URL(profileLink, home).toString();
+      await page.goto(target, { timeout: 30_000, waitUntil: 'domcontentloaded' }).catch(() => undefined);
+      await page.waitForTimeout(4_000).catch(() => undefined);
+    }
     const url = page.url();
     const title = await page.title().catch(() => '');
     const name = await page.evaluate((unused: unknown) => {
       const candidates = [
-        'h1',
         '[data-e2e="user-title"]',
         'strong[data-e2e="user-title"]',
-        '[data-e2e="unique-username"]'
+        '[data-e2e="unique-username"]',
+        'h1'
       ];
       for (const selector of candidates) {
         const el = document.querySelector(selector);
@@ -348,7 +372,7 @@ async function readSocialProfileName(
       }
       return '';
     }, null).catch(() => '');
-    const cleanedTitle = title.replace(/\s*[-??]\s*(TikTok|Facebook)\s*$/i, '').trim();
+    const cleanedTitle = title.replace(/\s*[-–—]\s*(TikTok|Facebook)\s*$/i, '').trim();
     const label = name !== '' ? name : cleanedTitle;
     return {
       ...(label !== '' && label.length < 80 ? { name: label } : {}),
@@ -428,6 +452,8 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       tkProfileUrl: cluster.tkProfileUrl,
       ytAccountName: cluster.ytAccountName,
       ytAccountId: cluster.ytAccountId,
+      tkAccountName: cluster.tkAccountName,
+      fbAccountName: cluster.fbAccountName,
       needsChannel: cluster.needsChannel,
       autoReplyEnabled: cluster.autoReplyEnabled,
       autoReplyPrompt: cluster.autoReplyPrompt,
@@ -696,7 +722,12 @@ export function createSocialService(input: SocialServiceInput): SocialService {
           readSocialProfileName(browserHandle, platform));
         if (account.name !== undefined) {
           accountName = account.name;
-          if (platform === 'tiktok') patch.tk_profile_url = account.url ?? '';
+          if (platform === 'tiktok') {
+            patch.tk_account_name = account.name;
+            patch.tk_profile_url = account.url ?? '';
+          } else {
+            patch.fb_account_name = account.name;
+          }
         }
       }
       updateClusterRow(db, clusterId, patch);
@@ -744,11 +775,20 @@ export function createSocialService(input: SocialServiceInput): SocialService {
         [column]: 'ok',
         updated_at: new Date().toISOString()
       };
-      if (platform === 'tiktok' && result.accountName !== undefined) patch.tk_profile_url = result.accountUrl ?? '';
+      // Đọc tên tài khoản thật từ trang profile (để cột hiển thị "● <tên>").
+      const profile = await worker.withClusterBrowser(clusterId, async browserHandle =>
+        readSocialProfileName(browserHandle, platform));
+      const accountName = profile.name ?? result.accountName;
+      if (platform === 'tiktok') {
+        patch.tk_profile_url = profile.url ?? result.accountUrl ?? '';
+        if (accountName !== undefined) patch.tk_account_name = accountName;
+      } else if (accountName !== undefined) {
+        patch.fb_account_name = accountName;
+      }
       updateClusterRow(db, clusterId, patch);
       return {
         ok: true,
-        ...(result.accountName === undefined ? {} : { accountName: result.accountName }),
+        ...(accountName === undefined ? {} : { accountName }),
         ...(result.accountUrl === undefined ? {} : { accountUrl: result.accountUrl })
       };
     },

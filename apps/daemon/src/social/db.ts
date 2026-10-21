@@ -169,6 +169,9 @@ function migrateColumns(db: SocialDB): void {
   // Tài khoản đã liên kết (đọc từ cookie/Studio sau khi đăng nhập tay).
   addColumn('social_clusters', 'yt_account_name', "yt_account_name TEXT NOT NULL DEFAULT ''");
   addColumn('social_clusters', 'yt_account_id', "yt_account_id TEXT NOT NULL DEFAULT ''");
+  // Tên tài khoản TikTok/Facebook (để cột hiển thị "● <tên>" như YouTube).
+  addColumn('social_clusters', 'tk_account_name', "tk_account_name TEXT NOT NULL DEFAULT ''");
+  addColumn('social_clusters', 'fb_account_name', "fb_account_name TEXT NOT NULL DEFAULT ''");
   addColumn('social_clusters', 'auto_reply_enabled', 'auto_reply_enabled INTEGER NOT NULL DEFAULT 0');
   addColumn('social_clusters', 'auto_reply_prompt', "auto_reply_prompt TEXT NOT NULL DEFAULT ''");
   // GĐ4: công tắc tự nạp đăng sau khi dịch xong (điều khiển từ daemon).
@@ -223,6 +226,8 @@ export type SocialClusterRow = {
   tk_profile_url: string | null;
   yt_account_name: string | null;
   yt_account_id: string | null;
+  tk_account_name: string | null;
+  fb_account_name: string | null;
   auto_reply_enabled: number | null;
   auto_reply_prompt: string | null;
   auto_publish_after_translate: number | null;
@@ -294,6 +299,8 @@ export function mapCluster(row: SocialClusterRow): SocialCluster {
     tkProfileUrl: row.tk_profile_url ?? '',
     ytAccountName: row.yt_account_name ?? '',
     ytAccountId: row.yt_account_id ?? '',
+    tkAccountName: row.tk_account_name ?? '',
+    fbAccountName: row.fb_account_name ?? '',
     needsChannel: (row.yt_login === 'ok') && (row.yt_account_id ?? '') === '',
     autoReplyEnabled: row.auto_reply_enabled === 1,
     autoReplyPrompt: row.auto_reply_prompt ?? '',
@@ -396,6 +403,8 @@ export function createClusterRow(
     fb_login: 'unknown',
     yt_account_name: '',
     yt_account_id: '',
+    tk_account_name: '',
+    fb_account_name: '',
     fb_mode: data.fbMode,
     fb_page_id: data.fbPageId,
     fb_page_token_encrypted: data.fbPageTokenEncrypted,
@@ -457,6 +466,8 @@ export function updateClusterRow(
     tk_profile_url: string;
     yt_account_name: string;
     yt_account_id: string;
+    tk_account_name: string;
+    fb_account_name: string;
     auto_reply_enabled: number;
     auto_reply_prompt: string;
     auto_publish_after_translate: number;
