@@ -78,7 +78,14 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
   // 2. Caption + hashtag: điền sau khung soạn thảo xuất hiện.
   const editor = page.locator(sel.caption_editor).first();
   await editor.waitFor({ state: 'visible', timeout: 45_000 });
-  await editor.click({ timeout: 20_000 });
+  // TikTok hay mở modal phủ toàn trang (vd. bật kiểm tra nội dung, tour) →
+  // dùng Escape để gỡ, rồi click cưỡng chế (force) để không bị overlay chặn.
+  await dismissBlockingModals(page);
+  await page.keyboard.press('Escape').catch(() => undefined);
+  await page.waitForTimeout(600).catch(() => undefined);
+  await editor.click({ timeout: 20_000, force: true }).catch(async () => {
+    await editor.click({ timeout: 10_000 }).catch(() => undefined);
+  });
   await page.waitForTimeout(800);
   await typeWithHashtags(page, context.job.title, context.job.description.slice(0, 2_000));
   await dismissBlockingModals(page);
@@ -110,9 +117,12 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
   }
 
   // 5. Đăng / Lên lịch.
+  await dismissBlockingModals(page);
   const postBtn = page.locator(sel.post_btn).first();
   await postBtn.scrollIntoViewIfNeeded().catch(() => undefined);
-  await postBtn.click();
+  await postBtn.click({ timeout: 20_000, force: true }).catch(async () => {
+    await postBtn.click({ timeout: 10_000 }).catch(() => undefined);
+  });
   await page.waitForTimeout(2_000);
   // Popup bản quyền âm thanh/nhạc nền — chọn "vẫn đăng" nếu xuất hiện
   // (best-effort; TikTok hiện popup xếp.slot khác nhau theo khu vực).
@@ -122,6 +132,34 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: TkSe
   // — chưa thấy thì bỏ qua.
   await clickIfVisible(page, sel.post_now_btn);
   await page.waitForTimeout(4_000);
+  await dismissBlockingModals(page);
+  // PHẢI xác nhận bài đăng thực sự tồn tại — nếu không, báo lỗi thay vì
+  // trả "published" (trước đây app báo thành công dù TikTok không có bài).
+  const confirmed = await page.locator(sel.post_confirmation).first()
+    .isVisible().catch(() => false);
+  if (!confirmed) {
+    const url = page.url();
+    if (url.includes('upload')) {
+      // Liệt kê nút đang hiện để biết chính xác bị chặn bởi gì.
+      const buttons = await page.evaluate(() => {
+        const visible = (el: Element): boolean => (el as HTMLElement).offsetParent !== null;
+        return JSON.stringify(Array.from(document.querySelectorAll('button, [role="button"]'))
+          .filter(el => visible(el))
+          .map(el => (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 24))
+          .filter(text => text !== '')
+          .slice(0, 12));
+      }).catch(() => '[]');
+      console.log(`[social] TikTok: chưa đăng được — các nút đang hiện: ${buttons}`);
+      const composer = await page.evaluate(() => {
+        const main = document.querySelector('div[role="main"]');
+        return ((main?.innerText ?? '').replace(/\s+/g, ' ')).slice(0, 400);
+      }).catch(() => '');
+      return {
+        status: 'failed',
+        error: `TikTok chưa xác nhận đăng bài (vẫn ở màn hình tải lên). Hãy mở trình duyệt cụm để kiểm tra — có thể còn modal che hoặc thiếu quyền xem. [Composer: ${composer}]`
+      };
+    }
+  }
   return { status: scheduled ? 'scheduled' : 'published' };
 }
 
@@ -159,7 +197,21 @@ async function dismissBlockingModals(page: Page): Promise<void> {
       const overlays = Array.from(document.querySelectorAll(
         '.TUXModal-overlay, [data-floating-ui-portal] [role="dialog"], #react-joyride-portal, [data-test-id="joyride"]'
       )).filter(el => visible(el));
-      return overlays.length;
+      if (overlays.length > 0) return overlays.length;
+      // Lớp phủ mờ toàn trang (modal không có role) — phủ > 55% khung nhìn.
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      for (const el of Array.from(document.querySelectorAll('div'))) {
+        if (!visible(el)) continue;
+        const style = window.getComputedStyle(el);
+        if (style.position !== 'fixed' && style.position !== 'absolute') continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < vw * 0.9 || rect.height < vh * 0.9) continue;
+        const background = style.backgroundColor || '';
+        if (background === '' || background === 'rgba(0, 0, 0, 0)' || background === 'transparent') continue;
+        return 1;
+      }
+      return 0;
     }).catch(() => 0);
     if (!open || open === 0) return;
     const buttons = page.locator('.TUXModal-overlay button, [data-floating-ui-portal] [role="dialog"] button, #react-joyride-portal button');

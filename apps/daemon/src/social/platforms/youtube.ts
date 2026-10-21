@@ -190,7 +190,8 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
 
   // Hẹn giờ phát sóng.
   const scheduledAtLocal = toLocalParts(context.job.scheduledAt);
-  if (scheduledAtLocal !== null && scheduledAtLocal.getTime() - Date.now() > 10 * 60_000) {
+  const publishingNow = scheduledAtLocal === null || scheduledAtLocal.getTime() - Date.now() <= 10 * 60_000;
+  if (!publishingNow) {
     const scheduleRadio = page.locator(sel.schedule_radio).first();
     if (await scheduleRadio.isVisible().catch(() => false)) {
       await scheduleRadio.click();
@@ -212,12 +213,22 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
     } else {
       return { status: 'failed', error: 'Không tìm thấy tùy chọn hẹn giờ YouTube Studio' };
     }
+  } else {
+    // Đăng ngay ⇒ PHẢI chọn "Công khai" (radio PUBLIC trong UI mới), nếu không
+    // YouTube lưu video thành "Draft" và không ai xem được.
+    const publicRadio = page.locator("tp-yt-paper-radio-button[name='PUBLIC'], tp-yt-paper-radio-button#public-radio-button").first();
+    if (await publicRadio.isVisible().catch(() => false)) {
+      await publicRadio.scrollIntoViewIfNeeded().catch(() => undefined);
+      await publicRadio.click({ timeout: 10_000 }).catch(() => undefined);
+      await page.waitForTimeout(1_000);
+    }
   }
 
-  // Chờ tải lên xong và bấm Done.
-  const doneBtn = page.locator(sel.done_btn).first();
-  await doneBtn.waitFor({ state: 'visible', timeout: 300_000 });
-  await doneBtn.click();
+  // Chờ tải lên xong và bấm Save (UI mới dùng nút "Save"; bản cũ là
+  // ytcp-button#done-button) — không bấm thì video chỉ ở trạng thái Draft.
+  const saveBtn = page.locator("ytcp-button#done-button, button[aria-label='Save'], button[aria-label='Lưu'], button:has-text('Save')").first();
+  await saveBtn.waitFor({ state: 'visible', timeout: 300_000 });
+  await saveBtn.click({ timeout: 20_000 }).catch(() => undefined);
   await page.waitForTimeout(3_000);
   // Bước "Kiểm tra/Quyền" hoàn tất → hộp thoại xác nhận phát hành (laid out
   // theo cấu trúc luồng youtube_uploader_selenium cộng đồng): best-effort —
@@ -232,7 +243,38 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
     // Không chặn luồng.
   }
   await page.waitForTimeout(3_000);
+  // Kiểm chứng: video phải được publish (không còn là "Draft") — nếu không thì
+  // báo lỗi thay vì trả "published" (trước đây app báo thành công dù chỉ lưu nháp).
+  const draft = await verifyYoutubeNotDraft(page, context.job.title);
+  if (draft === 'draft') {
+    return { status: 'failed', error: 'YouTube lưu video thành "Draft" (chưa công khai) — cần chọn "Công khai" ở bước Quyền xem rồi bấm Save/Đăng lại.' };
+  }
   return { status: scheduledAtLocal !== null ? 'scheduled' : 'published' };
+}
+
+/** Mở danh sách video của kênh và kiểm tra video vừa đăng có còn là "Draft" không. */
+async function verifyYoutubeNotDraft(page: Page, title: string): Promise<'draft' | 'ok' | 'unknown'> {
+  try {
+    const channelId = /\/channel\/([A-Za-z0-9_-]+)/.exec(page.url())?.[1] ?? '';
+    if (channelId === '') return 'unknown';
+    await page.goto(`https://studio.youtube.com/channel/${channelId}/videos/upload`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await page.waitForTimeout(8_000);
+    const state = await page.evaluate((arg: unknown) => {
+      const expected = (typeof arg === 'string' ? arg : '').trim();
+      const visible = (el: Element): boolean => (el as HTMLElement).offsetParent !== null;
+      const rows = Array.from(document.querySelectorAll('ytcp-video-row, tr')).filter(el => visible(el));
+      for (const row of rows) {
+        const text = (row.textContent ?? '').replace(/\s+/g, ' ').trim();
+        if (expected !== '' && !text.includes(expected.slice(0, 30))) continue;
+        if (/Draft|Nháp|draft/i.test(text)) return 'draft';
+        return 'ok';
+      }
+      return 'unknown';
+    }, title);
+    return state === 'draft' ? 'draft' : state === 'ok' ? 'ok' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 async function fillEditable(locator: import('patchright').Locator, page: Page, text: string): Promise<void> {
