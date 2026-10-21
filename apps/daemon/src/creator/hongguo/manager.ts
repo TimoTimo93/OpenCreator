@@ -699,7 +699,11 @@ export async function createHongguoComponentManager(
       refreshRunning();
       if (state.active === undefined) {
         apiLastError = 'Hongguo chưa được cài đặt';
-        throw new HongguoUpdateError('creator_hongguo_unavailable', 'Hongguo is not installed yet', 503);
+        throw new HongguoUpdateError(
+          'creator_hongguo_unavailable',
+          `Thành phần Hồng Quá chưa được cài đặt. Cần kênh phát hành (channel): tạo file "${channelFilePath}" chứa URL kênh (http(s)://... hoặc file:///.../manifest.json) rồi bấm "Kiểm tra cập nhật" trong Cài đặt → Thành phần runtime.`,
+          503
+        );
       }
       if (phase !== 'idle') {
         throw new HongguoUpdateError('creator_hongguo_unavailable', 'Another Hongguo component operation is already running', 503);
