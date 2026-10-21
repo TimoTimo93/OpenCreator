@@ -29,6 +29,8 @@ export type RuntimeDependenciesController = {
   /** Checks the fork channel; with force it automatically downloads and applies a newer build. */
   checkHongguoUpdate?(force?: boolean): Promise<HongguoComponentStatus>;
   updateHongguo?(): Promise<HongguoComponentStatus>;
+  /** Luu kenh phat hanh (channel) cua component Hong Qua. */
+  setHongguoChannel?(url: string): Promise<HongguoComponentStatus>;
   /** Raw runtime dependency service (drama discovery + component ops). */
   service?: RuntimeDependencyService;
 };
@@ -209,6 +211,15 @@ export function useRuntimeDependencies(input: {
         if (active) setHongguoStatus(undefined);
       });
     return () => { active = false; };
+  }, [input.connected, input.service]);
+
+  const setHongguoChannel = useCallback(async (url: string): Promise<HongguoComponentStatus> => {
+    if (!input.connected || input.service === null) {
+      throw new Error('runtime_dependency_unavailable');
+    }
+    const response = await input.service.setHongguoChannel(url);
+    setHongguoStatus(response.hongguo);
+    return response.hongguo;
   }, [input.connected, input.service]);
 
   const updateHongguo = useCallback(async (): Promise<HongguoComponentStatus> => {

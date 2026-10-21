@@ -124,6 +124,8 @@ export type HongguoComponentManager = {
   status(): HongguoComponentStatus;
   check(input: { force: boolean }): Promise<HongguoComponentStatus>;
   update(): Promise<HongguoComponentStatus>;
+  /** Lưu kênh phát hành (channel) của component; rỗng = xoá kênh. */
+  setChannel(url: string): Promise<string | null>;
   /** Starts the component GUI/API; `credential` reuses a port+token already chosen. */
   launch(credential?: { port: number; token: string }): Promise<HongguoComponentStatus>;
   /** Health-checks the component's loopback API without spawning anything. */
@@ -188,7 +190,7 @@ export async function createHongguoComponentManager(
     const checkedAt = state.lastCheckedAt === undefined ? null : Date.parse(state.lastCheckedAt);
     const current = now().getTime();
     return {
-      installed: active !== undefined,
+    installed: active !== undefined,
       currentVersion: active?.version ?? null,
       currentViRevision: active?.viRevision ?? null,
       latestVersion: latest?.version ?? null,
@@ -796,7 +798,30 @@ export async function createHongguoComponentManager(
     }
   };
 
-  return { status, check, update, launch, probeDramaApi, apiFetch, close };
+  /**
+   * Lưu kênh phát hành (channel) của component: URL manifest (http(s)://… hoặc
+   * file:///…/manifest.json). Rỗng ⇒ xoá kênh (component sẽ báo chưa cài).
+   */
+  const setChannel = async (url: string): Promise<string | null> => {
+    const trimmed = url.trim();
+    if (trimmed === '') {
+      await rm(channelFilePath, { force: true });
+      cachedChannel = null;
+      return null;
+    }
+    if (!isValidChannelUrl(trimmed)) {
+      throw new HongguoUpdateError(
+        'creator_hongguo_unavailable',
+        'URL kênh phát hành không hợp lệ (cần http(s)://… hoặc file:///…/manifest.json)',
+        400
+      );
+    }
+    await writePrivateJsonFile(channelFilePath, { url: trimmed });
+    cachedChannel = trimmed;
+    return trimmed;
+  };
+
+  return { status, check, update, launch, probeDramaApi, apiFetch, close, setChannel };
 }
 
 type HongguoComponentDownloadProgressState = HongguoComponentStatus['downloadProgress'];

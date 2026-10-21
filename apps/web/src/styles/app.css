@@ -8307,3 +8307,41 @@ html.is-window-resizing *::after {
   transition: none !important;
   animation-play-state: paused !important;
 }
+
+/* Kênh phát hành của thành phần Hồng Quá (Cài đặt → Thành phần bên thứ ba). */
+.runtime-component-channel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.settings-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-inline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-inline-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.settings-inline-row input:focus {
+  border-color: var(--accent-strong);
+  outline: 2px solid var(--accent-soft);
+}

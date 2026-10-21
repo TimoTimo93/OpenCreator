@@ -65,6 +65,18 @@ export async function registerCreatorRuntimeRoutes(
     }
   });
 
+  server.post<{ Body: unknown }>('/creator/hongguo/channel', async (request, reply) => {
+    if (hongguo === undefined) return hongguoUnavailable(reply);
+    const body = request.body as { url?: unknown } | null;
+    const url = typeof body?.url === 'string' ? body.url : '';
+    try {
+      await hongguo.setChannel(url);
+      return { hongguo: await hongguo.status() };
+    } catch (error) {
+      return sendHongguoError(reply, error);
+    }
+  });
+
   server.post('/creator/hongguo/update', async (_request, reply) => {
     if (hongguo === undefined) return hongguoUnavailable(reply);
     try {

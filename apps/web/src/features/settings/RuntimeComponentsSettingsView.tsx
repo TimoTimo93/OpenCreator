@@ -107,7 +107,6 @@ export function RuntimeComponentsSettingsView(props: {
   const statusKind = liveCheckState === 'failed' ? 'failed' : checking
     ? 'checking'
     : status.updateAvailable ? 'update' : 'current';
-
   return (
     <section className="settings-section settings-management runtime-components-settings" aria-labelledby="runtime-components-title">
       <SettingsHeader />
@@ -277,6 +276,17 @@ function HongguoComponentCard(props: { controller: RuntimeDependenciesController
     ? t('settings.runtimeComponents.notChecked')
     : `v${status.latestVersion} · vi.${status.latestViRevision ?? 0}`;
 
+  const [channelUrl, setChannelUrl] = useState(status?.channelUrl ?? '');
+  const [channelNotice, setChannelNotice] = useState<string>();
+  const saveChannel = () => {
+    const save = props.controller.setHongguoChannel;
+    if (save === undefined) return;
+    setChannelNotice(undefined);
+    void save(channelUrl.trim())
+      .then(() => setChannelNotice('Đã lưu kênh phát hành. Bấm "Kiểm tra cập nhật" để cài thành phần.'))
+      .catch(() => setChannelNotice('Không lưu được kênh phát hành — kiểm tra lại URL.'));
+  };
+
   const runCheck = () => {
     const check = props.controller.checkHongguoUpdate;
     if (check === undefined) return;
@@ -304,6 +314,23 @@ function HongguoComponentCard(props: { controller: RuntimeDependenciesController
           : status.error !== null ? <AlertCircle size={19} aria-hidden="true" data-status={statusKind} />
           : status.updateAvailable || !status.installed ? <Download size={19} aria-hidden="true" data-status={statusKind} />
           : <CheckCircle2 size={19} aria-hidden="true" data-status={statusKind} />}
+      </div>
+
+      <div className="runtime-component-channel">
+        <label className="settings-label" htmlFor="hongguo-channel">Kênh phát hành (URL manifest)</label>
+        <div className="settings-inline-row">
+          <input
+            id="hongguo-channel"
+            type="text"
+            value={channelUrl}
+            placeholder="https://.../manifest.json hoặc file:///.../manifest.json"
+            onChange={event => setChannelUrl(event.target.value)}
+          />
+          <button type="button" className="settings-button" onClick={saveChannel} disabled={busy}>
+            Lưu kênh
+          </button>
+        </div>
+        {channelNotice === undefined ? null : <p className="settings-notice" role="status">{channelNotice}</p>}
       </div>
 
       <dl className="runtime-component-details">
