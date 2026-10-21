@@ -153,9 +153,26 @@ async function uploadFlow(page: Page, context: SocialExecutionContext, sel: YtSe
   }
   const titleBox = page.locator(sel.title_box).first();
   await titleBox.waitFor({ state: 'visible', timeout: 45_000 });
-  await titleBox.click({ timeout: 20_000, force: true }).catch(async () => {
-    await titleBox.click({ timeout: 10_000 }).catch(() => undefined);
-  });
+  try {
+    await titleBox.click({ timeout: 20_000, force: true });
+  } catch {
+    // Bị overlay chặn ⇒ hoặc wizard xác minh kênh mới, hoặc hộp thoại khác.
+    const dialogInfo = await page.evaluate(() => {
+      const visible = (el: Element): boolean => (el as HTMLElement).offsetParent !== null;
+      const scrim = Array.from(document.querySelectorAll('div.dialog-scrim, tp-yt-iron-overlay-backdrop[opened]'))
+        .filter(el => visible(el));
+      const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ');
+      const hit = text.match(/.{0,100}(verif|xác minh|trust tier|GOV_ID|số điện thoại|phone number).{0,100}/i);
+      return { overlays: scrim.length, hint: hit?.[0] ?? '' };
+    }).catch(() => ({ overlays: 0, hint: '' }));
+    if (dialogInfo.overlays > 0 || dialogInfo.hint !== '') {
+      return {
+        status: 'failed',
+        error: 'YouTube đang hiện hộp thoại yêu cầu xác minh kênh mới (trust tiers) — cần xác minh trong trình duyệt cụm (số điện thoại/giấy tờ) trước khi đăng tiếp.'
+      };
+    }
+    await titleBox.click({ timeout: 20_000, force: true });
+  }
   await fillEditable(titleBox, page, context.job.title.slice(0, 100));
 
   // Mô tả (max 4900 ký tự) nếu khung xuất hiện.

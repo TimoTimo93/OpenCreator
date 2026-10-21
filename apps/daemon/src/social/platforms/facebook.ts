@@ -231,12 +231,9 @@ async function dismissBusinessModals(page: Page): Promise<void> {
       break;
     }
     if (!clicked) {
-      const close = buttons.first();
-      if (await close.isVisible().catch(() => false)) {
-        await close.click({ timeout: 5_000 }).catch(() => undefined);
-      } else {
-        await page.keyboard.press('Escape').catch(() => undefined);
-      }
+      // KHÔNG bấm mù nút đầu tiên (có thể là nút "Đăng" trong composer) —
+      // chỉ dùng phím Escape.
+      await page.keyboard.press('Escape').catch(() => undefined);
     }
     await page.waitForTimeout(1_500).catch(() => undefined);
   }
@@ -262,12 +259,30 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
     await page.waitForTimeout(4_000);
     await dismissBusinessModals(page);
 
-    const createBtn = page.locator(sel.create_post_btn).first();
-    if (!(await createBtn.isVisible().catch(() => false))) {
-      return await failedWithScreenshot(page, context, 'Không tìm thấy nút "Tạo bài viết" trên Business Suite (giao diện đổi?)');
+    // Nút "Tạo bài viết" — khớp text CHÍNH XÁC (không dùng :has-text vì nó
+    // khớp cả phần tử cha ⇒ click rơi vào container, composer không mở).
+    const createLabels = ['Tạo bài viết', 'Create post'];
+    let created = false;
+    for (const label of createLabels) {
+      const target = page.getByText(label, { exact: true }).first();
+      if (await target.count().catch(() => 0) === 0) continue;
+      await target.click({ timeout: 12_000, force: true }).catch(async () => {
+        await target.click({ timeout: 8_000 }).catch(() => undefined);
+      });
+      created = true;
+      break;
     }
-    await createBtn.click({ timeout: 20_000 }).catch(() => undefined);
-    await page.waitForTimeout(1_500);
+    if (!created) {
+      const fallback = page.locator(sel.create_post_btn).first();
+      if (await fallback.isVisible().catch(() => false)) {
+        await fallback.click({ timeout: 12_000, force: true }).catch(() => undefined);
+        created = true;
+      }
+    }
+    if (!created) {
+      return await failedWithScreenshot(page, context, 'Không tìm thấy nút "Tạo bài viết" trên Business Suite (giao diện đã đổi?)');
+    }
+    await page.waitForTimeout(3_000);
     await dismissBusinessModals(page);
 
     // postType 'reel' (chế độ browser): ưu tiên composer Reel nếu menu có —
@@ -281,39 +296,70 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
       }
     }
 
-    const photoVideo = page.locator(sel.photo_video_option).first();
-    if (!(await photoVideo.isVisible().catch(() => false))) {
-      // Business Suite mới: nút media là "Thêm ảnh/video" (nằm trong composer).
-      const altMedia = page.locator("div[role='button']:has-text('Thêm ảnh/video'), div[role='button']:has-text('Add photo/video')").first();
-      if (await altMedia.isVisible().catch(() => false)) {
-        await altMedia.click({ timeout: 15_000 }).catch(() => undefined);
-        await page.waitForTimeout(1_500);
-        await dismissBusinessModals(page);
-      } else {
-        const buttons = await page.evaluate(() => {
-          const visible = (el: Element): boolean => (el as HTMLElement).offsetParent !== null;
-          return JSON.stringify(Array.from(document.querySelectorAll('[role="button"], button'))
-            .filter(el => visible(el))
-            .map(el => (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 24))
-            .filter(text => text !== '')
-            .slice(0, 12));
-        }).catch(() => '[]');
-        console.log(`[social] Facebook: không thấy nút thêm media — các nút đang có: ${buttons}`);
-        return await failedWithScreenshot(page, context, 'Không thấy tùy chọn thêm ảnh/video trong Business Suite (giao diện có thể đã đổi)');
+    // Nút media trong composer Business Suite: "Thêm ảnh/video" (VI) hoặc
+    // "Add photo/video" (EN) — dùng khớp text CHÍNH XÁC, vì :has-text() khớp
+    // cả phần tử cha nên bấm vào cha sẽ không làm gì.
+    const mediaLabels = ['Thêm ảnh/video', 'Ảnh/Video', 'Add photo/video', 'Photo/video'];
+    const clickMedia = async (): Promise<boolean> => {
+      for (const label of mediaLabels) {
+        const target = page.getByText(label, { exact: true }).first();
+        if (await target.count().catch(() => 0) === 0) continue;
+        await target.click({ timeout: 12_000, force: true }).catch(async () => {
+          await target.click({ timeout: 8_000 }).catch(() => undefined);
+        });
+        return true;
       }
-    } else {
-      await photoVideo.click({ timeout: 15_000 }).catch(() => undefined);
-      await page.waitForTimeout(1_500);
-      await dismissBusinessModals(page);
+      return false;
+    };
+    let mediaClicked = await clickMedia();
+    if (!mediaClicked) {
+      // Composer có thể chưa mở (bị modal điều khoản chặn) → bấm lại nút tạo bài.
+      const reopen = page.getByText('Tạo bài viết', { exact: true }).first();
+      if (await reopen.count().catch(() => 0) > 0) {
+        await reopen.click({ timeout: 12_000, force: true }).catch(() => undefined);
+        await page.waitForTimeout(3_000);
+        await dismissBusinessModals(page);
+        mediaClicked = await clickMedia();
+      }
     }
-
-    const fileInput = page.locator(sel.file_input).first();
-    await fileInput.waitFor({ state: 'attached', timeout: 30_000 });
-    await fileInput.setInputFiles(context.job.videoPath);
+    if (!mediaClicked) {
+      const buttons = await page.evaluate(() => {
+        const visible = (el: Element): boolean => (el as HTMLElement).offsetParent !== null;
+        return JSON.stringify(Array.from(document.querySelectorAll('[role="button"], button'))
+          .filter(el => visible(el))
+          .map(el => (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 24))
+          .filter(text => text !== '')
+          .slice(0, 12));
+      }).catch(() => '[]');
+      console.log(`[social] Facebook: không thấy nút thêm media — các nút đang có: ${buttons}`);
+      return await failedWithScreenshot(page, context, 'Không thấy tùy chọn thêm ảnh/video trong Business Suite (giao diện có thể đã đổi)');
+    }
+    await page.waitForTimeout(2_000);
+    await dismissBusinessModals(page);
+    // Business Suite mới mở hộp chọn file NATIVE (không có input[type=file] ẩn)
+    // ⇒ bắt sự kiện filechooser để đưa file vào.
+    const chooserPromise = page.waitForEvent('filechooser', { timeout: 20_000 }).catch(() => undefined);
+    const fileInput = page.locator("input[type='file']").first();
+    const inputAttached = await fileInput.count().catch(() => 0) > 0;
+    if (inputAttached) {
+      await fileInput.waitFor({ state: 'attached', timeout: 20_000 });
+      await fileInput.setInputFiles(context.job.videoPath);
+    } else {
+      const chooser = await chooserPromise;
+      if (chooser !== undefined) {
+        await chooser.setFiles(context.job.videoPath).catch(() => undefined);
+      } else {
+        return await failedWithScreenshot(page, context, 'Business Suite không mở hộp chọn file (file chooser)');
+      }
+    }
 
     const textBox = page.locator(sel.composer_text_box).first();
     await textBox.waitFor({ state: 'visible', timeout: 45_000 });
-    await textBox.click();
+    await textBox.click({ timeout: 15_000, force: true }).catch(async () => {
+      await textBox.click({ timeout: 8_000 }).catch(() => undefined);
+    });
+    await page.keyboard.press('Control+A').catch(() => undefined);
+    await page.keyboard.press('Delete').catch(() => undefined);
     await page.keyboard.type(`${context.job.title}\n${context.job.description}`.slice(0, 4_900), { delay: 20 });
 
     // Đợi video tải xong (nút Đăng nhá nháy / hiển thị).
@@ -332,9 +378,28 @@ async function uploadViaBrowser(context: SocialExecutionContext): Promise<Social
         scheduled = true;
       }
     }
-    await publishBtn.scrollIntoViewIfNeeded().catch(() => undefined);
-    await publishBtn.click();
-    await page.waitForTimeout(6_000);
+    // Nút "Đăng" (Publish) — khớp text chính xác (nút có text "Đăng").
+    let published = false;
+    for (const label of ['Đăng', 'Đăng bài', 'Publish', 'Post']) {
+      const target = page.getByText(label, { exact: true }).first();
+      if (await target.count().catch(() => 0) === 0) continue;
+      await target.click({ timeout: 15_000, force: true }).catch(async () => {
+        await target.click({ timeout: 8_000 }).catch(() => undefined);
+      });
+      published = true;
+      break;
+    }
+    if (!published) {
+      const fallback = page.locator(sel.publish_btn).first();
+      if (await fallback.isVisible().catch(() => false)) {
+        await fallback.click({ timeout: 12_000, force: true }).catch(() => undefined);
+        published = true;
+      }
+    }
+    if (!published) {
+      return await failedWithScreenshot(page, context, 'Không tìm thấy nút "Đăng" trong composer Business Suite');
+    }
+    await page.waitForTimeout(8_000);
     return { status: scheduled ? 'scheduled' : 'published' };
   } catch (error) {
     return await failedWithScreenshot(page, context, error instanceof Error ? error.message : String(error));
