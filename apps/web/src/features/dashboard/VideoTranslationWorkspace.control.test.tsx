@@ -1519,14 +1519,14 @@ describe('VideoTranslationWorkspace task controls', () => {
       </LanguageProvider>
     );
 
-    // Initial step is Step 0: two explicit source choices, link input shown first
-    expect(screen.getByRole('tab', { name: '选择最近下载的视频' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: '打开本地已有视频' })).toHaveAttribute('aria-selected', 'false');
-    expect(screen.getByLabelText('视频链接')).toBeInTheDocument();
+    // Initial step is Step 0: chỉ còn thẻ "Mở tệp video" (v2.2 — bỏ tab "chọn video
+    // mới tải gần nhất" và ô dán link)
+    expect(screen.getByLabelText('上传本地视频')).toBeInTheDocument();
+    expect(screen.queryByLabelText('视频链接')).not.toBeInTheDocument();
 
-    // Enter a video URL
-    const urlInput = screen.getByLabelText('视频链接');
-    fireEvent.change(urlInput, { target: { value: 'https://www.youtube.com/watch?v=fresh123' } });
+    // Upload a video file
+    const initialVideo = new File(['fake video data'], 'test-video.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [initialVideo] } });
 
     // Navigate to step 1: 翻译设置
     fireEvent.click(screen.getByRole('button', { name: '继续' }));

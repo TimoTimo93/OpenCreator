@@ -1441,9 +1441,10 @@ describe('App', () => {
     await user.click(screen.getAllByRole('button', { name: /^视频翻译/ })
       .find(node => node.className.includes('dashboard-app-card'))!);
     expect(screen.getByRole('heading', { name: '视频翻译配音' })).toBeInTheDocument();
-    await user.type(
-      screen.getByRole('textbox', { name: '视频链接' }),
-      'https://www.youtube.com/watch?v=test'
+    // v2.2 — bỏ ô dán link: nạp tệp cục bộ thay cho URL
+    await user.upload(
+      screen.getByLabelText('上传本地视频'),
+      new File(['fake video'], 'test.mp4', { type: 'video/mp4' })
     );
     await user.click(screen.getByRole('button', { name: '继续' }));
     await user.click(screen.getByRole('button', { name: '继续' }));
@@ -1499,7 +1500,7 @@ describe('App', () => {
       type: 'video/webm',
       lastModified: 123
     });
-    await user.click(screen.getByRole('tab', { name: 'Open an existing video file' }));
+    // v2.2 — không còn tab nguồn: nạp tệp trực tiếp
     await user.upload(screen.getByLabelText('Upload a local video'), file);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.click(screen.getByRole('button', { name: 'Continue' }));

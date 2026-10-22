@@ -137,6 +137,45 @@ function createInMemoryCreatorService(): CreatorWebService {
       }
     };
   };
+  // v2.2 — hỗ trợ nạp video cục bộ: test "dịch từ tệp" thay cho URL (tab link đã bỏ)
+  const uploadSourceVideo = async (
+    jobId: string,
+    input: { file: File; expectedRevision: number }
+  ) => {
+    const current = jobs.get(jobId);
+    if (current === undefined) throw new Error(`Creator job not found: ${jobId}`);
+    const now = new Date().toISOString();
+    const artifact: CreatorArtifact = {
+      id: `source_video_${current.revision + 1}`,
+      jobId,
+      kind: 'source_video',
+      version: 1,
+      status: 'completed',
+      path: `/uploads/${input.file.name}`,
+      scopeKey: null,
+      inputFingerprint: null,
+      sha256: null,
+      sourceArtifactIds: [],
+      metadata: { fileName: input.file.name, size: input.file.size, source: 'local-upload' },
+      createdAt: now
+    };
+    const job: CreatorJob = {
+      ...current,
+      revision: current.revision + 1,
+      status: 'draft',
+      artifacts: [...current.artifacts, artifact],
+      state: {
+        ...current.state,
+        sourceType: 'file',
+        sourceUrl: '',
+        sourceArtifactId: artifact.id,
+        sourceFileName: input.file.name
+      },
+      updatedAt: now
+    };
+    jobs.set(job.id, job);
+    return { job };
+  };
   return {
     createJob,
     listVisualAssets: vi.fn(async () => ({ assets: dashboardVisualAssetCatalog() })),
@@ -147,6 +186,7 @@ function createInMemoryCreatorService(): CreatorWebService {
       return { job };
     },
     applyAction,
+    uploadSourceVideo,
     openArtifact: vi.fn(async (_jobId: string) => new Response(new Blob(['artifact']))),
     runAgentTurn: vi.fn(async () => {
       throw new Error('Agent turns require an explicit test fixture');
@@ -820,15 +860,11 @@ describe('DashboardPage', () => {
 
     openBlankWorkspace('Video Translation', 'Blank Video Translation');
     expect(screen.getByRole('heading', { name: 'Translate & Dub Video' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Choose the most recently downloaded video' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'Open an existing video file' })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Video link' })).toHaveAttribute(
-      'placeholder',
-      'Paste a video URL'
-    );
+    // v2.2 — chỉ còn thẻ chọn tệp trên máy, không còn tab "chọn video vừa tải" và ô link
+    expect(screen.getByLabelText('Upload a local video')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Video link' })).not.toBeInTheDocument();
     expect(screen.getByText('No collaboration activity yet')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ask Agent to review settings' })).toBeInTheDocument();
-    expect(screen.queryByText('拖放视频到这里')).not.toBeInTheDocument();
   });
 
   it('uses the Home-style Agent composer across creator workspaces', () => {
@@ -920,61 +956,6 @@ describe('DashboardPage', () => {
     expect(container.querySelector('.wechat-layout-list')).not.toBeInTheDocument();
   });
 
-  it('requires a Bilibili part selection and persists it without duplicate metadata requests', async () => {
-    const creatorService = createInMemoryCreatorService();
-    const applyAction = vi.spyOn(creatorService, 'applyAction');
-    const parts = [1, 2, 3].map(index => ({ index, title: `课程 ${index}`, cid: 1000 + index, width: 1920, height: 1080 }));
-    const getVideoMetadata = vi.fn(async () => ({ platform: 'bilibili' as const, title: '课程合集', parts }));
-    render(<DashboardPage onSelectPrompt={vi.fn()} workspace="video-translation" creatorService={creatorService}
-      videoMetadataService={{ getVideoMetadata }} />);
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.bilibili.com/video/BV18E421w7bf/?spm_id_from=share' }
-    });
-    expect(screen.getByText('正在读取 B 站分集信息，请稍候…')).toBeInTheDocument();
-    const selector = await screen.findByRole('combobox', { name: '选择要翻译的分集' });
-    expect(selector).toHaveValue('');
-    expect(screen.queryByTitle('Bilibili 视频预览')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    expect(screen.getByText('请确认链接有效，并选择要翻译的分集后继续')).toBeInTheDocument();
-    fireEvent.change(selector, { target: { value: '3' } });
-    expect(new URL(screen.getByTitle('Bilibili 视频预览').getAttribute('src')!).searchParams.get('p')).toBe('3');
-    expect(screen.getByText('课程合集 · P3 课程 3')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    await waitFor(() => expect(applyAction).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
-      action: 'update-settings', input: expect.objectContaining({ patch: expect.objectContaining({ sourceUrl: 'https://www.bilibili.com/video/BV18E421w7bf?p=3' }) })
-    })));
-    expect(getVideoMetadata).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([1, 2, 3])('preselects an explicit Bilibili P%s link', async index => {
-    const parts = [1, 2, 3].map(index => ({ index, title: `课程 ${index}` }));
-    render(<DashboardPage onSelectPrompt={vi.fn()} workspace="video-translation"
-      videoMetadataService={{ getVideoMetadata: vi.fn(async () => ({ platform: 'bilibili' as const, title: '课程合集', parts, selectedPart: parts[index - 1]! })) }} />);
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: `https://www.bilibili.com/video/BV18E421w7bf?p=${index}` }
-    });
-    expect(await screen.findByRole('combobox', { name: '选择要翻译的分集' })).toHaveValue(String(index));
-    expect(new URL(screen.getByTitle('Bilibili 视频预览').getAttribute('src')!).searchParams.get('p')).toBe(String(index));
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    expect(screen.queryByRole('combobox', { name: '选择要翻译的分集' })).not.toBeInTheDocument();
-  });
-
-  it('shows a recoverable Bilibili lookup error rather than silently translating P1', async () => {
-    const getVideoMetadata = vi.fn()
-      .mockRejectedValueOnce(new Error('无法读取 B 站分集信息，请重试'))
-      .mockResolvedValueOnce({ platform: 'bilibili', title: '课程合集', parts: [{ index: 1, title: '课程 1' }, { index: 2, title: '课程 2' }] });
-    render(<DashboardPage onSelectPrompt={vi.fn()} workspace="video-translation" videoMetadataService={{ getVideoMetadata }} />);
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.bilibili.com/video/BV18E421w7bf' }
-    });
-    expect(await screen.findByText('无法读取 B 站分集信息，请重试')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    expect(screen.getByText('请确认链接有效，并选择要翻译的分集后继续')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '重新读取分集' }));
-    expect(await screen.findByRole('combobox', { name: '选择要翻译的分集' })).toHaveValue('');
-    expect(getVideoMetadata).toHaveBeenCalledTimes(2);
-  });
-
   it('opens the video translation workspace and keeps its result in place', async () => {
     const onSelectPrompt = vi.fn();
     render(
@@ -995,21 +976,12 @@ describe('DashboardPage', () => {
 
     expect(screen.getByRole('heading', { name: '视频翻译配音' })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'OpenCreator' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '选择最近下载的视频' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('list', { name: '支持的平台' }).querySelectorAll('li')).toHaveLength(10);
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=test' }
-    });
-    expect(screen.getByRole('img', { name: 'YouTube 视频缩略图' })).toHaveAttribute(
-      'src',
-      'https://i.ytimg.com/vi/test/hqdefault.jpg'
-    );
-    expect(await screen.findByText('测试视频标题')).toBeInTheDocument();
-    expect(screen.getByText('YouTube 视频 · 测试作者')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '播放 YouTube 视频预览' }));
-    expect(screen.getByTitle('YouTube 视频预览')).toHaveAttribute('src', 'https://www.youtube-nocookie.com/embed/test');
+    // v2.2 — chỉ còn thẻ chọn tệp
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+    expect(screen.getByRole('region', { name: '视频预览' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '拖放视频到这里' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '改用本地视频' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清除当前视频来源' })).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '视频链接' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     expect(screen.getByRole('heading', { name: '设置翻译语言' })).toBeInTheDocument();
@@ -1058,10 +1030,9 @@ describe('DashboardPage', () => {
     expect(within(steps).getByRole('button', { name: '3 视频与字幕' })).toBeDisabled();
     expect(within(steps).getAllByRole('button')).toHaveLength(3);
 
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=steps-test' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     expect(within(steps).getByRole('button', { name: /翻译设置$/ })).toHaveAttribute('aria-current', 'step');
     fireEvent.click(screen.getByRole('switch', { name: '双语字幕' }));
     fireEvent.click(screen.getByRole('button', { name: '在下' }));
@@ -1095,10 +1066,9 @@ describe('DashboardPage', () => {
   it('reveals video settings together and preserves them when rendering is toggled off', () => {
     render(<DashboardPage onSelectPrompt={vi.fn()} />);
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=conditional-video-settings' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
 
     const rendering = screen.getByRole('switch', { name: '合成字幕视频' });
@@ -1129,11 +1099,9 @@ describe('DashboardPage', () => {
   it('uses the selected vertical output ratio for the subtitle preview', () => {
     render(<DashboardPage onSelectPrompt={vi.fn()} />);
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=vertical-preview' }
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.change(screen.getByRole('combobox', { name: '输出画幅' }), { target: { value: 'vertical' } });
     fireEvent.click(within(screen.getByRole('navigation', { name: '翻译流程' })).getByRole('button', {
@@ -1212,6 +1180,7 @@ describe('DashboardPage', () => {
       'placeholder',
       '粘贴 YouTube 标准链接、youtu.be 分享链接或 Bilibili 链接'
     );
+    // AutoClip giữ luồng link: dán URL → áp metadata (bản swap tệp của v2.2 KHÔNG áp cho workspace này)
     fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
       target: { value: 'https://www.youtube.com/watch?v=auto-clips' }
     });
@@ -1256,10 +1225,9 @@ describe('DashboardPage', () => {
     expect(within(clipSteps).getByRole('button', { name: '1 添加视频' })).toHaveAttribute('aria-current', 'step');
     expect(within(clipSteps).getByRole('button', { name: '2 切片设置' })).toBeDisabled();
     expect(within(clipSteps).getByRole('button', { name: '3 切片结果' })).toBeDisabled();
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=long-video' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '下一步：切片设置' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '下一步：切片设置' }));
     expect(screen.getByRole('heading', { name: '设置切片目标' })).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: '切片数量' })).toHaveValue(3);
     expect(screen.getByRole('combobox', { name: '输出画幅' })).toHaveValue('source');
@@ -1318,10 +1286,9 @@ describe('DashboardPage', () => {
   it('edits and saves generated subtitles without leaving the result workspace', async () => {
     render(<DashboardPage onSelectPrompt={vi.fn()} />);
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=test' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     await startVideoTranslation();
 
@@ -1346,10 +1313,9 @@ describe('DashboardPage', () => {
   it('requires confirmation before subtitle changes create a new output version', async () => {
     render(<DashboardPage onSelectPrompt={vi.fn()} />);
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=test' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     await startVideoTranslation();
 
@@ -1376,10 +1342,9 @@ describe('DashboardPage', () => {
   it('saves manual subtitle edits while generating a new version', async () => {
     render(<DashboardPage onSelectPrompt={vi.fn()} />);
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=test' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     await startVideoTranslation();
 
@@ -1412,10 +1377,9 @@ describe('DashboardPage', () => {
     });
     const rendered = render(<DashboardPage onSelectPrompt={vi.fn()} />);
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=test' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     await startVideoTranslation();
 
@@ -1437,7 +1401,8 @@ describe('DashboardPage', () => {
       'src',
       'blob:video-translation-dubbing'
     );
-    expect(createObjectURL).toHaveBeenCalledOnce();
+    // v2.2 — upload tệp cục bộ cũng tạo blob preview ở bước 1, nên chỉ chờ "đã gọi"
+    expect(createObjectURL).toHaveBeenCalled();
 
     rendered.unmount();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:video-translation-dubbing');
@@ -1446,10 +1411,9 @@ describe('DashboardPage', () => {
   it('returns to settings and creates a new version without replacing the old one', async () => {
     render(<DashboardPage onSelectPrompt={vi.fn()} />);
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=test' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     await startVideoTranslation();
 
@@ -1460,24 +1424,17 @@ describe('DashboardPage', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '添加视频' }));
     fireEvent.click(screen.getByRole('button', { name: '清除当前视频来源' }));
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=draft-source' }
-    });
-
+    const replacedVideo = new File(['fake video b'], 'translation-2.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [replacedVideo] } });
     expect(screen.getByText('正在基于 V1 调整')).toBeInTheDocument();
     expect(screen.getByText('原成品已保留，当前修改为配置草稿')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '返回 V1 成品' }));
     expect(screen.getByText('项目 V1')).toBeInTheDocument();
-    expect(screen.getByText('https://www.youtube.com/watch?v=test')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: '任务设置' }));
     fireEvent.click(screen.getByRole('button', { name: '调整设置' }));
     expect(screen.getByRole('combobox', { name: '翻译为' })).toHaveValue('ja');
     fireEvent.click(screen.getByRole('button', { name: '添加视频' }));
-    expect(screen.getByRole('img', { name: 'YouTube 视频缩略图' })).toHaveAttribute(
-      'src',
-      'https://i.ytimg.com/vi/draft-source/hqdefault.jpg'
-    );
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     expect(screen.getByRole('combobox', { name: '翻译为' })).toHaveValue('ja');
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
@@ -1520,10 +1477,9 @@ describe('DashboardPage', () => {
       />
     );
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=reuse-subtitles' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('switch', { name: '合成字幕视频' }));
     await startVideoTranslation();
@@ -1556,48 +1512,6 @@ describe('DashboardPage', () => {
       .toBeInTheDocument();
   });
 
-  it('does not bind a changed URL source to the selected version input artifacts', async () => {
-    const baseService = createInMemoryCreatorService();
-    const applyAction = vi.fn(baseService.applyAction.bind(baseService));
-    render(
-      <DashboardPage
-        onSelectPrompt={vi.fn()}
-        creatorService={{ ...baseService, applyAction } as CreatorWebService}
-      />
-    );
-    openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=source-v1' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    await startVideoTranslation();
-
-    fireEvent.click(screen.getByRole('tab', { name: '任务设置' }));
-    fireEvent.click(screen.getByRole('button', { name: '调整设置' }));
-    fireEvent.click(screen.getByRole('button', { name: '添加视频' }));
-    fireEvent.click(screen.getByRole('button', { name: '清除当前视频来源' }));
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=source-v2' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    fireEvent.click(screen.getByRole('button', { name: '生成 V2' }));
-
-    await waitFor(() => {
-      const regeneration = applyAction.mock.calls.find(([, request]) => (
-        request.action === 'run-stage'
-        && request.input.stageId === 'subtitle'
-        && request.input.baseResultVersion === 1
-      ));
-      expect(regeneration?.[1].input).toEqual({
-        stageId: 'subtitle',
-        workflow: true,
-        baseResultVersion: 1
-      });
-    });
-  });
-
   it('commits a new version when output is disabled without rerunning a stage', async () => {
     const baseService = createInMemoryCreatorService();
     const applyAction = vi.fn(baseService.applyAction.bind(baseService));
@@ -1608,10 +1522,9 @@ describe('DashboardPage', () => {
       />
     );
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=settings-only' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     await startVideoTranslation();
 
@@ -1644,10 +1557,9 @@ describe('DashboardPage', () => {
       />
     );
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=single-version' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     await startVideoTranslation();
 
@@ -1734,15 +1646,11 @@ describe('DashboardPage', () => {
     openBlankWorkspace('视频翻译', '空白视频翻译');
 
     const video = new File(['video'], 'demo.mp4', { type: 'video/mp4' });
-    fireEvent.click(screen.getByRole('tab', { name: '打开本地已有视频' }));
     fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [video] } });
     expect(screen.getByText('本地视频 · 1 KB')).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '视频链接' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '清除当前视频来源' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '清除当前视频来源' }));
-    fireEvent.click(screen.getByRole('tab', { name: '选择最近下载的视频' }));
-    expect(screen.getByRole('textbox', { name: '视频链接' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '打开本地已有视频' }));
     fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [video] } });
     expect(within(screen.getByRole('region', { name: '视频预览' })).getByText('demo.mp4'))
       .toBeInTheDocument();
@@ -1774,7 +1682,6 @@ describe('DashboardPage', () => {
     openBlankWorkspace('视频翻译', '空白视频翻译');
 
     const video = new File(['video'], 'portrait.mp4', { type: 'video/mp4' });
-    fireEvent.click(screen.getByRole('tab', { name: '打开本地已有视频' }));
     fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [video] } });
     const preview = await screen.findByLabelText('本地视频预览');
     Object.defineProperties(preview, {
@@ -1799,7 +1706,7 @@ describe('DashboardPage', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('请先添加需要翻译的视频');
     expect(screen.getByRole('alert').parentElement).toHaveClass('video-translation-action-group');
-    expect(screen.getByRole('tab', { name: '选择最近下载的视频' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('上传本地视频')).toBeInTheDocument();
   });
 
   it('delegates translation changes to the Creator Agent without local command parsing', async () => {
@@ -1815,10 +1722,9 @@ describe('DashboardPage', () => {
       />
     );
     openBlankWorkspace('视频翻译', '空白视频翻译');
-    fireEvent.change(screen.getByRole('textbox', { name: '视频链接' }), {
-      target: { value: 'https://www.youtube.com/watch?v=test' }
-    });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const videoFile = new File(['fake video'], 'translation.mp4', { type: 'video/mp4' });
+    fireEvent.change(screen.getByLabelText('上传本地视频'), { target: { files: [videoFile] } });
+fireEvent.click(screen.getByRole('button', { name: '继续' }));
 
     const composer = screen.getByRole('textbox', { name: '告诉 Agent 你的要求' });
     fireEvent.change(composer, { target: { value: '目标语言改成日语' } });

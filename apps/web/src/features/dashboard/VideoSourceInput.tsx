@@ -1,12 +1,10 @@
 import { useRef, useState, type DragEvent } from 'react';
-import { Film, Link2, UploadCloud } from 'lucide-react';
+import { Link2, UploadCloud } from 'lucide-react';
 import { useLocalizedCopy } from '../../i18n/useLocalizedCopy.js';
 import type { VideoMetadataResponse } from '@opencreator/protocol';
 import type { VideoMetadataService } from '../../services/video-metadata-service.js';
 import VideoSourcePreview, { type SourcePlaybackPreview } from './VideoSourcePreview.js';
 import SupportedVideoSources from './SupportedVideoSources.js';
-
-type SourceMode = 'url' | 'file';
 
 /** Video đã tải về máy (hàng đợi Hồng Quả) để chọn lại nhanh. */
 export type RecentDownloadedVideo = {
@@ -28,9 +26,9 @@ export default function VideoSourceInput(props: {
   invalid?: boolean;
   showSupportedPlatforms?: boolean;
   /**
-   * Renders an explicit two-choice source selector (download a new video vs.
-   * open an existing file) and shows a single input at a time. Enabled only on
-   * the Translate & Dub page so the other workspaces keep the combined input.
+   * Render the dedicated file-only source card on the Translate & Dub page.
+   * The old "recent downloads" tab and link input were removed (v2.2); other
+   * workspaces omit this flag and keep the combined URL input.
    */
   showSourceMode?: boolean;
   /** Video vừa tải xong trong hàng đợi tải; hiển thị để chọn nhanh. */
@@ -50,7 +48,6 @@ export default function VideoSourceInput(props: {
   const l = useLocalizedCopy();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [mode, setMode] = useState<SourceMode>('url');
 
   function openFilePicker() {
     if (!fileInputRef.current) return;
@@ -64,9 +61,10 @@ export default function VideoSourceInput(props: {
     props.onFileChange(event.dataTransfer.files[0] ?? null);
   }
 
-  const showDropzone = props.hasSource || props.showSourceMode !== true || mode === 'file';
-  const showUrlField = !props.hasSource && (props.showSourceMode !== true || mode === 'url');
-  const showSourceModes = props.showSourceMode === true && !props.hasSource;
+  // v2.2 — "Dịch video" (showSourceMode) chỉ còn chọn tệp trên máy: dropzone luôn
+  // hiển thị, không còn tab "chọn video mới tải gần nhất" và ô dán link.
+  const showDropzone = true;
+  const showUrlField = !props.hasSource && props.showSourceMode !== true;
 
   return (
     <section
@@ -74,35 +72,6 @@ export default function VideoSourceInput(props: {
       aria-label={props.hasSource ? l('视频预览', 'Video preview') : undefined}
       aria-labelledby={!props.hasSource && showDropzone ? 'add-video-title' : undefined}
     >
-      {showSourceModes ? (
-        <div
-          className="video-translation-source-modes"
-          role="tablist"
-          aria-label={l('视频来源', 'Video source')}
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'url'}
-            className={mode === 'url' ? 'is-active' : undefined}
-            onClick={() => setMode('url')}
-          >
-            <Link2 size={16} strokeWidth={1.7} aria-hidden="true" />
-            {l('选择最近下载的视频', 'Choose the most recently downloaded video')}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'file'}
-            className={mode === 'file' ? 'is-active' : undefined}
-            onClick={() => setMode('file')}
-          >
-            <UploadCloud size={16} strokeWidth={1.7} aria-hidden="true" />
-            {l('打开本地已有视频', 'Open an existing video file')}
-          </button>
-        </div>
-      ) : null}
-
       {showDropzone ? (
         <div
           className={props.hasSource ? 'video-translation-preview-drop-target' : 'video-translation-dropzone'}
@@ -153,36 +122,6 @@ export default function VideoSourceInput(props: {
 
       {showUrlField ? (
         <>
-          {props.showSourceMode === true && mode === 'url' ? (
-            <div className="video-translation-recent" aria-label={l('最近下载的视频', 'Recently downloaded videos')}>
-              <p className="video-translation-recent-title">
-                {l('最近下载的视频', 'Recently downloaded videos')}
-              </p>
-              {(props.recentVideos ?? []).length === 0 ? (
-                <p className="video-translation-recent-empty">
-                  {props.recentLoading === true
-                    ? l('正在读取...', 'Loading...')
-                    : l('还没有已下载的视频，可粘贴链接下载新视频。', 'No downloaded videos yet — paste a link to download a new one.')}
-                </p>
-              ) : (
-                <ul className="video-translation-recent-list">
-                  {(props.recentVideos ?? []).map(item => (
-                    <li key={item.path}>
-                      <button type="button" onClick={() => props.onSelectRecent?.(item)}>
-                        {item.cover !== undefined && item.cover !== ''
-                          ? <img src={item.cover} alt="" loading="lazy" />
-                          : <span className="video-translation-recent-ph" aria-hidden="true"><Film size={14} /></span>}
-                        <span>
-                          <strong>{item.title}</strong>
-                          <small title={item.path}>{item.path}</small>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ) : null}
           <label className="video-translation-field video-translation-url-field">
             <span>{l('视频链接', 'Video link')}</span>
             <div>

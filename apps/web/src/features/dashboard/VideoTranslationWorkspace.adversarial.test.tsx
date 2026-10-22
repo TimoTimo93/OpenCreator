@@ -46,13 +46,13 @@ describe('VideoTranslationWorkspace Adversarial & Empirical Stress Suite (Milest
       </LanguageProvider>
     );
 
-    // Initial step is Step 0: two explicit source choices, link input shown first
-    expect(screen.getByRole('tab', { name: '选择最近下载的视频' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByLabelText('视频链接')).toBeInTheDocument();
+    // Initial step is Step 0: chỉ còn thẻ chọn tệp trên máy (v2.2)
+    expect(screen.getByLabelText('上传本地视频')).toBeInTheDocument();
+    expect(screen.queryByLabelText('视频链接')).not.toBeInTheDocument();
 
-    // Input URL to advance through wizard
-    fireEvent.change(screen.getByLabelText('视频链接'), {
-      target: { value: 'https://www.youtube.com/watch?v=adv_empty_1' },
+    // Upload a local file to advance through wizard
+    fireEvent.change(screen.getByLabelText('上传本地视频'), {
+      target: { files: [new File(['fake video data'], 'adv-test.mp4', { type: 'video/mp4' })] },
     });
 
     // Advance to Step 1: 翻译设置
@@ -85,7 +85,7 @@ describe('VideoTranslationWorkspace Adversarial & Empirical Stress Suite (Milest
   // =========================================================================
   // 2. Stress Test Source Switching
   // =========================================================================
-  it('adversarial test 2: switching sources (URL -> File -> New URL -> Replacement File) retains defaults and customizations without clobbering', () => {
+  it('adversarial test 2: switching sources (File -> Replacement File -> New File -> Second Replacement) retains defaults and customizations without clobbering', () => {
     const freshJob: CreatorJob = {
       id: 'job_adv_switch',
       projectId: 'project_adv',
@@ -115,9 +115,9 @@ describe('VideoTranslationWorkspace Adversarial & Empirical Stress Suite (Milest
       </LanguageProvider>
     );
 
-    // Step 0: Input URL
-    fireEvent.change(screen.getByLabelText('视频链接'), {
-      target: { value: 'https://www.youtube.com/watch?v=initial_url' },
+    // Step 0: upload an initial local file
+    fireEvent.change(screen.getByLabelText('上传本地视频'), {
+      target: { files: [new File(['dummy binary 0'], 'clip0.mp4', { type: 'video/mp4' })] },
     });
 
     // Step 1: Customize to non-defaults
@@ -153,13 +153,11 @@ describe('VideoTranslationWorkspace Adversarial & Empirical Stress Suite (Milest
     expect(screen.getByLabelText('字幕字重')).toHaveValue('bold');
     expect(screen.getByLabelText('字幕大小')).toHaveValue('large');
 
-    // Return to Step 0: clear the current file source and switch back to a new URL
+    // Return to Step 0: clear the current file source and upload a different file
     fireEvent.click(screen.getByRole('button', { name: /添加视频/ }));
     fireEvent.click(screen.getByRole('button', { name: '清除当前视频来源' }));
-
-    // Now URL input is visible again
-    fireEvent.change(screen.getByLabelText('视频链接'), {
-      target: { value: 'https://www.youtube.com/watch?v=second_url' },
+    fireEvent.change(screen.getByLabelText('上传本地视频'), {
+      target: { files: [new File(['dummy binary url'], 'clip-url.mp4', { type: 'video/mp4' })] },
     });
 
     // Navigate to Step 1 & 2: verify custom settings remain intact across file-to-url transition
