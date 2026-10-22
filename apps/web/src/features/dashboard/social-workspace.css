@@ -303,7 +303,10 @@
    COMPOSER — 2 cột 50/50, cuộn khi thiếu chỗ
    -------------------------------------------------------------------------- */
 .social-composer-cols {
-  flex: 1; min-height: 0;
+  /* Lấy chiều cao theo nội dung (không chia đều với lịch) nhưng vẫn co khi thiếu chỗ;
+     cột trái có phần neo cứng nên nút submit luôn hiển thị dù bị co. */
+  flex: 0 1 auto;
+  min-height: 0;
   /* Grid 1fr/1fr thay vì width:50% + gap (vượt 100% → cột phải bị tràn/cắt). */
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px;
   overflow: hidden;
@@ -312,9 +315,9 @@
 .composer-col > * { flex-shrink: 0; min-width: 0; }
 .social-composer-col {
   width: auto; min-width: 0; min-height: 0;
-  display: flex; flex-direction: column; gap: 10px;
+  display: flex; flex-direction: column; gap: 8px;
   background: #14141f; border: 1px solid #334155; border-radius: 6px;
-  padding: 12px;
+  padding: 10px 12px;
 }
 .social-composer-sec-title {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -715,3 +718,64 @@
   padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; font-size: 11px;
 }
 .social-trend-card-name { color: #4d94ff; font-weight: 700; }
+
+/* --------------------------------------------------------------------------
+   REDESIGN — tab 2 & 3
+   Hàng composer gọn 1 dòng khi đóng thư viện video
+   -------------------------------------------------------------------------- */
+.social-composer-media-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.social-composer-media-row > .social-btn { flex-shrink: 0; }
+
+/* JobChip lịch: lỗi MỘT PHẦN → nền THƯỜNG (đè nền đỏ của nền tảng YouTube),
+   viền gạch chấm + đếm nhỏ; chỉ khi TẤT CẢ nền tảng bật failed mới nền đỏ. */
+.social-cal-chip-state-partial {
+  background: #334155;
+  outline: 1px dashed rgb(244 63 94 / 45%);
+}
+.social-cal-chip-err { font-size: 9.5px; font-weight: 700; color: #fda4af; margin-left: 5px; white-space: nowrap; }
+
+/* --------------------------------------------------------------------------
+   Tab 3 — toolbar 2 hàng: hàng tổng quan (chip lọc) + hàng nạp bài
+   -------------------------------------------------------------------------- */
+.social-queue-toolbar-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.social-queue-toolbar-row .social-label { margin-bottom: 0; }
+.social-queue-toolbar-row .social-retry-all { margin-left: auto; }
+
+/* Chip lọc theo trạng thái job — dùng biến màu theme hiện có */
+.social-filter-chips { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; min-width: 0; }
+.social-filter-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #262639; border: 1px solid #334155; border-radius: 999px;
+  color: #a6adc8; font-size: 11px; font-weight: 600;
+  padding: 4px 10px; cursor: pointer; white-space: nowrap;
+}
+.social-filter-chip:hover { border-color: #3b82f6; color: #e2e8f0; }
+.social-filter-chip b { font-weight: 700; color: inherit; }
+.social-filter-chip-active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+.social-filter-chip-active:hover { background: #3b82f6; color: #fff; }
+
+/* Dòng đếm tổng quan ngay trên bảng job */
+.social-queue-count { font-size: 11px; color: #94a3b8; flex-shrink: 0; padding-bottom: 2px; }
+
+/* --------------------------------------------------------------------------
+   Tab 2 — composer nén: phần đầu cuộn, phần giờ/cụm/nút submit neo đáy cột
+   -------------------------------------------------------------------------- */
+.composer-anchored { display: flex; flex-direction: column; overflow: hidden; }
+.composer-anchored-scroll {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto;
+  /* Scrollbar THIN luôn hiện rõ khi thiếu chỗ (Chromium + Firefox) */
+  scrollbar-width: thin;
+  scrollbar-color: #45475a #26263a;
+}
+.composer-anchored-fixed { flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
+/* Thời điểm đăng | Cụm kênh đăng — 2 cột 1 hàng thay vì 2 hàng dọc */
+.social-composer-schedule-grid {
+  display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 3px 10px; align-items: start;
+}
+.social-composer-schedule-grid input[type='datetime-local'] { width: 100%; }
+.social-composer-schedule-grid .soc-dd-wrap { min-width: 0; }
+/* Hàng submit riêng 1 dòng, nút chính to rõ, đẩy sát phải */
+.social-composer-submit-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.social-btn-submit { padding: 8px 16px; font-size: 12.5px; flex-shrink: 0; }

@@ -59,6 +59,17 @@ type PlatformName = 'youtube' | 'tiktok' | 'facebook';
 
 const PLATFORMS: PlatformName[] = ['youtube', 'tiktok', 'facebook'];
 
+/** Lọc nhanh trạng thái job (tab Hàng Đợi) — "pending" gộp cả scheduled. */
+type StatusFilterId = 'all' | 'failed' | 'running' | 'pending' | 'published';
+
+const STATUS_FILTER_DEFS: Array<{ id: StatusFilterId; label: string }> = [
+  { id: 'all', label: 'Tất cả' },
+  { id: 'failed', label: 'Lỗi' },
+  { id: 'running', label: 'Đang chạy' },
+  { id: 'pending', label: 'Chờ' },
+  { id: 'published', label: 'Đã đăng' }
+];
+
 type TabId = 'channels' | 'calendar' | 'queue' | 'stats' | 'comments';
 
 const PLATFORM_ICONS: Record<PlatformName, LucideIcon> = {
@@ -457,13 +468,7 @@ export default function SocialWorkspace(props: {
           ) : null}
           {activeTab === 'calendar' ? (
             <>
-              <CalendarPanel
-                jobs={jobs}
-                t={t}
-                onReschedule={(job, iso) => void reschedule(job, iso)}
-                onRemove={job => void action(t('dashboard.social.jobRemoved'), () => service.removeJob(job.id))}
-                onRetry={job => void action(t('dashboard.social.retried'), () => service.retryFailedPlatforms(job.id))}
-              />
+              {/* Composer đặt TRÊN lịch: đủ chỗ cho nút "Xếp Lịch Đăng" trên màn 1080p không cần cuộn. */}
               <ComposerBlock
                 clusters={clusters}
                 service={service}
@@ -473,6 +478,13 @@ export default function SocialWorkspace(props: {
                 t={t}
                 onClose={() => { setHandoffPath(''); }}
                 onEnqueue={items => enqueueFromComposer(items)}
+              />
+              <CalendarPanel
+                jobs={jobs}
+                t={t}
+                onReschedule={(job, iso) => void reschedule(job, iso)}
+                onRemove={job => void action(t('dashboard.social.jobRemoved'), () => service.removeJob(job.id))}
+                onRetry={job => void action(t('dashboard.social.retried'), () => service.retryFailedPlatforms(job.id))}
               />
             </>
           ) : null}
@@ -595,6 +607,11 @@ export default function SocialWorkspace(props: {
 
 function shortJobId(id: string): string {
   return id.length <= 8 ? id : id.slice(0, 8);
+}
+
+/** 6 ký tự ĐUÔI id — hiển thị trong bảng hàng đợi & tiêu đề Soi Lỗi (phân biệt được giữa các job). */
+function tailJobId(id: string): string {
+  return id.length <= 6 ? id : id.slice(-6);
 }
 
 /** Chip trạng thái nền tảng EN caps như demo (SCHEDULED / PENDING / UPLOADING…). */
@@ -1085,11 +1102,16 @@ function JobChip(props: { job: SocialJobSummary; t: Translate; onClick(): void }
   const activePlatforms = PLATFORMS.filter(platform => job.platforms[platform].status !== 'skipped');
   const primary = activePlatforms.includes('youtube') ? 'youtube' : activePlatforms.includes('tiktok') ? 'tiktok' : 'facebook';
   const statuses = activePlatforms.map(platform => job.platforms[platform].status);
+  const failedCount = statuses.filter(status => status === 'failed').length;
+  // Đỏ CHỈ khi tất cả nền tảng bật đều failed; lỗi một phần → nền thường + đếm nhỏ.
+  const allFailed = statuses.length > 0 && failedCount === statuses.length;
   const state = statuses.every(status => status === 'published')
     ? 'done'
-    : statuses.includes('failed')
+    : allFailed
       ? 'failed'
-      : 'sched';
+      : failedCount > 0
+        ? 'partial'
+        : 'sched';
   return (
     <button
       type="button"
@@ -1111,6 +1133,7 @@ function JobChip(props: { job: SocialJobSummary; t: Translate; onClick(): void }
           </span>
         ))}
       </span>
+      {state === 'partial' ? <span className="social-cal-chip-err">{failedCount} lỗi</span> : null}
     </button>
   );
 }
@@ -1209,9 +1232,47 @@ function QueuePanel(props: {
   const selectedJob = props.jobs.find(job => job.id === props.selectedJobId) ?? null;
   const failedJobs = props.jobs.filter(job => jobKind(job) === 'failed');
   const [clusterFilter, setClusterFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilterId>('all');
   const [manualTitle, setManualTitle] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const visibleJobs = clusterFilter === '' ? props.jobs : props.jobs.filter(job => job.clusterId === clusterFilter);
+
+  // Đếm job theo nhóm trạng thái (hiện trên chip lọc nhanh).
+  const statusCounts = useMemo(() => {
+    let failed = 0;
+    let running = 0;
+    let pending = 0;
+    let published = 0;
+    for (const job of props.jobs) {
+      const kind = jobKind(job);
+      if (kind === 'failed') failed += 1;
+      else if (kind === 'running') running += 1;
+      else if (kind === 'pending' || kind === 'scheduled') pending += 1;
+      else if (kind === 'ok') published += 1;
+    }
+    return { failed, running, pending, published };
+  }, [props.jobs]);
+
+  /** Chip "Chờ" gộp pending + scheduled (đều chưa đăng xong). */
+  function matchesStatusFilter(job: SocialJobSummary): boolean {
+    const kind = jobKind(job);
+    switch (statusFilter) {
+      case 'failed': return kind === 'failed';
+      case 'running': return kind === 'running';
+      case 'pending': return kind === 'pending' || kind === 'scheduled';
+      case 'published': return kind === 'ok';
+      default: return true;
+    }
+  }
+
+  // Kết hợp lọc nhóm + lọc trạng thái.
+  const visibleJobs = props.jobs.filter(job =>
+    (clusterFilter === '' || job.clusterId === clusterFilter) && matchesStatusFilter(job)
+  );
+  const visibleFailedCount = visibleJobs.filter(job => jobKind(job) === 'failed').length;
+  const visiblePendingCount = visibleJobs.filter(job => {
+    const kind = jobKind(job);
+    return kind === 'pending' || kind === 'scheduled';
+  }).length;
 
   function enqueueFiles(files: File[]): void {
     const cluster = clusterFilter === ''
@@ -1248,10 +1309,44 @@ function QueuePanel(props: {
   }
   return (
     <div className="social-queue">
-      <div className="social-inline-row">
+      {/* Hàng 1 — tổng quan: trạng thái hàng đợi + chip lọc theo trạng thái + Retry All đẩy phải */}
+      <div className="social-queue-toolbar-row">
         <span className={`social-queue-state social-queue-state-${props.queueRunning ? 'running' : 'paused'}`}>
           {props.queueRunning ? t('dashboard.social.queueRunning') : t('dashboard.social.queuePaused')}
         </span>
+        <div className="social-filter-chips" role="group" aria-label="Lọc trạng thái job">
+          {STATUS_FILTER_DEFS.map(def => {
+            const total = def.id === 'all'
+              ? props.jobs.length
+              : def.id === 'failed'
+                ? statusCounts.failed
+                : def.id === 'running'
+                  ? statusCounts.running
+                  : def.id === 'pending'
+                    ? statusCounts.pending
+                    : statusCounts.published;
+            const active = statusFilter === def.id;
+            return (
+              <button
+                key={def.id}
+                type="button"
+                aria-pressed={active}
+                className={`social-filter-chip${active ? ' social-filter-chip-active' : ''}`}
+                onClick={() => setStatusFilter(def.id)}
+              >
+                {def.label} <b>{total}</b>
+              </button>
+            );
+          })}
+        </div>
+        {failedJobs.length > 0 ? (
+          <button type="button" className="social-btn social-btn-amber social-retry-all" onClick={retryAllFailed}>
+            🔄 Đặt Lại Job Lỗi (Retry All)
+          </button>
+        ) : null}
+      </div>
+      {/* Hàng 2 — nạp bài nhanh: nhóm + tiêu đề tập + chọn file + Excel */}
+      <div className="social-queue-toolbar-row">
         <span className="social-label" style={{ margin: 0, flexShrink: 0 }}>Nhóm:</span>
         <select
           className="social-queue-cluster"
@@ -1299,14 +1394,13 @@ function QueuePanel(props: {
           onEnqueueMany={props.onEnqueueMany}
           onError={message => props.onError(message)}
         />
-        {failedJobs.length > 0 ? (
-          <button type="button" className="social-btn social-btn-amber" onClick={retryAllFailed}>
-            🔄 Đặt Lại Job Lỗi (Retry All)
-          </button>
-        ) : null}
       </div>
       <div className="social-queue-cols">
         <div className="social-queue-table">
+          {/* Dòng đếm tổng quan ngay trên bảng job */}
+          <div className="social-queue-count">
+            {visibleJobs.length} jobs · {visibleFailedCount} lỗi · {visiblePendingCount} chờ
+          </div>
           {visibleJobs.length === 0 ? (
             <p className="social-empty">{t('dashboard.social.noJobs')}</p>
           ) : (
@@ -1321,6 +1415,7 @@ function QueuePanel(props: {
                     <th>YouTube</th>
                     <th>TikTok</th>
                     <th>Facebook</th>
+                    <th style={{ textAlign: 'center' }}>Thao Tác</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1333,7 +1428,7 @@ function QueuePanel(props: {
                         className={`social-queue-selectable${selected ? ' social-queue-selected' : ''}${failed ? ' social-queue-row-failed' : ''}`}
                         onClick={() => props.onSelectJob(job.id)}
                       >
-                        <td className="social-cell-mono">#{shortJobId(job.id)}</td>
+                        <td className="social-cell-mono">#{tailJobId(job.id)}</td>
                         <td className="social-cell-name">{job.clusterName}</td>
                         <td className="social-cell-mono" title={job.videoPath}>
                           {job.title !== '' ? job.title : fileNameOf(job.videoPath)}
@@ -1349,6 +1444,35 @@ function QueuePanel(props: {
                             </td>
                           );
                         })}
+                        {/* Cột Thao Tác: retry chỉ khi job lỗi + xóa mọi hàng */}
+                        <td>
+                          <div className="social-actions-cell">
+                            {failed ? (
+                              <button
+                                type="button"
+                                className="social-btn social-btn-sm"
+                                title="Chạy lại các nền tảng lỗi của job này"
+                                onClick={event => {
+                                  event.stopPropagation();
+                                  props.onRetry(job);
+                                }}
+                              >
+                                🔄 Retry
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="social-btn social-btn-sm social-btn-danger"
+                              title="Xóa job khỏi hàng đợi"
+                              onClick={event => {
+                                event.stopPropagation();
+                                props.onRemove(job);
+                              }}
+                            >
+                              🗑
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -1418,7 +1542,7 @@ function ErrorInspector(props: {
   return (
     <div className="social-err-panel">
       <div className="social-err-head">
-        <span className="social-err-title">🔍 Trình Soi Lỗi & Ảnh Chụp (Job #{shortJobId(job.id)})</span>
+        <span className="social-err-title">🔍 Trình Soi Lỗi & Ảnh Chụp (Job #{tailJobId(job.id)})</span>
         <div style={{ display: 'flex', gap: 6 }}>
           {failedPlatforms.length > 0 ? (
             <button type="button" className="social-btn social-btn-danger social-btn-sm" onClick={props.onRetry}>
@@ -1450,10 +1574,13 @@ function ErrorInspector(props: {
         📸 Ảnh chụp màn hình trong trình duyệt của nhóm vào lúc gặp lỗi:
       </span>
       <div className="social-err-shot-frame">
-        <div className="social-err-shot-bar">
-          <span className="social-err-shot-domain">{firstFailedDomain(failedPlatforms)}</span>
-          <span className="social-err-shot-badge">DOM Changed / Popup Blocked</span>
-        </div>
+        {/* Thanh domain + badge chỉ hiện khi CÓ ảnh chụp; không ảnh → chỉ placeholder. */}
+        {shotUrl !== null ? (
+          <div className="social-err-shot-bar">
+            <span className="social-err-shot-domain">{firstFailedDomain(failedPlatforms)}</span>
+            <span className="social-err-shot-badge">DOM Changed / Popup Blocked</span>
+          </div>
+        ) : null}
         {shotUrl !== null
           ? <img src={shotUrl} alt={`ảnh chụp lỗi job ${shortJobId(job.id)}`} onLoad={event => { const el = event.currentTarget; const w = Math.max(1, Math.round(el.naturalWidth || el.clientWidth)); const h = Math.max(1, Math.round(el.naturalHeight || el.clientHeight)); setShotResolution(`${w}x${h}`); }} />
           : (
@@ -1491,11 +1618,6 @@ function ErrorInspector(props: {
           </div>
         </div>
       </details>
-      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-        <button type="button" className="social-btn social-btn-danger social-btn-sm" onClick={props.onRemove}>
-          <Trash2 size={12} aria-hidden="true" /> {t('dashboard.social.remove')}
-        </button>
-      </div>
     </div>
   );
 }
@@ -1728,7 +1850,10 @@ function ComposerBlock(props: {
 
   return (
     <div className="social-composer-cols">
-      <div className="social-composer-col composer-col">
+      {/* Cột trái nén: phần đầu cuộn nội bộ, hàng giờ/cụm kênh + nút submit NEO DƯỚI đáy cột
+          → "📤 Xếp Lịch Đăng" luôn thấy trong khung đầu tiên ở 1080p (125%) mà không cuộn. */}
+      <div className="social-composer-col composer-col composer-anchored">
+        <div className="composer-anchored-scroll">
         <div className="social-composer-sec-title">
           <span>🧾 Composer</span>
           <button
@@ -1744,15 +1869,27 @@ function ComposerBlock(props: {
         {downloadsError !== '' ? <p className="social-warn-text">{downloadsError}</p> : null}
         {translatedError !== '' ? <p className="social-warn-text">{translatedError}</p> : null}
         {!libraryOpen ? (
-          <div className="social-media-grid">
-            {mergedMedia.slice(0, 2).map(entry => mediaTile(entry))}
+          /* Hàng gọn 1 dòng: nút mở thư viện + tên video đang chọn + mở thư mục Explorer. */
+          <div className="social-composer-media-row">
             <button
               type="button"
-              className="social-media-card social-media-card-search"
+              className="social-btn social-btn-primary social-btn-sm"
               aria-expanded={libraryOpen}
               onClick={() => setLibraryOpen(true)}
             >
-              <span>📂 Chọn video đã dịch xong</span>
+              📂 Chọn video đã dịch xong
+            </button>
+            <span className="social-media-name" style={{ flex: 1, minWidth: 0 }}>
+              {path.trim() === '' ? 'Chưa chọn video' : fileNameOf(path)}
+            </span>
+            <button
+              type="button"
+              className="social-btn social-btn-sm"
+              title="Mở thư mục chứa các video đã dịch xong (chờ đăng) bằng Windows Explorer"
+              disabled={translatedVideos === null || translatedVideos.length === 0}
+              onClick={openTranslatedFolder}
+            >
+              📁 Mở thư mục
             </button>
           </div>
         ) : (
@@ -1828,72 +1965,79 @@ function ComposerBlock(props: {
             onChange={event => setHashtags(event.target.value)}
           />
         </div>
-        <div className="social-inline-row">
-          <span className="social-label" style={{ margin: 0, flexShrink: 0 }}>{t('dashboard.social.scheduleAt')}:</span>
-          <input
-            type="datetime-local"
-            style={{ width: 168, flexShrink: 0 }}
-            value={schedule}
-            onChange={event => setSchedule(event.target.value)}
-          />
-          <span className="social-label" style={{ margin: 0, marginLeft: 4, flexShrink: 0 }}>{t('dashboard.social.composerClusters')}:</span>
-          <div className="soc-dd-wrap" ref={ddWrapRef} style={{ flex: 1, minWidth: 180 }}>
-            <button type="button" className="soc-dd-btn" onClick={toggleDropdown}>
-              <span className={`soc-dd-label${selectedClusters.length === 0 ? ' none' : ''}`}>{ddLabel()}</span>
-              <span style={{ color: '#94a3b8' }}>▾</span>
-            </button>
-            {ddOpen ? (
-              <div className={`soc-dd-panel ${ddUp ? 'dd-up' : 'dd-down'}`}>
-                {props.clusters.length === 0 ? <span className="soc-dd-item">{t('dashboard.social.noClusters')}</span> : null}
-                {props.clusters.map(cluster => {
-                  const label = cluster.seriesName !== '' ? cluster.seriesName : cluster.name;
-                  const selected = snapshot.has(cluster.id);
-                  return (
-                    <label key={cluster.id} className="soc-dd-item">
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        className={cluster.loginStatus.youtube === 'ok' ? 'accent-green' : undefined}
-                        onChange={() => {
-                          setSnapshot(current => {
-                            const next = new Set(current);
-                            if (next.has(cluster.id)) next.delete(cluster.id);
-                            else next.add(cluster.id);
-                            return next;
-                          });
-                        }}
-                        aria-label={label}
-                      />
-                      {label}
-                    </label>
-                  );
-                })}
+        </div>
+        {/* Phần neo cứng: giờ + cụm kênh 1 hàng 2 cột, nút submit hàng riêng — không bao giờ bị cắt đáy */}
+        <div className="composer-anchored-fixed">
+          <div className="social-composer-schedule-grid">
+            <div>
+              <span className="social-label">{t('dashboard.social.scheduleAt')}:</span>
+              <input
+                type="datetime-local"
+                value={schedule}
+                onChange={event => setSchedule(event.target.value)}
+              />
+            </div>
+            <div>
+              <span className="social-label" style={{ whiteSpace: 'nowrap' }}>{t('dashboard.social.composerClusters')}:</span>
+              <div className="soc-dd-wrap" ref={ddWrapRef}>
+                <button type="button" className="soc-dd-btn" onClick={toggleDropdown}>
+                  <span className={`soc-dd-label${selectedClusters.length === 0 ? ' none' : ''}`}>{ddLabel()}</span>
+                  <span style={{ color: '#94a3b8' }}>▾</span>
+                </button>
+                {ddOpen ? (
+                  <div className={`soc-dd-panel ${ddUp ? 'dd-up' : 'dd-down'}`}>
+                    {props.clusters.length === 0 ? <span className="soc-dd-item">{t('dashboard.social.noClusters')}</span> : null}
+                    {props.clusters.map(cluster => {
+                      const label = cluster.seriesName !== '' ? cluster.seriesName : cluster.name;
+                      const selected = snapshot.has(cluster.id);
+                      return (
+                        <label key={cluster.id} className="soc-dd-item">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            className={cluster.loginStatus.youtube === 'ok' ? 'accent-green' : undefined}
+                            onChange={() => {
+                              setSnapshot(current => {
+                                const next = new Set(current);
+                                if (next.has(cluster.id)) next.delete(cluster.id);
+                                else next.add(cluster.id);
+                                return next;
+                              });
+                            }}
+                            aria-label={label}
+                          />
+                          {label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+            </div>
           </div>
-          <button
-            type="button"
-            className="social-btn"
-            style={{ flexShrink: 0 }}
-            disabled={slotTimes.length === 0}
-            title={t('dashboard.social.composerUseSlot')}
-            onClick={() => {
-              const slot = nextGoldenSlot(slotTimes);
-              if (slot !== null) setSchedule(toDatetimeLocalValue(slot.toISOString()));
-            }}
-          >
-            Theo khung giờ nhóm
-          </button>
-          <button
-            type="button"
-            className="social-btn social-btn-primary"
-            style={{ flexShrink: 0 }}
-            disabled={!pathOk || !clustersOk || submitting}
-            onClick={submit}
-          >
-            {submitting ? <LoaderCircle size={13} className="social-spin" aria-hidden="true" /> : <Plus size={13} aria-hidden="true" />}
-            📤 Xếp Lịch Đăng
-          </button>
+          <div className="social-composer-submit-row">
+            <button
+              type="button"
+              className="social-btn"
+              disabled={slotTimes.length === 0}
+              title={t('dashboard.social.composerUseSlot')}
+              onClick={() => {
+                const slot = nextGoldenSlot(slotTimes);
+                if (slot !== null) setSchedule(toDatetimeLocalValue(slot.toISOString()));
+              }}
+            >
+              Theo khung giờ nhóm
+            </button>
+            <button
+              type="button"
+              className="social-btn social-btn-primary social-btn-submit"
+              disabled={!pathOk || !clustersOk || submitting}
+              onClick={submit}
+            >
+              {submitting ? <LoaderCircle size={13} className="social-spin" aria-hidden="true" /> : <Plus size={13} aria-hidden="true" />}
+              📤 Xếp Lịch Đăng
+            </button>
+          </div>
         </div>
       </div>
 

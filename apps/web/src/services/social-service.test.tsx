@@ -536,18 +536,20 @@ describe('SocialWorkspace — composer nguồn "Video đã dịch"', () => {
       </LanguageProvider>
     );
     fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
-    // Tile thư viện + trạng thái "✨ Đã dịch — chờ đăng" như demo
-    expect(await screen.findByRole('button', { name: /Chọn video đã dịch xong/ })).toBeInTheDocument();
+    // Hàng media gọn khi đóng thư viện: chỉ nút mở + tên video bật lên
+    const pickerButton = await screen.findByRole('button', { name: /Chọn video đã dịch xong/ });
+    expect(screen.queryByText('✨ Đã dịch — chờ đăng')).not.toBeInTheDocument();
+    // Mở thư viện: tile video đã dịch + trạng thái "✨ Đã dịch — chờ đăng" như demo
+    fireEvent.click(pickerButton);
     expect(await screen.findByText('✨ Đã dịch — chờ đăng')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /tap-1\.mp4/ }));
-    // Mở thư viện: có nút mở thư mục video đã dịch + tên file đã chọn (không còn ô dán link)
-    fireEvent.click(screen.getByRole('button', { name: /Chọn video đã dịch xong/ }));
+    // Thư viện mở: nút mở thư mục video đã dịch + tên file đã chọn (không còn ô dán link)
     expect(await screen.findByRole('button', { name: /Mở thư mục video đã dịch/ })).toBeInTheDocument();
     expect(screen.queryByLabelText('Vị trí video (MP4)')).not.toBeInTheDocument();
     expect(screen.getAllByText('tap-1.mp4').length).toBeGreaterThan(0);
   });
 
-  it('composer khi không có creatorService hiện tile thư viện + video tải về (không crash)', async () => {
+  it('composer khi không có creatorService hiện thư viện video tải về + hàng media gọn (không crash)', async () => {
     const { client } = fakeClient();
     render(
       <LanguageProvider initialPreference="vi-VN">
@@ -555,8 +557,10 @@ describe('SocialWorkspace — composer nguồn "Video đã dịch"', () => {
       </LanguageProvider>
     );
     fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
-    await screen.findByRole('button', { name: /Chọn video đã dịch xong/ });
+    const pickerButton = await screen.findByRole('button', { name: /Chọn video đã dịch xong/ });
     expect(screen.queryByText('✨ Đã dịch — chờ đăng')).not.toBeInTheDocument();
-    expect(screen.getByText('Tập 5')).toBeInTheDocument();
+    // Mở thư viện mới thấy tile video tải về (Tập 5)
+    fireEvent.click(pickerButton);
+    expect(await screen.findByText('Tập 5')).toBeInTheDocument();
   });
 });

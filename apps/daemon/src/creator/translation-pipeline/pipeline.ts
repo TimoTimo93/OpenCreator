@@ -7,6 +7,7 @@ import type { CreatorCommandDispatcher } from '../command-dispatcher.js';
 import { validateMediaFile, type MediaProbe } from '../validators/media.js';
 import { parseEpisodeIndex } from './episode-index.js';
 import { mergeVideoSegments, type SegmentSpec } from './merge.js';
+import { inferSeriesKeyFromTitle } from './series-inference.js';
 /**
  * Hàng đợi tự động dịch video (chạy tuần tự, 1 video/lượt):
  *
@@ -236,12 +237,36 @@ export function createTranslationPipelineService(
     // Cast mở rộng cho state cũ (chứa `merge` đơn) — migration về `merges[]`.
     const state = parsed as TranslationPipelineState & { merge?: TranslationPipelineMerge };
     return {
-      items: Array.isArray(state.items) ? state.items.filter(isEpisode) : [],
+      items: backfillSeriesKeys(Array.isArray(state.items) ? state.items.filter(isEpisode) : []),
       paused: state.paused === true,
       // Migration: state cũ có 1 `merge` duy nhất → thành nhóm seriesKey null;
       // state mới đọc mảng `merges` (mỗi bộ một mục).
       merges: normalizeMerges(state.merges, state.merge)
     };
+  }
+
+  /**
+   * v2.4 — bù seriesKey cho state cũ: mục nạp trước khi có suy tự động còn
+   * `seriesKey: null` ⇒ các tập phim (tiêu đề có thẻ 《...》) bị coi "lẻ" và
+   * tự nạp đăng TỪNG TẬP dù chưa ghép. Đọc lại state thì suy bù — CHỈ BÁM
+   * mục chưa từng nạp đăng (socialEnqueuedAt trống) để không nuôi giấu повед
+   * над nội dung đã đăng thành full movie trùng lặp.
+   */
+  function backfillSeriesKeys(items: PipelineEpisode[]): PipelineEpisode[] {
+    let patched = 0;
+    const result = items.map(item => {
+      if (item.seriesKey !== null) return item;
+      if (item.socialEnqueuedAt !== undefined && item.socialEnqueuedAt !== null
+        && item.socialEnqueuedAt !== '') return item;
+      const inferred = inferSeriesKeyFromTitle(item.title);
+      if (inferred === undefined) return item;
+      patched += 1;
+      return { ...item, seriesKey: inferred };
+    });
+    if (patched > 0) {
+      console.warn(`[translation-pipeline] bù seriesKey cho ${patched} mục cũ (tiêu đề thẻ 《》) — chờ ghép full trước khi tự nạp đăng`);
+    }
+    return result;
   }
 
   /** Ghi state nguyên tử: tmp + rename (bên trong chuỗi serialized). */
@@ -300,7 +325,12 @@ export function createTranslationPipelineService(
             : parseEpisodeIndex(request.title, baseName(request.path));
           const seriesKey = typeof request.seriesKey === 'string' && request.seriesKey.trim() !== ''
             ? request.seriesKey.trim()
-            : null;
+            // v2.4 — luồng nạp không truyền key: tự suy từ thẻ 《tên phim》 trong
+            // tiêu đề (hoặc tên file). Suy được ⇒ coi như "dịch cả bộ": chờ ghép
+            // full movie xong mới tự nạp đăng (chống đăng dư tung tập).
+            : (inferSeriesKeyFromTitle(request.title !== undefined && request.title !== ''
+              ? request.title
+              : baseName(request.path)) ?? null);
           touchedSeries.add(seriesKey);
           draft.items.push({
             id: randomUUID(),
@@ -612,9 +642,10 @@ export function createTranslationPipelineService(
     if (input.onEpisodeCompleted === undefined) return;
     const current = readState().items.find(candidate => candidate.id === episodeId);
     if (current === undefined) return;
-    // v2 "dịch cả bộ": mục batch KHÔNG tự nạp đăng tung tập (mỗi tập chỉ 1-2
-    // phút) — chờ ghép cả bộ xong, hook `onMerged` sẽ nạp full movie thay vào.
-    if (current.batchMode === true && current.seriesKey !== null) return;
+    // v2 "dịch cả bộ" + v2.4: MỌI mục thuộc một bộ (seriesKey !== null — tự nạp
+    // truyền key, nạp thủ công tự suy, hoặc bù từ state cũ) KHÔNG tự nạp đăng
+    // tung tập — chờ ghép cả bộ xong, hook `onMerged` nạp full movie thay vào.
+    if (current.seriesKey !== null) return;
     if (current.socialEnqueuedAt !== undefined && current.socialEnqueuedAt !== null
       && current.socialEnqueuedAt !== '') return;
     try {
@@ -632,8 +663,8 @@ export function createTranslationPipelineService(
     if (input.onEpisodeCompleted === undefined) return;
     for (const item of readState().items) {
       if (item.status !== 'completed' || item.outputVideoPath === null) continue;
-      // Mục batch đợi ghép xong mới nạp (khoan đăng tung tập).
-      if (item.batchMode === true && item.seriesKey !== null) continue;
+      // Mục thuộc bộ (seriesKey) đợi ghép xong mới nạp (khoan đăng tung tập).
+      if (item.seriesKey !== null) continue;
       if (item.socialEnqueuedAt !== undefined && item.socialEnqueuedAt !== null
         && item.socialEnqueuedAt !== '') continue;
       await afterEpisodeCompleted(item.id, {
@@ -741,6 +772,10 @@ export function createTranslationPipelineService(
     if (mergeRunning) return;
     const groups = groupBySeries(readState());
     for (const [seriesKey, group] of groups) {
+      // v2.4 — nhóm lẻ (seriesKey null) KHÔNG tự ghép: các video không liên quan
+      // sẽ bị trộn thành "Full Movie" rác (đã gặp ở state cũ). Video lẻ chỉ đi
+      // con đường nạp đăng tung tập / nạp thủ công.
+      if (seriesKey === null) continue;
       // Còn tập chờ/đang dịch trong NHÓM này → chưa ghép nhóm đó.
       if (group.some(item => item.status === 'queued' || item.status === 'running')) continue;
       const completed = group.filter(item =>

@@ -6,8 +6,10 @@
  * Dùng để sửa trạng thái cột nền tảng khi phiên đã đăng nhập từ trước
  * (tránh hiện "Chưa đăng nhập" + nút "Đăng nhập"/"Tạo tài khoản" khi đã có).
  */
-import { existsSync } from 'node:fs';
+import { copyFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 export type SocialSessionFlags = {
   youtube: boolean;
@@ -30,23 +32,41 @@ const PLATFORM_COOKIES: Record<'youtube' | 'tiktok' | 'facebook', string[]> = {
  * Đọc tên cookie của profile cụm. Trả về null nếu không đọc được (profile
  * đang bị Chrome khoá, hoặc không tồn tại) — khi đó caller giữ nguyên trạng thái.
  */
+function readCookieNames(file: string): Array<{ name: string }> | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Database = require('better-sqlite3') as new (path: string, options: { readonly: boolean }) => {
+      prepare: (sql: string) => { all: () => Array<{ name: string }> };
+      close: () => void;
+    };
+    const db = new Database(file, { readonly: true });
+    const rows = db.prepare('SELECT name FROM cookies').all() as Array<{ name: string }>;
+    db.close();
+    return rows;
+  } catch {
+    return null;
+  }
+}
+
 export function readProfileSessionFlags(profileDir: string): SocialSessionFlags | null {
   for (const relative of COOKIE_FILES) {
     const file = join(profileDir, relative);
     if (!existsSync(file)) continue;
-    let rows: Array<{ name: string }> = [];
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Database = require('better-sqlite3') as new (path: string, options: { readonly: boolean }) => {
-        prepare: (sql: string) => { all: () => Array<{ name: string }> };
-        close: () => void;
-      };
-      const db = new Database(file, { readonly: true });
-      rows = db.prepare('SELECT name FROM cookies').all();
-      db.close();
-    } catch {
-      continue;
+    // Lấy danh sách tên cookie: mở thẳng file readonly; Chrome đang chạy có thể
+    // khoá file → fall back copy ra thư mục temp rồi đọc bản copy.
+    let rows: Array<{ name: string }> | null = readCookieNames(file);
+    if (rows === null) {
+      const copyPath = join(tmpdir(), `oc-cookies-${randomUUID()}.sqlite`);
+      try {
+        copyFileSync(file, copyPath);
+        rows = readCookieNames(copyPath);
+      } catch {
+        rows = null;
+      } finally {
+        try { unlinkSync(copyPath); } catch { /* bỏ qua */ }
+      }
     }
+    if (rows === null) continue;
     const names = new Set(rows.map(row => row.name));
     const flags: SocialSessionFlags = {
       youtube: PLATFORM_COOKIES.youtube.some(name => names.has(name)),

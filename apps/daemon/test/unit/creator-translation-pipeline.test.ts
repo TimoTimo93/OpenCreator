@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, normalize } from 'node:path';
+import { join, normalize, dirname } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { CreatorArtifact, CreatorJob, CreatorJson } from '@opencreator/protocol';
 import type { CreatorCommandDispatcher } from '../../src/creator/command-dispatcher.js';
@@ -308,13 +308,10 @@ describe('translation pipeline service', () => {
     expect(after.counts.completed).toBe(1);
     const failedItem = after.items.find(item => item.status === 'failed');
     expect(failedItem?.error).toContain('Không đọc được file nguồn');
-    // Merge: chỉ ghép phần đã hoàn thành; nhóm chỉ còn 1 phân đoạn → copy thẳng
-    // (không gọi ffmpeg).
+    // Merge: v2.5 — nhóm lẻ (seriesKey null) KHÔNG tự ghép nữa; giữ idle.
     expect(mergeCalls).toHaveLength(0);
     const groupMerge = after.merges.find(entry => entry.seriesKey === null);
-    expect(groupMerge?.status).toBe('completed');
-    expect(groupMerge?.episodeCount).toBe(1);
-    expect(groupMerge?.uploadReady).toContain('upload-pending');
+    expect(groupMerge?.status ?? 'idle').toBe('idle');
   });
 
   it('paused chặn chạy; resume tiếp tục', async () => {
@@ -385,13 +382,15 @@ describe('translation pipeline v2 — dịch cả bộ', () => {
         await writeFile(path, 'fake-video');
         return path;
       }));
-    // Nạp lộn xộn: ep 100 trước, rồi 3, rồi 1..2.
-    service.enqueue([{ path: extraPaths[0]!, title: 'Tập 100', seriesKey: 'series-A', episodeIndex: 100 }]);
+    // Nạp lộn xộn: ep 100 trước, rồi 3, rồi 1..2. (Test này kiểm THỨ TỰ DỊCH —
+    // v2.5 mọi mục bộ không gọi hook từng tập ⇒ bỏ seriesKey để hook phản ánh
+    // thứ tự hoàn thành.)
+    service.enqueue([{ path: extraPaths[0]!, title: 'Tập 100', episodeIndex: 100 }]);
     await waitFor(() => service.getSummary().counts.running === 1);
     service.enqueue([
-      { path: extraPaths[1]!, title: 'Tập 3', seriesKey: 'series-A', episodeIndex: 3 },
-      { path: extraPaths[2]!, title: 'Tập 1', seriesKey: 'series-A', episodeIndex: 1 },
-      { path: extraPaths[3]!, title: 'Tập 2', seriesKey: 'series-A', episodeIndex: 2 }
+      { path: extraPaths[1]!, title: 'Tập 3', episodeIndex: 3 },
+      { path: extraPaths[2]!, title: 'Tập 1', episodeIndex: 1 },
+      { path: extraPaths[3]!, title: 'Tập 2', episodeIndex: 2 }
     ]);
     void sourcePaths;
     await waitForSettle(service);
@@ -596,5 +595,85 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
     const after = await waitForSettle(service);
     expect(after.counts.completed).toBe(1);
     expect(after.items[0]!.socialEnqueuedAt ?? null).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // v2.4 — tự suy seriesKey từ thẻ 《tên phim》 khi luồng nạp không truyền key:
+  // mọi mục thuộc một bộ ĐỢI GHÉP xong mới tự nạp đăng (không còn đăng tung tập).
+  // -------------------------------------------------------------------------
+
+  it('nạp không truyền key nhưng tiêu đề có thẻ 《》 → tự suy seriesKey, KHÔNG gọi hook tung tập', async () => {
+    const hookCalls: Array<{ title: string }> = [];
+    const mergeCalls: Array<{ title: string; episodeCount: number }> = [];
+    const { service, sourcePaths } = await makeService({
+      onEpisodeCompleted: async info => { hookCalls.push({ title: info.title }); },
+      onMerged: async info => { mergeCalls.push({ title: info.title, episodeCount: info.episodeCount }); }
+    });
+    service.enqueue([
+      { path: sourcePaths[0]!, title: '《天赋万古无双，只手横推三千帝》 Tập 1', episodeIndex: 1 },
+      { path: sourcePaths[1]!, title: '《天赋万古无双，只手横推三千帝》 Tập 2', episodeIndex: 2 }
+    ]);
+    const after = await waitForSettle(service);
+    expect(after.items[0]!.seriesKey).toBe('title:天赋万古无双，只手横推三千帝');
+    expect(after.items[1]!.seriesKey).toBe('title:天赋万古无双，只手横推三千帝');
+    expect(after.items[0]!.socialEnqueuedAt ?? null).toBeNull();
+    expect(hookCalls).toHaveLength(0);
+    // Ghép cả bộ xong → hook full movie đã tới.
+    expect(mergeCalls).toHaveLength(1);
+    expect(mergeCalls[0]!.episodeCount).toBe(2);
+  });
+
+  it('tiêu đề không có thẻ 《》 → mục lẻ giữ nguyên: hook tung tập chạy, không ghép', async () => {
+    const hookCalls: Array<{ title: string }> = [];
+    const { service, sourcePaths, mergeCalls: mergeSegments } = await makeService({
+      onEpisodeCompleted: async info => { hookCalls.push({ title: info.title }); }
+    });
+    service.enqueue([{ path: sourcePaths[0]!, title: 'OpenCreator kiem tra dich video', episodeIndex: 1 }]);
+    const after = await waitForSettle(service);
+    expect(after.items[0]!.seriesKey ?? null).toBeNull();
+    expect(hookCalls).toHaveLength(1);
+    expect(mergeSegments).toHaveLength(0);
+  });
+
+  it('nhóm lẻ (seriesKey null) KHÔNG được tự ghép — không trộn video không liên quan', async () => {
+    const { service, sourcePaths, mergeCalls } = await makeService();
+    service.enqueue([
+      { path: sourcePaths[0]!, title: 'video lẻ Một', episodeIndex: 1 },
+      { path: sourcePaths[1]!, title: 'video lẻ Hai', episodeIndex: 2 }
+    ]);
+    const after = await waitForSettle(service);
+    const solo = after.merges.find(entry => entry.seriesKey === null);
+    expect(solo === undefined || solo.status === 'idle').toBe(true);
+    expect(mergeCalls).toHaveLength(0);
+  });
+
+  it('bù seriesKey khi đọc state cũ: mục chưa nạp đăng được bù theo thẻ 《》, mục đã nạp giữ nguyên', async () => {
+    const first = await makeService();
+    // Viết state giả trực tiếp: 1 mục chưa nạp (thẻ 《》) + 1 mục đã nạp đăng.
+    const statePath = join(first.dataDir, 'translation-pipeline', 'pipeline.json');
+    await mkdir(dirname(statePath), { recursive: true });
+    await writeFile(statePath, `${JSON.stringify({
+      paused: false,
+      items: [
+        {
+          id: 'item-new', sourcePath: join(first.dataDir, 'a.mp4'), title: '《Bộ phim A》 Tập 5',
+          seriesKey: null, episodeIndex: 5, addedAt: '2026-01-01T00:00:00.000Z',
+          status: 'completed', jobId: null, error: null, outputVideoPath: null,
+          durationSeconds: null, merged: false, mergeRunId: null, projectId: null, socialEnqueuedAt: null
+        },
+        {
+          id: 'item-old', sourcePath: join(first.dataDir, 'b.mp4'), title: '《Bộ phim A》 Tập 6',
+          seriesKey: null, episodeIndex: 6, addedAt: '2026-01-01T00:00:00.000Z',
+          status: 'completed', jobId: null, error: null, outputVideoPath: null,
+          durationSeconds: null, merged: false, mergeRunId: null, projectId: null,
+          socialEnqueuedAt: '2026-01-02T00:00:00.000Z'
+        }
+      ],
+      merges: []
+    }, null, 2)}\n`);
+    const second = await makeService({ dataDir: first.dataDir });
+    const summary = second.service.getSummary();
+    expect(summary.items[0]!.seriesKey).toBe('title:Bộ phim A');
+    expect(summary.items[1]!.seriesKey ?? null).toBeNull(); // đã nạp đăng → giữ nguyên
   });
 });
