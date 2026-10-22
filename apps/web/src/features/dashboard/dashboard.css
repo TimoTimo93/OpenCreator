@@ -12686,6 +12686,38 @@
   align-items: baseline;
 }
 
+/* v2.2 — đầu panel: "Danh sách dịch video" + nút Dừng/Tiếp tục */
+.video-translation-batch-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.video-translation-batch-head strong {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.video-translation-batch-head button {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface-2, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.video-translation-batch-head button:hover {
+  border-color: var(--accent);
+}
+
 .video-translation-batch-group-head strong {
   overflow: hidden;
   text-overflow: ellipsis;

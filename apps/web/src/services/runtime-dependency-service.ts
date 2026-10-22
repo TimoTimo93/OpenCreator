@@ -200,6 +200,14 @@ export function createRuntimeDependencyService(client: ClientLike) {
     retryTranslationBatchItem(episodeId: string): Promise<TranslationBatchStatus> {
       return client.post('/creator/translation-batch/retry', { id: episodeId }) as Promise<TranslationBatchStatus>;
     },
+    /** v2.2 — tạm dừng hàng đợi dịch (sau khi tập đang dịch chạy xong). */
+    pauseTranslationBatch(): Promise<TranslationBatchStatus> {
+      return client.post('/creator/translation-pipeline/pause', {}) as Promise<TranslationBatchStatus>;
+    },
+    /** v2.2 — tiếp tục hàng đợi dịch sau khi tạm dừng. */
+    resumeTranslationBatch(): Promise<TranslationBatchStatus> {
+      return client.post('/creator/translation-pipeline/resume', {}) as Promise<TranslationBatchStatus>;
+    },
     /** Mở thư mục chứa file (Windows: Explorer chọn file). */
     revealTranslationBatch(path: string, mode: 'file' | 'directory' = 'file'): Promise<{ ok: boolean }> {
       return client.post('/creator/translation-batch/reveal', { path, mode }) as Promise<{ ok: boolean }>;

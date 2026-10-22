@@ -466,11 +466,13 @@ function insideRoot(root: string, target: string): boolean {
 /** Mở file/thư mục trong trình quản lý file của hệ điều hành (Windows: Explorer). */
 async function revealPath(input: { absolutePath: string; mode: 'file' | 'directory' }): Promise<void> {
   if (platform() === 'win32') {
-    if (input.mode === 'file') {
-      await execFileAsync('explorer.exe', ['/select,', input.absolutePath]);
-      return;
+    // explorer.exe luôn trả exit code khác 0 kể cả khi đã mở cửa sổ — bỏ qua
+    // exit code (tệp không tồn tại đã được kiểm tra trước đó).
+    try {
+      await execFileAsync('explorer', [input.mode === 'file' ? `/select,${input.absolutePath}` : input.absolutePath]);
+    } catch {
+      // ignore — launch lỗi chỉ xảy ra khi Explorer chưa sẵn sàng, hiếm.
     }
-    await execFileAsync('explorer.exe', [input.absolutePath]);
     return;
   }
   if (platform() === 'darwin') {

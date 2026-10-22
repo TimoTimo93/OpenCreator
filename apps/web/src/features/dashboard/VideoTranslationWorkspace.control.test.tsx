@@ -1812,7 +1812,38 @@ describe('VideoTranslationWorkspace — điều hướng bước khi đã có da
     }
   });
 
-  it('chưa có danh sách dịch: giữ hành vi cũ — bước sau khoá, bám lỗi "thêm video trước"', async () => {
+  it('đầu panel có tiêu đề + nút Dừng/Tạm dừng ↔ Tiếp tục gọi pause/resume', async () => {
+    let pausedNow = false;
+    const service = {
+      applyAction: vi.fn(),
+      runAgentTurn: vi.fn(),
+      getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
+      getTranslationBatch: vi.fn(async () => ({ ...batchStatusFixture(), paused: pausedNow })),
+      pauseTranslationBatch: vi.fn(async () => { pausedNow = true; return { ...batchStatusFixture(), paused: true }; }),
+      resumeTranslationBatch: vi.fn(async () => { pausedNow = false; return { ...batchStatusFixture(), paused: false }; })
+    };
+    const renderView = render(<LanguageProvider initialPreference="vi-VN"><CreatorSessionProvider
+      initialJob={job({ status: 'draft', revision: 1, stages: [], state: { currentStep: 0, furthestStep: 0, workspacePhase: 'configure' } })}
+      service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+    ><VideoTranslationWorkspace onBack={vi.fn()} runtimeDependencies={{ service } as never} /></CreatorSessionProvider></LanguageProvider>);
+    try {
+      const panel = await screen.findByRole('complementary', { name: 'Danh sách dịch cả bộ' });
+      expect(within(panel).getByText('Danh sách dịch video')).toBeInTheDocument();
+
+      const toggle = () => within(panel).getByRole('button', { name: 'Tạm dừng' });
+      expect(toggle()).toBeInTheDocument();
+      fireEvent.click(toggle());
+      await waitFor(() => expect(service.pauseTranslationBatch).toHaveBeenCalled());
+      await waitFor(() => expect(within(panel).getByRole('button', { name: 'Tiếp tục' })).toBeInTheDocument());
+      fireEvent.click(within(panel).getByRole('button', { name: 'Tiếp tục' }));
+      await waitFor(() => expect(service.resumeTranslationBatch).toHaveBeenCalled());
+      await waitFor(() => expect(within(panel).getByRole('button', { name: 'Tạm dừng' })).toBeInTheDocument());
+    } finally {
+      renderView.unmount();
+    }
+  });
+
+  it('không có danh sách dịch: giữ hành vi cũ — bước sau khoá, bám lỗi "thêm video trước"', async () => {
     const service = {
       applyAction: vi.fn(),
       runAgentTurn: vi.fn(),

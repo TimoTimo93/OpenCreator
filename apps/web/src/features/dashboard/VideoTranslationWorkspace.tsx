@@ -36,6 +36,7 @@ import VideoTranslationAgentPanel from './VideoTranslationAgentPanel.js';
 import CreatorResizableLayout from './CreatorResizableLayout.js';
 import CreatorTaskSummary from './CreatorTaskSummary.js';
 import VideoSourceInput, { type RecentDownloadedVideo } from './VideoSourceInput.js';
+import { ApiClientError } from '../../runtime/errors.js';
 import { BilibiliPartSelector } from './BilibiliPartSelector.js';
 import { parseVideoSource } from './VideoSourcePreview.js';
 import { VideoTranslationSubtitleImport } from './VideoTranslationSubtitleImport.js';
@@ -3082,8 +3083,8 @@ export default function VideoTranslationWorkspace(props: {
     setOpenFolderPendingId(output.artifactId);
     try {
       await service.revealTranslationBatch(path, 'file');
-    } catch {
-      setResultNotice(l('无法打开文件夹，请重试。', 'Could not open the folder. Try again.'));
+    } catch (cause) {
+      setResultNotice(revealFolderFailure(cause, l));
     } finally {
       setOpenFolderPendingId(undefined);
     }
@@ -3146,12 +3147,25 @@ export default function VideoTranslationWorkspace(props: {
       });
     const mergeOf = (key: string | null): TranslationBatchStatus['merges'][number] | undefined =>
       batchStatus?.merges.find(mergeState => mergeState.seriesKey === key);
+    const paused = batchStatus?.paused === true;
+    const toggleBatchPaused = async (): Promise<void> => {
+      if (batchService === undefined) return;
+      try {
+        const response = paused
+          ? await batchService.resumeTranslationBatch()
+          : await batchService.pauseTranslationBatch();
+        setBatchStatus(response);
+      } catch (cause) {
+        setBatchNotice(creatorErrorMessage(cause, l));
+      }
+    };
     const revealOutput = async (item: TranslationBatchEpisode): Promise<void> => {
       if (item.outputVideoPath === null || item.outputVideoPath === '') return;
       try {
+        setBatchNotice('');
         await batchService.revealTranslationBatch(item.outputVideoPath, 'file');
-      } catch {
-        setBatchNotice(l('无法打开文件夹，请重试。', 'Could not open the folder. Try again.'));
+      } catch (cause) {
+        setBatchNotice(revealFolderFailure(cause, l));
       }
     };
     const retryItem = async (item: TranslationBatchEpisode): Promise<void> => {
@@ -3164,6 +3178,16 @@ export default function VideoTranslationWorkspace(props: {
     };
     return (
       <aside className="video-translation-batch-list" aria-label={l('整部翻译列表', 'Series translation list')}>
+        <div className="video-translation-batch-head">
+          <strong>{l('整部翻译列表', 'Video translation list')}</strong>
+          <button
+            type="button"
+            aria-label={paused ? l('继续', 'Continue') : l('暂停', 'Pause')}
+            onClick={() => void toggleBatchPaused()}
+          >
+            {paused ? l('继续', 'Continue') : l('暂停', 'Pause')}
+          </button>
+        </div>
         {[...groups.entries()].map(([key, groupItems]) => {
           const done = groupItems.filter(item => item.status === 'completed').length;
           const allGroupDone = groupItems.every(item =>
@@ -4796,6 +4820,13 @@ function creatorServicesSettingsHref(...codes: Array<string | null | undefined>)
       ? 'transcription'
       : 'text';
   return `#/settings?tab=ai-services&section=${section}`;
+}
+
+/** Thông báo lỗi khi mở thư mục thất bại: phân biệt tệp đã xóa vs lỗi khác. */
+function revealFolderFailure(cause: unknown, l: LocalizeCopy): string {
+  return cause instanceof ApiClientError && cause.code === 'creator_batch_path_not_found'
+    ? l('文件已不在磁盘上（可能已随项目删除）。', 'The translated file is no longer on disk.')
+    : l('无法打开文件夹，请重试。', 'Could not open the folder. Try again.');
 }
 
 function localizeStep(step: typeof steps[number], l: LocalizeCopy): string {

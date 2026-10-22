@@ -55,6 +55,26 @@ function dramaMocks() {
       uploadFolder: ''
     })),
     revealTranslationBatch: vi.fn(async () => ({ ok: true })),
+    pauseTranslationBatch: vi.fn(async () => ({
+      items: [],
+      paused: true,
+      counts: { queued: 0, running: 0, completed: 0, failed: 0 },
+      progress: {
+        total: 0, queued: 0, running: 0, completed: 0, failed: 0, canceled: 0, allDone: true, percent: 0
+      },
+      merges: [],
+      uploadFolder: ''
+    })),
+    resumeTranslationBatch: vi.fn(async () => ({
+      items: [],
+      paused: false,
+      counts: { queued: 0, running: 0, completed: 0, failed: 0 },
+      progress: {
+        total: 0, queued: 0, running: 0, completed: 0, failed: 0, canceled: 0, allDone: true, percent: 0
+      },
+      merges: [],
+      uploadFolder: ''
+    })),
     renameProject: vi.fn(async (projectId: string, name: string) => ({ project: { id: projectId, name } }))
   };
 }
