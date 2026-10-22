@@ -1749,8 +1749,6 @@ export default function VideoTranslationWorkspace(props: {
   const [batchStatus, setBatchStatus] = useState<TranslationBatchStatus>();
   const [batchPending, setBatchPending] = useState(false);
   const [batchNotice, setBatchNotice] = useState('');
-  // Cho phép hiện lại khung chọn video khi cả bộ đang xếp hàng (thêm video khác).
-  const [seriesSourceFallback, setSeriesSourceFallback] = useState(false);
   const [openFolderPendingId, setOpenFolderPendingId] = useState<string>();
   const pendingHandoffPathRef = useRef<string>();
   const batchPollTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -2337,7 +2335,7 @@ export default function VideoTranslationWorkspace(props: {
   // v2.1 — đủ điều kiện điều hướng bước khi ĐÃ CÓ danh sách dịch cả bộ (kể cả khi
   // mọi tập đã xong — danh sách còn tồn tại): bấm "Tiếp tục"/nút bước được mở khoá.
   const batchActive = (batchStatus?.items.length ?? 0) > 0;
-  const hideSeriesSourceCard = batchQueueActive && !hasSource && !seriesSourceFallback;
+  // v2.2 — khung chọn video luôn hiển thị (không còn ẩn khi cả bộ đang xếp hàng).
   const latestStage = creatorSession?.job.stages.at(-1);
   const activeStage = creatorSession === null
     ? undefined
@@ -3420,7 +3418,7 @@ export default function VideoTranslationWorkspace(props: {
     setAttemptedContinue(true);
     // v2.1 — danh sách dịch cả bộ còn tồn tại: không cần chọn video vẫn sang bước
     // cài đặt (trừ khi người dùng vừa hiện lại khung chọn video để thêm tập khác).
-    if (!hasSource && !seriesSourceFallback && batchActive) {
+    if (!hasSource && batchActive) {
       openWizardStep(1);
       return;
     }
@@ -3922,15 +3920,10 @@ export default function VideoTranslationWorkspace(props: {
             <div className="video-translation-batch-layout">
               {renderBatchSeriesPanel()}
               <div className="video-translation-batch-main">
-            {hideSeriesSourceCard ? (
-              <div className="video-translation-batch-source-hidden">
-                <p>{l('整部已加入翻译队列，正在按集数从小到大翻译。', 'The whole series is already in the translation queue, translating episode by episode.')}</p>
-                <button type="button" onClick={() => setSeriesSourceFallback(true)}>
-                  {l('添加其他视频', 'Add a different video')}
-                </button>
-              </div>
-            ) : (
-              <>
+            {/*
+              v2.2 — luôn hiển thị khung chọn video (dịch đơn lẻ bất cứ lúc nào,
+              kể cả khi cả bộ đang nằm trong hàng chờ dịch bên trái).
+            */}
             <VideoSourceInput
               showSupportedPlatforms
               showSourceMode
@@ -3980,8 +3973,6 @@ export default function VideoTranslationWorkspace(props: {
                 onSelect={selectBilibiliPart}
               />
             ) : null}
-              </>
-            )}
             {renderBatchPanel()}
               </div>
             </div>
