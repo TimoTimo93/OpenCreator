@@ -36,7 +36,52 @@ describe('extractDownloadedEpisodes', () => {
     expect(episodes[0]?.path).toBe('D:\\downloads\\ep1.mp4');
     expect(episodes[0]?.title).toBe('Tập 1');
     expect(episodes[0]?.episodeIndex).toBe(1);
-    expect(episodes[0]?.seriesKey).toBe('series-1');
+    expect(episodes[0]?.seriesKey).toBe('honggua:series-1');
+  });
+
+  it('suy key bộ từ object lồng nhau (hongguoInfo.series_id)', () => {
+    const episodes = extractDownloadedEpisodes({
+      tasks: [{
+        status: 'completed',
+        path: 'D:\\dl\\《天赋万古无双，只手横推三千帝》T?p 084.mp4',
+        title: '《天赋万古无双，只手横推三千帝》T?p 084',
+        hongguoInfo: { series_id: 'a4d414f2', episode_no: 84 }
+      }]
+    });
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0]?.seriesKey).toBe('honggua:a4d414f2');
+  });
+
+  it('suy key bộ từ thẻ 《tên phim》 trong tiêu đề khi không có series_id', () => {
+    const episodes = extractDownloadedEpisodes({
+      tasks: [{
+        status: 'completed',
+        path: 'D:\\dl\\《京夜读温》T?p 001.mp4',
+        title: '《京夜读温》T?p 001'
+      }]
+    });
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0]?.seriesKey).toBe('title:京夜读温');
+  });
+
+  it('fallback cuối: thư mục cha chứa file (bỏ hậu tố hash)', () => {
+    const episodes = extractDownloadedEpisodes({
+      tasks: [{
+        status: 'completed',
+        path: 'D:\\Phim Hồng Quả\\Phim hot nhat 2026-a4d414f2356f\\Tap 010.mp4',
+        title: 'Tap 010'
+      }]
+    });
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0]?.seriesKey).toBe('folder:Phim hot nhat 2026');
+  });
+
+  it('phim lẻ ngoài thư mục tải Hồng Quả (không hash, không 《》) giữ nhóm lẻ', () => {
+    const episodes = extractDownloadedEpisodes({
+      tasks: [{ status: 'completed', path: 'D:\\download\\clip-x.mp4', title: 'video của tôi' }]
+    });
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0]?.seriesKey).toBeUndefined();
   });
 
   it('quét được đường dẫn nằm trong field lạ', () => {
@@ -71,6 +116,28 @@ describe('createDramaDownloadBridge', () => {
     };
     await bridge.tick();
     expect(enqueued).toHaveLength(2);
+  });
+
+  it('cấu hình batchMode cho các tập có seriesKey (dịch cả bộ, không nạp tung tập)', async () => {
+    const enqueued: unknown[] = [];
+    const payload = {
+      tasks: [
+        {
+          status: 'completed',
+          path: 'D:\\dl\\《phim mới》T?p 001.mp4',
+          title: '《phim mới》T?p 001'
+        },
+        { status: 'completed', path: 'D:\\dl\\video lẻ.mp4', title: 'video lẻ' }
+      ]
+    };
+    const bridge = createDramaDownloadBridge({
+      listTasks: async () => payload,
+      enqueue: (requests) => { enqueued.push(...requests); }
+    });
+    await bridge.tick();
+    expect(enqueued[0]).toMatchObject({ seriesKey: 'title:phim mới', batchMode: true });
+    expect(enqueued[1]).not.toHaveProperty('batchMode');
+    expect(enqueued[1]).not.toHaveProperty('seriesKey');
   });
 
   it('không ném lỗi khi thành phần Hồng Quá chưa sẵn sàng', async () => {

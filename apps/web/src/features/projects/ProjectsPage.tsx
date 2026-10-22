@@ -81,6 +81,8 @@ const projectCoverArtifactKinds = new Set([
 
 type CreatorProject = {
   job: CreatorJob;
+  /** v2.1 — các job thuộc thẻ này: thẻ "dịch cả bộ" gộp nhiều job (mỗi tập một job) */
+  jobs: CreatorJob[];
   title: string;
   type: string;
   category: Exclude<ProjectCategory, '全部'>;
@@ -137,10 +139,10 @@ export default function ProjectsPage(props: {
     );
   }, [l, pageIssues.captureOperationFailure, pageIssues.resolveOperation, props.createProjectError]);
   const projects = useMemo(
-    () => props.jobs
+    () => groupCreatorProjects(props.jobs
       .filter(isMeaningfulCreatorJob)
       .map(job => createCreatorProject(job, props.workspaces, l))
-      .filter((project): project is CreatorProject => project !== undefined),
+      .filter((project): project is CreatorProject => project !== undefined)),
     [l, props.jobs, props.workspaces]
   );
   const visibleProjects = useMemo(() => projects
@@ -413,7 +415,7 @@ export default function ProjectsPage(props: {
                       <small>{localizeJobStatus(project.job.status, l)}</small>
                     </span>
                     <span className="project-card-copy">
-                      <small>{project.type}</small>
+                      <small>{project.type}{project.jobs.length > 1 ? ` · ${l(`${project.jobs.length} 集`, `${project.jobs.length} episodes`)}` : ''}</small>
                       <strong>{project.title}</strong>
                       <span>{formatProjectTime(
                         project.job.updatedAt,
@@ -585,14 +587,17 @@ export default function ProjectsPage(props: {
             void (async () => {
               const failedProjectIds = new Set<string>();
               for (const project of selectedProjects) {
-                try {
-                  await deleteJob(project.job.id, { deleteFiles: deleteProjectFiles });
-                } catch (error) {
-                  failedProjectIds.add(project.job.id);
-                  pageIssues.captureOperationFailure('projects.delete', error,
-                    error instanceof ApiClientError && error.code === 'creator_job_has_active_run'
-                      ? l('项目仍在运行，请先停止任务后再删除。', 'This project is still running. Stop it before deleting.')
-                      : l('项目删除失败，请重试。', 'Unable to delete the project. Please try again.'));
+                for (const job of project.jobs) {
+                  try {
+                    await deleteJob(job.id, { deleteFiles: deleteProjectFiles });
+                  } catch (error) {
+                    failedProjectIds.add(project.job.id);
+                    pageIssues.captureOperationFailure('projects.delete', error,
+                      error instanceof ApiClientError && error.code === 'creator_job_has_active_run'
+                        ? l('项目仍在运行，请先停止任务后再删除。', 'This project is still running. Stop it before deleting.')
+                        : l('项目删除失败，请重试。', 'Unable to delete the project. Please try again.'));
+                    break;
+                  }
                 }
               }
 
@@ -613,21 +618,25 @@ export default function ProjectsPage(props: {
             || deletingProjectId !== undefined
             || props.onDeleteJob === undefined
           ) return;
-          const projectId = projectPendingDeletion.job.id;
-          setDeletingProjectId(projectId);
-          void props.onDeleteJob(projectId, { deleteFiles: deleteProjectFiles })
-            .then(() => {
-              pageIssues.resolveOperation('projects.delete');
-              setDeleteProjectFiles(false);
-              setProjectPendingDeletion(undefined);
-            })
-            .catch(error => {
-              pageIssues.captureOperationFailure('projects.delete', error,
-                error instanceof ApiClientError && error.code === 'creator_job_has_active_run'
-                  ? l('项目仍在运行，请先停止任务后再删除。', 'This project is still running. Stop it before deleting.')
-                  : l('项目删除失败，请重试。', 'Unable to delete the project. Please try again.'));
-            })
-            .finally(() => setDeletingProjectId(undefined));
+          // v2.1 — thẻ nhóm "dịch cả bộ" chứa nhiều job (mỗi tập một job): xóa lần lượt.
+          const pendingJobs = [...projectPendingDeletion.jobs];
+          setDeletingProjectId(projectPendingDeletion.job.id);
+          void (async () => {
+            for (const job of pendingJobs) {
+              try {
+                await props.onDeleteJob!(job.id, { deleteFiles: deleteProjectFiles });
+              } catch (error) {
+                pageIssues.captureOperationFailure('projects.delete', error,
+                  error instanceof ApiClientError && error.code === 'creator_job_has_active_run'
+                    ? l('项目仍在运行，请先停止任务后再删除。', 'This project is still running. Stop it before deleting.')
+                    : l('项目删除失败，请重试。', 'Unable to delete the project. Please try again.'));
+                return;
+              }
+            }
+            pageIssues.resolveOperation('projects.delete');
+            setDeleteProjectFiles(false);
+            setProjectPendingDeletion(undefined);
+          })().finally(() => setDeletingProjectId(undefined));
         }}
       />
     </main>
@@ -643,6 +652,7 @@ function createCreatorProject(
   if (type === undefined) return undefined;
   return {
     job,
+    jobs: [job],
     type,
     title: creatorProjectTitle(job, type),
     category: job.templateId === 'cover' || job.templateId === 'image-generation'
@@ -668,6 +678,90 @@ export function isMeaningfulCreatorJob(job: CreatorJob): boolean {
     return true;
   }
   return hasMeaningfulDraftState(job.templateId, job.state);
+}
+
+/**
+ * v2.1 — nhóm các job "dịch cả bộ" của CÙNG MỘT bộ phim thành MỘT thẻ dự án.
+ * Job do pipeline nạp từng tập nên mỗi tập là một job riêng; định danh bộ lấy từ
+ * `state.sourceSeriesKey` (pipeline ghi khi dịch) hoặc suy từ tên nguồn
+ * `《tên phim》 …` / `<tên phim> 100.mp4`. Job không nhận ra bộ ⇒ thẻ riêng như cũ.
+ */
+function groupCreatorProjects(projects: CreatorProject[]): CreatorProject[] {
+  const solo: CreatorProject[] = [];
+  const groups = new Map<string, { name: string; members: CreatorProject[] }>();
+  for (const project of projects) {
+    const series = creatorSeries(project.job);
+    if (series === undefined) {
+      solo.push(project);
+      continue;
+    }
+    let group = groups.get(series.key);
+    if (group === undefined) {
+      group = { name: series.name, members: [] };
+      groups.set(series.key, group);
+    }
+    group.members.push(project);
+  }
+  const grouped: CreatorProject[] = [...groups.values()].map(group => {
+    const primary = group.members.reduce((best, candidate) => (isBetterPrimary(candidate.job, best.job) ? candidate : best));
+    return {
+      ...primary,
+      title: group.name,
+      job: primary.job,
+      jobs: group.members
+        .map(member => member.job)
+        .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+    };
+  });
+  return [...solo, ...grouped];
+}
+
+type CreatorSeriesInfo = { key: string; name: string };
+
+/** Định danh + tên bộ phim của job dịch video:
+ *  - có `sourceSeriesKey` (pipeline v2.1 ghi) → key gốc, tên suy từ tên nguồn;
+ *  - không → suy tên bộ từ tên nguồn `《tên phim》 …` hoặc `<tên phim> 100.mp4`
+ *    (bỏ đuôi số tập; tên có khoảng trắng cộng số mới bỏ được).
+ */
+function creatorSeries(job: CreatorJob): CreatorSeriesInfo | undefined {
+  if (job.templateId !== 'video-translation') return undefined;
+  const sourceName = readString(job.state.sourceFileName);
+  const seriesKey = readString(job.state.sourceSeriesKey);
+  const fromFileName = seriesNameFromSource(sourceName);
+  if (seriesKey !== '') {
+    return { key: `key:${seriesKey}`, name: fromFileName ?? seriesDisplayName(seriesKey) };
+  }
+  if (fromFileName === undefined) return undefined;
+  return { key: `name:${job.projectId}::${fromFileName}`, name: fromFileName };
+}
+
+/** Tên bộ phim suy từ tên file nguồn: `《tên phim》 T?p 001.mp4` hoặc
+ *  `tên phim 100.mp4` → `tên phim` (chỉ bỏ khi đuôi là số tập cách bằng nước). */
+function seriesNameFromSource(sourceName: string): string | undefined {
+  if (sourceName === '') return undefined;
+  const bracket = sourceName.match(/《(.+?)》/);
+  if (bracket !== null && bracket[1] !== undefined) {
+    const name = bracket[1].trim();
+    return name === '' ? undefined : name;
+  }
+  const extension = sourceName.match(/^(.+?)\s+\d{1,4}\s*\.[a-z0-9]{2,5}$/i);
+  if (extension !== null && extension[1] !== undefined) {
+    const name = extension[1].trim();
+    return name === '' ? undefined : name;
+  }
+  return undefined;
+}
+
+/** Hiện tên từ seriesKey khi không suy được tên nguồn: bỏ tiền tố key. */
+function seriesDisplayName(seriesKey: string): string {
+  return seriesKey.replace(/^(honggua|title|folder|solo):/, '').trim();
+}
+
+/** Thẻ nhóm mở "chính": job đã dịch xong (mới nhất), không → job chạy/mới nhất. */
+function isBetterPrimary(candidate: CreatorJob, current: CreatorJob): boolean {
+  const rank = (job: CreatorJob) => (job.status === 'completed' ? 2 : job.status === 'draft' ? 0 : 1);
+  if (rank(candidate) !== rank(current)) return rank(candidate) > rank(current);
+  return candidate.updatedAt.localeCompare(current.updatedAt) > 0;
 }
 
 function hasMeaningfulDraftState(templateId: string, state: CreatorJob['state']): boolean {
@@ -918,26 +1012,28 @@ function outputKindIcon(kind: ProjectOutputKind, size: number) {
 }
 
 function createProjectOutputs(project: CreatorProject, l: LocalizeCopy): ProjectOutput[] {
-  return project.job.artifacts
-    .filter(artifact => (
-      artifact.path !== null
-      && artifact.status !== 'stale'
-      && projectArtifactKinds.has(artifact.kind)
-    ))
-    .map(artifact => ({
-      id: artifact.id,
-      job: project.job,
-      projectName: project.title,
-      name: artifactName(artifact, l),
-      kind: artifactKind(artifact.kind),
-      format: artifactFormat(artifact),
-      detail: artifact.status === 'technical_preview'
-        ? l(`技术预览 · V${artifact.version}`, `Technical preview · V${artifact.version}`)
-        : `V${artifact.version}`,
-      cover: project.cover,
-      youtubeCovers: project.youtubeCovers,
-      updatedAt: artifact.createdAt
-    }));
+  // v2.1 — thẻ nhóm "dịch cả bộ": liệt kê cả các job từng tập.
+  return project.jobs
+    .flatMap(job => job.artifacts
+      .filter(artifact => (
+        artifact.path !== null
+        && artifact.status !== 'stale'
+        && projectArtifactKinds.has(artifact.kind)
+      ))
+      .map(artifact => ({
+        id: artifact.id,
+        job,
+        projectName: project.title,
+        name: artifactName(artifact, l),
+        kind: artifactKind(artifact.kind),
+        format: artifactFormat(artifact),
+        detail: artifact.status === 'technical_preview'
+          ? l(`技术预览 · V${artifact.version}`, `Technical preview · V${artifact.version}`)
+          : `V${artifact.version}`,
+        cover: project.cover,
+        youtubeCovers: project.youtubeCovers,
+        updatedAt: artifact.createdAt
+      })));
 }
 
 function artifactName(artifact: CreatorArtifact, l: LocalizeCopy): string {

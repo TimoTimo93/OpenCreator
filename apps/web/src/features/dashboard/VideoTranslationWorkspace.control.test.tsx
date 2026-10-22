@@ -1752,6 +1752,90 @@ describe('VideoTranslationWorkspace — panel dịch cả bộ bên trái (v2)',
   });
 });
 
+// ---------------------------------------------------------------------------
+// v2.1 — điều hướng bước khi ĐÃ CÓ danh sách dịch cả bộ (không cần chọn nguồn)
+// ---------------------------------------------------------------------------
+
+const emptyBatchFixture: Record<string, unknown> = {
+  items: [],
+  paused: false,
+  counts: { queued: 0, running: 0, completed: 0, failed: 0 },
+  progress: { total: 0, queued: 0, running: 0, completed: 0, failed: 0, canceled: 0, allDone: false, percent: 0 },
+  merges: [],
+  uploadFolder: 'D:\\data\\upload-pending'
+};
+
+function batchRenderFixture(items: Record<string, unknown>[]): Record<string, unknown> {
+  return {
+    ...batchStatusFixture(),
+    items,
+    counts: { queued: 0, running: 0, completed: items.length, failed: 0 },
+    progress: { total: items.length, queued: 0, running: 0, completed: items.length, failed: 0, canceled: 0, allDone: true, percent: 100 }
+  };
+}
+
+describe('VideoTranslationWorkspace — điều hướng bước khi đã có danh sách dịch (v2.1)', () => {
+  it('có danh sách dịch: nút bước sau mở khoá và "Tiếp tục" sang bước cài đặt dù chưa chọn video', async () => {
+    const service = {
+      applyAction: vi.fn(),
+      runAgentTurn: vi.fn(),
+      getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
+      getTranslationBatch: vi.fn(async () => batchRenderFixture([
+        batchItem({ id: 'e1', episodeIndex: 1, title: '《Bão》 Tập 1', status: 'completed', outputVideoPath: 'D:\\out\\tap-1.dub.mp4' })
+      ]))
+    };
+    const renderView = render(<LanguageProvider initialPreference="vi-VN"><CreatorSessionProvider
+      initialJob={job({ status: 'draft', revision: 1, stages: [], state: { currentStep: 0, furthestStep: 0, workspacePhase: 'configure', sourceUrl: '' } })}
+      service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+    ><VideoTranslationWorkspace onBack={vi.fn()} runtimeDependencies={{ service } as never} /></CreatorSessionProvider></LanguageProvider>);
+    try {
+      await screen.findByRole('complementary', { name: 'Danh sách dịch cả bộ' });
+      const stepButton = screen.getByRole('button', { name: '2 Dịch thuật' });
+      expect(stepButton).toBeEnabled();
+      fireEvent.click(stepButton);
+      expect(await screen.findByRole('heading', { name: 'Đặt ngôn ngữ dịch' })).toBeInTheDocument();
+    } finally {
+      renderView.unmount();
+    }
+
+    // Nút "Tiếp tục" cũng phải đi tiếp khi vừa có danh sách vừa chưa chọn nguồn.
+    const continueView = render(<LanguageProvider initialPreference="vi-VN"><CreatorSessionProvider
+      initialJob={job({ status: 'draft', revision: 1, stages: [], state: { currentStep: 0, furthestStep: 0, workspacePhase: 'configure', sourceUrl: '' } })}
+      service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+    ><VideoTranslationWorkspace onBack={vi.fn()} runtimeDependencies={{ service } as never} /></CreatorSessionProvider></LanguageProvider>);
+    try {
+      await screen.findByRole('complementary', { name: 'Danh sách dịch cả bộ' });
+      fireEvent.click(screen.getByRole('button', { name: 'Tiếp tục' }));
+      expect(await screen.findByRole('heading', { name: 'Đặt ngôn ngữ dịch' })).toBeInTheDocument();
+    } finally {
+      continueView.unmount();
+    }
+  });
+
+  it('chưa có danh sách dịch: giữ hành vi cũ — bước sau khoá, bám lỗi "thêm video trước"', async () => {
+    const service = {
+      applyAction: vi.fn(),
+      runAgentTurn: vi.fn(),
+      getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
+      getTranslationBatch: vi.fn(async () => emptyBatchFixture)
+    };
+    const renderView = render(<LanguageProvider initialPreference="vi-VN"><CreatorSessionProvider
+      initialJob={job({ status: 'draft', revision: 1, stages: [], state: { currentStep: 0, furthestStep: 0, workspacePhase: 'configure', sourceUrl: '' } })}
+      service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+    ><VideoTranslationWorkspace onBack={vi.fn()} runtimeDependencies={{ service } as never} /></CreatorSessionProvider></LanguageProvider>);
+    try {
+      // Chờ nhịp poll batch chạy qua (effect khôi phục state xong) rồi mới bấm.
+      await waitFor(() => expect(service.getTranslationBatch).toHaveBeenCalled());
+      await waitFor(() => expect(screen.getByRole('button', { name: '2 Dịch thuật' })).toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Tiếp tục' }));
+      await waitFor(() => expect(screen.getByText('Thêm video để dịch trước')).toBeInTheDocument());
+      expect(screen.queryByRole('heading', { name: 'Đặt ngôn ngữ dịch' })).not.toBeInTheDocument();
+    } finally {
+      renderView.unmount();
+    }
+  });
+});
+
 function job(input: {
   status: CreatorJob['status'];
   revision: number;

@@ -543,8 +543,13 @@ export function createTranslationPipelineService(
       applyItem(item.id, { durationSeconds: Math.round(probe.duration) });
     }
     // Cấu hình tự động dịch: bật lồng tiếng (schema mặc định targetLanguage 'vi',
-    // keepBackgroundAudio true — giữ nhạc nền 80%).
-    await dispatchSettings(job.id, { dubbing: true as const, sourceType: 'file' as const });
+    // keepBackgroundAudio true — giữ nhạc nền 80%). Kèm key bộ phim để trang
+    // "Dự án của tôi" gộp các tập cùng bộ thành một thẻ dự án (v2.1).
+    await dispatchSettings(job.id, {
+      dubbing: true as const,
+      sourceType: 'file' as const,
+      ...(item.seriesKey === null ? {} : { sourceSeriesKey: item.seriesKey })
+    });
     await runStageWait(job.id, 'subtitle');
     await runStageWait(job.id, 'tts');
     await runStageWait(job.id, 'render-horizontal');

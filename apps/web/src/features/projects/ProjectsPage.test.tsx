@@ -468,6 +468,95 @@ describe('ProjectsPage', () => {
       .not.toBeInTheDocument());
   });
 
+  // ---------------------------------------------------------------------------
+  // v2.1 — video dịch HÀNG LOẠT của cùng một bộ gộp thành MỘT thẻ dự án
+  // ---------------------------------------------------------------------------
+
+  const seriesEpisodes = [
+    creatorJob({
+      id: 'series_ep_1',
+      templateId: 'video-translation',
+      state: { sourceType: 'file', sourceFileName: '《Phim Ba》 Tập 001.mp4' },
+      updatedAt: '2026-09-01T00:00:00.000Z'
+    }),
+    creatorJob({
+      id: 'series_ep_2',
+      templateId: 'video-translation',
+      state: { sourceType: 'file', sourceFileName: '《Phim Ba》 Tập 002.mp4' },
+      updatedAt: '2026-09-02T00:00:00.000Z'
+    }),
+    creatorJob({
+      id: 'other_series_ep_1',
+      templateId: 'video-translation',
+      state: { sourceType: 'file', sourceFileName: '《Phim Chen》 Tập 001.mp4' },
+      updatedAt: '2026-09-03T00:00:00.000Z'
+    })
+  ];
+
+  it('groups batch-translated episodes of one series into a single project card', () => {
+    const onOpenJob = vi.fn();
+    render(<ProjectsPage jobs={seriesEpisodes} workspaces={workspaces} onOpenJob={onOpenJob} />);
+
+    // Hai thẻ (mỗi bộ một thẻ) — không có 3 thẻ riêng từng tập.
+    expect(screen.getByRole('button', { name: '打开项目 Phim Chen' })).toBeInTheDocument();
+    const seriesCard = screen.getByRole('button', { name: '打开项目 Phim Ba' });
+    expect(seriesCard).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /打开项目 《Phim Ba》/ })).not.toBeInTheDocument();
+    // Badge số tập gộp.
+    expect(seriesCard).toHaveTextContent('视频翻译 · 2 集');
+    // Mở thẻ → mở job chính (mới nhất).
+    fireEvent.click(seriesCard);
+    expect(onOpenJob).toHaveBeenCalledWith(expect.objectContaining({ id: 'series_ep_2' }));
+  });
+
+  it('deletes every episode job when deleting a grouped series card', async () => {
+    const onDeleteJob = vi.fn(async () => undefined);
+    render(
+      <ProjectsPage
+        jobs={seriesEpisodes}
+        workspaces={workspaces}
+        onOpenJob={vi.fn()}
+        onDeleteJob={onDeleteJob}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '删除项目 Phim Ba' }));
+    fireEvent.click(within(screen.getByRole('alertdialog', { name: '删除项目' })).getByRole('button', { name: '删除' }));
+    await waitFor(() => {
+      expect(onDeleteJob).toHaveBeenCalledWith('series_ep_1', { deleteFiles: false });
+      expect(onDeleteJob).toHaveBeenCalledWith('series_ep_2', { deleteFiles: false });
+    });
+    expect(onDeleteJob).toHaveBeenCalledTimes(2);
+  });
+
+  it('groups filenames ending with the episode number (no 《》) and prefers sourceSeriesKey', () => {
+    const digitJobs = [
+      creatorJob({
+        id: 'digits_ep_1',
+        templateId: 'video-translation',
+        state: { sourceType: 'file', sourceFileName: '天赋万古无双，只手横推三千帝 1.mp4' },
+        updatedAt: '2026-09-01T00:00:00.000Z'
+      }),
+      creatorJob({
+        id: 'digits_ep_2',
+        templateId: 'video-translation',
+        state: { sourceType: 'file', sourceFileName: '天赋万古无双，只手横推三千帝 200.mp4' },
+        updatedAt: '2026-09-02T00:00:00.000Z'
+      }),
+      // File lẻ tự đặt tên có số cuối nhưng không cách bằng khoảng trắng ⇒ thẻ riêng.
+      creatorJob({
+        id: 'solo_file',
+        templateId: 'video-translation',
+        state: { sourceType: 'file', sourceFileName: 'opencreator-dich-1.mp4' },
+        updatedAt: '2026-09-03T00:00:00.000Z'
+      })
+    ];
+    render(<ProjectsPage jobs={digitJobs} workspaces={workspaces} onOpenJob={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: '打开项目 天赋万古无双，只手横推三千帝' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开项目 opencreator-dich-1.mp4' })).toBeInTheDocument();
+  });
+
   it('explains that projects appear after the user starts creating', () => {
     render(<ProjectsPage jobs={[]} workspaces={workspaces} onOpenJob={vi.fn()} />);
 

@@ -56,6 +56,70 @@ function readString(record: Record<string, unknown>, keys: readonly string[]): s
   return '';
 }
 
+/**
+ * Tìm key bộ phim trong object lồng nhau (kiểu `hongguoInfo.series_id` của task
+ * tải Hồng Quả) — đọc theo tầng: key riêng của object trước, rồi con (DFS).
+ */
+function findNestedSeriesKey(value: unknown, depth = 0): string | undefined {
+  if (depth > 6 || Array.isArray(value) || typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const seriesId = readString(record, ['seriesId', 'series_id']);
+  if (seriesId !== '') return `honggua:${seriesId}`;
+  const seriesTitle = readString(record, ['seriesTitle', 'series_title']);
+  if (seriesTitle !== '') return `title:${seriesNameFromTitle(seriesTitle)}`;
+  for (const child of Object.values(record)) {
+    if (typeof child !== 'object' || child === null) continue;
+    const found = findNestedSeriesKey(child, depth + 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** Rút tên bộ phim từ tiêu đề: thẻ `《tên phim》` nếu có, không → chuỗi nguyên. */
+function seriesNameFromTitle(source: string): string {
+  const match = source.match(/《(.+?)》/);
+  return (match?.[1] ?? source).trim();
+}
+
+/** Giá trị seriesKey phẳng: đã có tiền tố trải dùng nguyên, còn lại coi là id Hồng Quả. */
+function normalizeSeriesKey(value: string): string {
+  const trimmed = value.trim();
+  return /^(honggua|title|folder|solo):/.test(trimmed) ? trimmed : `honggua:${trimmed}`;
+}
+
+/** Fallback cuối: thư mục cha tải của Hồng Quả `<tên bộ>-<hash>` — chỉ nhận khi
+ * tên thư mục có hậu tố hash để không ghép nhầm các video lẻ cùng một thư mục. */
+function seriesKeyFromFolder(path: string): string | undefined {
+  const segments = path.split(/[\\/]/).filter(segment => segment !== '');
+  const folder = segments.at(-2);
+  if (folder === undefined) return undefined;
+  const match = folder.match(/^(.+)-[0-9a-f]{6,}$/i);
+  if (match === null || match[1] === undefined) return undefined;
+  const cleaned = match[1].trim();
+  return cleaned === '' ? undefined : `folder:${cleaned}`;
+}
+
+/**
+ * Suy key bộ phim cho một task tải xong: key phẳng có sẵn → object lồng nhau
+ * (`hongguoInfo`) → thẻ `《tên phim》` trong tiêu đề → thư mục cha của file.
+ * Không suy ra được ⇒ undefined (video lẻ, giữ hành vi cũ).
+ */
+function detectSeriesKey(
+  record: Record<string, unknown>,
+  title: string,
+  path: string
+): string | undefined {
+  const flat = readString(record, ['seriesKey', 'series_key', 'seriesId', 'series_id', 'series']);
+  if (flat !== '') return normalizeSeriesKey(flat);
+  const nested = findNestedSeriesKey(record);
+  if (nested !== undefined) return nested;
+  const fromTitle = seriesNameFromTitle(title);
+  if (fromTitle !== '' && title.includes('《')) return `title:${fromTitle}`;
+  return seriesKeyFromFolder(path);
+}
+
 function readNumber(record: Record<string, unknown>, keys: readonly string[]): number | undefined {
   for (const key of keys) {
     const value = record[key];
@@ -107,12 +171,14 @@ export function extractDownloadedEpisodes(payload: unknown): DramaDownloadedEpis
         ? readString(record, ['title', 'name', 'episodeTitle', 'episode_title'])
         : path.split(/[\\/]/).pop() ?? path;
       const episodeIndex = readNumber(record, ['episodeIndex', 'episode_index', 'index', 'no', 'number']);
-      const seriesKey = readString(record, ['seriesKey', 'series_key', 'seriesId', 'series_id', 'series']);
+      // seriesKey tự suy (object lồng nhau / tiêu đề 《...》/ thư mục cha) để các
+      // tập của CÙNG MỘT bộ vào chung nhóm dịch "dịch cả bộ", không lẫn phim khác.
+      const seriesKey = detectSeriesKey(record, title, path);
       episodes.push({
         path,
         title,
         ...(episodeIndex === undefined ? {} : { episodeIndex }),
-        ...(seriesKey === '' ? {} : { seriesKey })
+        ...(seriesKey === undefined ? {} : { seriesKey })
       });
     }
   }
@@ -158,7 +224,12 @@ export function createDramaDownloadBridge(deps: DramaDownloadBridgeDeps): {
         path: episode.path,
         title: episode.title,
         ...(episode.episodeIndex === undefined ? {} : { episodeIndex: episode.episodeIndex }),
-        ...(episode.seriesKey === undefined ? {} : { seriesKey: episode.seriesKey })
+        // Có seriesKey ⇒ vào nhóm "dịch cả bộ": không tự nạp đăng tung tập,
+        // dịch xong toàn bộ mới ghép full movie rồi nạp đăng. Video lẻ giữ hành
+        // vi cũ (tự nạp đăng từng tập).
+        ...(episode.seriesKey === undefined
+          ? {}
+          : { seriesKey: episode.seriesKey, batchMode: true })
       });
     }
     if (requests.length > 0) {
