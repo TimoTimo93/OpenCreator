@@ -38,6 +38,17 @@ import type { YtDlpRuntime } from '../creator/yt-dlp/runtime.js';
 import { createSocialComments, type SocialLlmConfig } from './comments.js';
 import { aiComposeVideoMeta, aiTestReply, type SocialAiCompose, type SocialAiReplyTestInput } from './ai.js';
 import { listDownloadedVideos, type SocialDownloadItem } from './downloads.js';
+import {
+  deletePendingUpload,
+  insertPendingUpload,
+  listPendingUploads,
+  readAutoAssignEnabled,
+  readPendingUpload,
+  readRoundRobinIndex,
+  writeAutoAssignEnabled,
+  writeRoundRobinIndex,
+  type SocialPendingUploadRow
+} from './pending-uploads.js';
 import { createYoutubeChannel } from './platforms/youtube-channel.js';
 import { createFacebookPage, signUpTiktokViaGoogle } from './platforms/account-signup.js';
 import { createFacebookAccountWithGmail, isFacebookSignedIn } from './platforms/facebook-account.js';
@@ -142,16 +153,24 @@ export type SocialService = {
   listComments(clusterId?: string, limit?: number): SocialComment[];
   scanComments(clusterId?: string): Promise<SocialCommentScanResult>;
   /**
-   * GĐ4 — tự nạp đăng sau dịch (hook gọi từ daemon khi pipeline dịch xong 1 tập):
-   * tìm mọi cụm đang bật autoPublishAfterTranslate và xếp video vào hàng đợi
-   * của từng cụm (không truyền scheduledAt → Auto-Slot khung giờ vàng).
+   * v2.6 — HÀNG CHỜ UPLOAD 2 TẦNG: video ghép xong (hook từ daemon) tự vào
+   * DANH SÁCH CHỜ UPLOAD nhưng CHƯA chọn nhóm đăng. Gán nhóm đích theo 2 cơ chế:
+   * thủ công (người dùng chọn cụm) hoặc tự động (xoay vòng cụm 1→N→1 theo
+   * thứ tự danh sách) — gán xong xếp ngay Auto-Slot giờ vàng.
    */
-  enqueueAfterTranslate(request: SocialAfterTranslateRequest): {
-    accepted: number;
-    duplicates: string[];
-    /** id các cụm bật tự nạp đã xử lý (nạp mới hoặc trùng — để log/diag). */
-    clusters: string[];
+  addPendingUpload(request: { path: string; title: string }): {
+    pending: SocialPendingUploadsView;
+    /** Cụm được TỰ ĐỘNG gán ngay sau(create video; null khi chờ/select thủ công). */
+    autoAssignedClusterId: string | null;
   };
+  /** Danh sách chờ upload (chưa gán nhóm) + trạng thái cơ chế tự động. */
+  listPendingUploads(): SocialPendingUploadsView;
+  /** THỦ CÔNG: gán 1 video chờ vào 1 cụm (xếp slot giờ vàng ngay). */
+  assignPendingUpload(id: string, clusterId: string): SocialOverview;
+  /** Gỡ 1 video khỏi danh sách chờ (không đăng). */
+  removePendingUpload(id: string): SocialPendingUploadsView;
+  /** Bật/tắt cơ chế TỰ ĐỘNG gán nhóm; bật → xếp nốt danh sách đang chờ. */
+  setUploadAutoAssign(enabled: boolean): SocialPendingUploadsView;
   /** AI tích hợp sẵn: sinh tiêu đề + mô tả + hashtag chuẩn SEO cho 1 video. */
   aiComposeVideoMeta(input: { videoTitle: string; language?: string }): Promise<SocialAiCompose>;
   /** AI tích hợp sẵn: thử phản hồi bình luận — chỉ sinh chữ, không đăng thật. */
@@ -163,14 +182,10 @@ export type SocialService = {
   close(): Promise<void>;
 };
 
-export type SocialAfterTranslateRequest = {
-  /** File video đã dịch xong (đường dẫn tuyệt đối trên đĩa). */
-  path: string;
-  title: string;
-  /** null/undefined → không ghép đuôi " — Tập n". */
-  episodeIndex?: number | null;
-  /** Passthrough từ pipeline enqueue (A3) — chỉ mang theo, social không dùng. */
-  projectId?: string | null;
+/** v2.6: vòng chờ upload chưa gán nhóm (thay cho tự nạp tung tập). */
+export type SocialPendingUploadsView = {
+  autoAssign: boolean;
+  items: Array<{ id: string; path: string; title: string; createdAt: string }>;
 };
 
 export class SocialError extends Error {
@@ -559,6 +574,51 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       jobs,
       screenshotDir,
       browserOpenClusters: worker.openClusterIds()
+    };
+  }
+
+  /** Tự gán 1 mục chờ: xoay vòng cụm theo thứ tự danh sách 1→N→1. */
+  function autoAssignPending(row: SocialPendingUploadRow): string | null {
+    if (!readAutoAssignEnabled(db)) return null;
+    const clusters = listClusterRows(db).map(clusterRow => mapCluster(clusterRow).id);
+    if (clusters.length === 0) return null;
+    const index = readRoundRobinIndex(db) % clusters.length;
+    const target = clusters[index];
+    if (target === undefined) return null;
+    let result: { accepted: number; duplicates: string[] };
+    try {
+      result = enqueueVideos([{
+        clusterId: target,
+        path: row.videoPath,
+        title: row.title,
+        // scheduledAt trống → Auto-Slot xếp khung giờ trống tiếp theo.
+      }]);
+    } catch (error) {
+      console.warn(`[social] tự động gán nhóm cho hàng chờ upload thất bại: ${
+        error instanceof Error ? error.message : String(error)
+      }`);
+      return null;
+    }
+    if (result.accepted === 0) {
+      // Trùng job đang có (ghép lại cùng bộ) → gỡ khỏi danh sách, không đếm.
+      deletePendingUpload(db, row.id);
+      return null;
+    }
+    writeRoundRobinIndex(db, index + 1);
+    deletePendingUpload(db, row.id);
+    return target;
+  }
+
+  /** Danh sách chờ upload (chưa gán nhóm) cho web + API. */
+  function pendingView(): SocialPendingUploadsView {
+    return {
+      autoAssign: readAutoAssignEnabled(db),
+      items: listPendingUploads(db).map(row => ({
+        id: row.id,
+        path: row.videoPath,
+        title: row.title,
+        createdAt: row.createdAt
+      }))
     };
   }
 
@@ -1132,27 +1192,53 @@ export function createSocialService(input: SocialServiceInput): SocialService {
       return comments.scan(clusterId);
     },
 
-    enqueueAfterTranslate(request: SocialAfterTranslateRequest) {
-      const path = request.path.trim();
-      if (path === '') return { accepted: 0, duplicates: [], clusters: [] };
-      // Chỉ cụm đang bật công tắc mới nhận video tự nạp; cụm tắt → không nạp gì
-      // (nút thủ công trên web vẫn là đường đăng bình thường).
-      const clusters = listClusterRows(db)
-        .filter(row => row.auto_publish_after_translate === 1)
-        .map(row => mapCluster(row).id);
-      if (clusters.length === 0) return { accepted: 0, duplicates: [], clusters: [] };
-      const episodeSuffix = typeof request.episodeIndex === 'number' && Number.isFinite(request.episodeIndex)
-        ? ` — Tập ${Math.trunc(request.episodeIndex)}`
-        : '';
-      const title = `${request.title.trim()}${episodeSuffix}`;
-      const result = enqueueVideos(clusters.map(clusterId => ({
+    addPendingUpload(request: { path: string; title: string }) {
+      if (request.path.trim() === '') {
+        return { pending: pendingView(), autoAssignedClusterId: null };
+      }
+      const { row, created } = insertPendingUpload(db, {
+        path: request.path,
+        title: request.title,
+        now
+      });
+      const clusterId = created ? autoAssignPending(row) : null;
+      return { pending: pendingView(), autoAssignedClusterId: clusterId };
+    },
+
+    listPendingUploads(): SocialPendingUploadsView {
+      return pendingView();
+    },
+
+    assignPendingUpload(id: string, clusterId: string): SocialOverview {
+      // THỦ CÔNG: chọn cụm đích cho 1 video đang chờ.
+      const row = readPendingUpload(db, id);
+      if (row === undefined) {
+        throw new SocialError('social_pending_not_found', 'Video không còn trong hàng chờ upload');
+      }
+      enqueueVideos([{
         clusterId,
-        path,
-        title,
-        // scheduledAt bỏ trống → Auto-Slot xếp khung giờ trống tiếp theo.
-        // platformSettings không truyền → mặc định từng nền tảng.
-      })));
-      return { accepted: result.accepted, duplicates: result.duplicates, clusters };
+        path: row.videoPath,
+        title: row.title,
+        // Auto-Slot: xếp ngay khung giờ trống tiếp theo của cụm.
+      }]);
+      deletePendingUpload(db, id);
+      return overview();
+    },
+
+    removePendingUpload(id: string): SocialPendingUploadsView {
+      deletePendingUpload(db, id);
+      return pendingView();
+    },
+
+    setUploadAutoAssign(enabled: boolean): SocialPendingUploadsView {
+      writeAutoAssignEnabled(db, enabled);
+      if (enabled) {
+        // Bật cơ chế tự động → xếp ngay nốt các video đang chờ (xoay vòng).
+        for (const row of listPendingUploads(db)) {
+          autoAssignPending(row);
+        }
+      }
+      return pendingView();
     },
 
     async aiComposeVideoMeta(input: { videoTitle: string; language?: string }): Promise<SocialAiCompose> {

@@ -371,6 +371,22 @@ export type SocialSelectorsResult = {
   selectors: string;
 };
 
+// ---------------------------------------------------------------------------
+// Hàng chờ Upload 2 tầng — video ghép thành công chưa chọn nhóm đăng
+// ---------------------------------------------------------------------------
+
+export type SocialPendingUploadItem = {
+  id: string;
+  path: string;
+  title: string;
+  createdAt: string;
+};
+
+export type SocialPendingUploads = {
+  autoAssign: boolean;
+  items: SocialPendingUploadItem[];
+};
+
 export function createSocialService(client: RuntimeClient) {
   return {
     getOverview(): Promise<SocialOverview> {
@@ -480,6 +496,22 @@ export function createSocialService(client: RuntimeClient) {
     /** Lưu selectors.json mới (daemon tự backup .bak). */
     saveSelectors(selectors: string): Promise<SocialSelectorsResult> {
       return client.put('/social/selectors', { selectors });
+    },
+    /** Hàng chờ upload 2 tầng: video ghép xong chưa chọn nhóm đăng. */
+    getPendingUploads(): Promise<SocialPendingUploads> {
+      return client.get('/social/pending-uploads');
+    },
+    /** Gán thủ công video chờ vào 1 cụm (daemon xếp slot giờ vàng ngay). */
+    assignPendingUpload(id: string, clusterId: string): Promise<SocialOverview> {
+      return client.post(`/social/pending-uploads/${encodeURIComponent(id)}/assign`, { clusterId });
+    },
+    /** Gỡ video khỏi danh sách chờ upload. */
+    removePendingUpload(id: string): Promise<SocialOverview> {
+      return client.delete(`/social/pending-uploads/${encodeURIComponent(id)}`);
+    },
+    /** Bật/tắt tự động gán nhóm (xoay vòng 1→N→1; bật xếp nốt backlog). */
+    setPendingUploadsAutoAssign(enabled: boolean): Promise<SocialOverview> {
+      return client.post('/social/pending-uploads/auto-assign', { enabled });
     },
     /** Ảnh chụp màn hình lỗi của job (chỉ khi nền tảng đã chụp; không có → null). */
     async getErrorScreenshot(jobId: string, platform: 'yt' | 'tk' | 'fb'): Promise<{ url: string } | null> {

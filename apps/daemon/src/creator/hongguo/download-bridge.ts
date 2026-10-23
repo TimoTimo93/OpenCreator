@@ -189,7 +189,7 @@ export type DramaDownloadBridgeDeps = {
   /** Lấy payload download-tasks (qua thành phần Hồng Quá). */
   listTasks: () => Promise<unknown>;
   /** Nạp tập vào pipeline dịch. */
-  enqueue: (requests: readonly PipelineEnqueueRequest[]) => unknown;
+  enqueue: (requests: readonly PipelineEnqueueRequest[]) => unknown | Promise<unknown>;
   /** Ghi log. */
   log?: (message: string) => void;
   /** Chu kỳ thăm dò (ms). */
@@ -234,7 +234,7 @@ export function createDramaDownloadBridge(deps: DramaDownloadBridgeDeps): {
     }
     if (requests.length > 0) {
       try {
-        deps.enqueue(requests);
+        await deps.enqueue(requests);
         deps.log?.(`[creator] Hồng Quá: đã nối ${requests.length} tập vào hàng đợi dịch video`);
       } catch (error) {
         deps.log?.(`[creator] Hồng Quá: nối vào hàng đợi dịch thất bại — ${error instanceof Error ? error.message : String(error)}`);

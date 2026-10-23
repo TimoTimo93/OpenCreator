@@ -1,7 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { join, normalize } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename as nodeBasename, dirname, extname, join, normalize } from 'node:path';
+import {
+  fileExists,
+  isPathInside,
+  moveVideoIntoFile,
+  sanitizeFolderName,
+  seriesFolderName,
+  type MediaStorageRoots
+} from './media-storage.js';
 import type { CreatorArtifact, CreatorJob, CreatorJson } from '@opencreator/protocol';
 import type { CreatorCommandDispatcher } from '../command-dispatcher.js';
 import { validateMediaFile, type MediaProbe } from '../validators/media.js';
@@ -58,6 +66,12 @@ export type PipelineEpisode = {
    * hook `onMerged` nạp full movie (chống đăng dư tung tập).
    */
   batchMode?: boolean;
+  /**
+   * v2.6 sắp xếp nơi lưu: đường dẫn nguồn TRƯỚC khi file được dời về
+   * `data\download\<tên bộ>\` — dùng để chống nạp lặp (tick Hồng Quá vẫn
+   * liệt kê file ở đường dẫn cũ).
+   */
+  movedFrom?: string | null;
 };
 
 export type TranslationPipelineMerge = {
@@ -86,6 +100,8 @@ export type TranslationPipelineSummary = TranslationPipelineState & {
 
 export type PipelineEnqueueRequest = {
   path: string;
+  /** v2.6: đường dẫn gốc trước khi pipeline dời file về thư mục download theo bộ. */
+  originalPath?: string;
   title?: string;
   seriesKey?: string | null;
   episodeIndex?: number | null;
@@ -97,7 +113,7 @@ export type PipelineEnqueueRequest = {
 
 export type TranslationPipelineService = {
   getSummary(): TranslationPipelineSummary;
-  enqueue(requests: readonly PipelineEnqueueRequest[]): TranslationPipelineSummary;
+  enqueue(requests: readonly PipelineEnqueueRequest[]): Promise<TranslationPipelineSummary>;
   pause(): TranslationPipelineSummary;
   resume(): TranslationPipelineSummary;
   remove(episodeId: string): TranslationPipelineSummary;
@@ -128,6 +144,11 @@ export type TranslationPipelineServiceInput = {
       lastModified: number | null;
       media: MediaProbe;
     }): { job: CreatorJob; artifact: CreatorArtifact; deduplicated: boolean };
+    /**
+     * v2.6: cập nhật đường dẫn artifact trong DB sau khi video dịch được dời
+     * về `data\translate` — viewer/trang dự án vẫn mở được video đúng chỗ mới.
+     */
+    updateArtifactPath?(jobId: string, fromPath: string, toPath: string): void;
   };
   dispatcher: Pick<CreatorCommandDispatcher, 'dispatchWorkflow'>;
   projects: {
@@ -142,6 +163,18 @@ export type TranslationPipelineServiceInput = {
   ffmpegPath: string | undefined;
   ffprobePath: string | undefined;
   ensureRuntimeReady(): Promise<void>;
+  /**
+   * v2.6 — bố cục lưu media cạnh nơi cài app (`data\download`, `data\translate`,
+   * `data\merging & upload`). Khi có:
+   * - nạp dịch: file nguồn cho BỘ PHIM được dời về `download\<tên bộ>\`;
+   * - dịch xong từng tập: video ngang dời về `translate[\<tên bộ>]\`, cập nhật
+   *   artifact trong DB, và video gốc trong `download` bị XOÁ;
+   * - ghép xong: full movie nằm trong `merging & upload[\<tên bộ>]\` — chính là
+   *   nguồn tự nạp upload (hook onMerged).
+   * Không truyền → giữ hành vi cũ (upload-pending, không dời/xoá gì) cho các
+   * môi trường/lượt kiểm thử cấu hình theo lối cũ.
+   */
+  mediaRoots?: MediaStorageRoots;
   /**
    * GĐ4 — hook tự nạp đăng sau dịch, cài ở server.ts (điều khiển từ DAEMON):
    * gọi mỗi khi một tập dịch xong; cài đặt sẽ thông báo trong app + xếp video
@@ -196,13 +229,22 @@ export function createTranslationPipelineService(
   const now = input.now ?? (() => new Date().toISOString());
   const pipelineDir = join(input.dataDir, 'translation-pipeline');
   const statePath = join(pipelineDir, 'pipeline.json');
-  const uploadFolder = join(input.dataDir, 'upload-pending');
+  // Hành vi cũ (môi trường/kiểm thử không truyền mediaRoots): full movie nằm
+  // trong `<dataDir>/upload-pending`. v2.6 khi có mediaRoots thì xem trong
+  // uploadFolderFor() → `data\merging & upload[\<tên bộ>]\`.
+  const legacyUploadFolder = join(input.dataDir, 'upload-pending');
   let closed = false;
   let pumpRunning = false;
   let mergeRunning = false;
   // v2: đảm bảo thư mục đợi upload tồn tại ngay khi pipeline lên — không chờ
   // tới lúc ghép xong mới tạo (web/luồng đa kênh cần xem trước thư mục này).
-  void mkdir(uploadFolder, { recursive: true }).catch(() => undefined);
+  void mkdir(legacyUploadFolder, { recursive: true }).catch(() => undefined);
+  // v2.6: các thư mục media của bố cục mới cũng được báo trước.
+  if (input.mediaRoots !== undefined) {
+    void mkdir(input.mediaRoots.download, { recursive: true }).catch(() => undefined);
+    void mkdir(input.mediaRoots.translate, { recursive: true }).catch(() => undefined);
+    void mkdir(input.mediaRoots.merging, { recursive: true }).catch(() => undefined);
+  }
 
   function ensureTools(): void {
     if (input.ffmpegPath === undefined) {
@@ -300,24 +342,77 @@ export function createTranslationPipelineService(
     }, () => undefined);
   }
 
+  /**
+   * v2.6: dời file nguồn của BỘ PHIM về `data\download\<tên bộ>\` trước khi
+   * nạp dịch (file lẻ / không suy được tên bộ → giữ nguyên). Đừng đụng file theo
+   * yêu cầu nằm trong `translate`/`merging & upload` (video đã xử lý — giữ nguyên
+   * tránh nạp lặp), file thiếu (tick Hồng Quá có thể nối lặp) cũng bỏ qua.
+   */
+  async function normalizeEnqueueSource(
+    request: PipelineEnqueueRequest
+  ): Promise<PipelineEnqueueRequest> {
+    const mediaRoots = input.mediaRoots;
+    if (mediaRoots === undefined) return request;
+    const fallbackKey = inferSeriesKeyFromTitle(
+      request.title !== undefined && request.title !== '' ? request.title : baseName(request.path)
+    );
+    const seriesKey = request.seriesKey !== undefined && request.seriesKey !== null && request.seriesKey.trim() !== ''
+      ? request.seriesKey.trim()
+      : fallbackKey;
+    if (seriesKey === null) return request;
+    const sourcePath = normalizePath(request.path);
+    if (sourcePath === '') return request;
+    if (isPathInside(sourcePath, mediaRoots.translate) || isPathInside(sourcePath, mediaRoots.merging)) {
+      return request;
+    }
+    if (!(await fileExists(sourcePath))) return request;
+    const folder = seriesFolderName(seriesKey, request.title);
+    if (folder === null) return request;
+    const targetDir = join(mediaRoots.download, folder);
+    if (isPathInside(sourcePath, targetDir)) return request;
+    try {
+      const moved = await moveVideoIntoFile({ sourcePath, targetDir });
+      if (moved === null || moved === sourcePath) return request;
+      return { ...request, path: moved, originalPath: sourcePath };
+    } catch (error) {
+      console.warn(`[translation-pipeline] dời file tải về về thư mục download thất bại: ${
+        error instanceof Error ? error.message : String(error)
+      }`);
+      return request;
+    }
+  }
+
   return {
     getSummary(): TranslationPipelineSummary {
       return summarize(readState());
     },
-    enqueue(requests: readonly PipelineEnqueueRequest[]): TranslationPipelineSummary {
+    async enqueue(requests: readonly PipelineEnqueueRequest[]): Promise<TranslationPipelineSummary> {
       ensureTools();
       let accepted = 0;
       let summary: TranslationPipelineSummary | undefined;
+      // v2.6 — sắp xếp nơi lưu file nguồn TRƯỚC khi ghi state: file của một
+      // bộ phim (seriesKey có tên_SCENE đọc được) được dời về
+      // `data\download\<tên bộ>\` (cùng ổ → rename, khác ổ → copy rồi xoá).
+      const prepared = await Promise.all(
+        requests.map(request => normalizeEnqueueSource(request))
+      );
       mutateSync(draft => {
-        const seen = new Set(draft.items.map(item => item.sourcePath));
+        // Đánh dấu chống nạp lặp: cả đường dẫn hiện tại LẪN đường dẫn gốc
+        // (movedFrom) — Hồng Quá tick lại vẫn liệt kê file ở đường dẫn cũ.
+        const seen = new Set<string>();
+        for (const item of draft.items) {
+          seen.add(item.sourcePath);
+          if (item.movedFrom) seen.add(item.movedFrom);
+        }
         // Các bộ bị đụng tới trong lượt nạp này — nạp đợt mới → phiên ghép mới
         // cho CHÍNH nhóm đó (không xoá ghép của bộ khác).
         const touchedSeries = new Set<string | null>();
-        for (const request of requests) {
+        for (const request of prepared) {
           const path = normalizePath(request.path);
           if (path === '' || seen.has(path)) continue;
           if (draft.items.length >= MAX_SOURCE_ITEMS) break;
           seen.add(path);
+          if (request.originalPath !== undefined) seen.add(normalizePath(request.originalPath));
           // Không truyền episodeIndex → tự trích số tập từ tiêu đề / tên file
           // ("Tập 01", "EP01", "S01E02", "第03集", số cuối) để ghép đúng thứ tự.
           const episodeIndex = typeof request.episodeIndex === 'number' && Number.isFinite(request.episodeIndex)
@@ -350,7 +445,8 @@ export function createTranslationPipelineService(
               ? request.projectId.trim()
               : null,
             socialEnqueuedAt: null,
-            batchMode: request.batchMode === true
+            batchMode: request.batchMode === true,
+            movedFrom: request.originalPath === undefined ? null : normalizePath(request.originalPath)
           });
           accepted += 1;
         }
@@ -455,7 +551,7 @@ export function createTranslationPipelineService(
   function summarize(state: TranslationPipelineState): TranslationPipelineSummary {
     return {
       ...state,
-      uploadFolder,
+      uploadFolder: input.mediaRoots?.merging ?? legacyUploadFolder,
       counts: {
         queued: state.items.filter(item => item.status === 'queued').length,
         running: state.items.filter(item => item.status === 'running').length,
@@ -600,21 +696,96 @@ export function createTranslationPipelineService(
     if (video === undefined || video.path === null) {
       throw new Error('Dịch xong nhưng không tìm thấy video ngang trong artifacts');
     }
-    const probe = await probeSource(video.path);
-    const outputPath = normalizePath(video.path);
+    const artifactOriginalPath = video.path;
+    let movedVideoPath: string | null = null;
+    {
+      // v2.6 — đưa video đã dịch về `data\translate[\<tên bộ>]`: video lẻ nằm
+      // trực tiếp trong `translate`, mỗi bộ một thư mục con theo tên phim.
+      const folder = input.mediaRoots === undefined
+        ? null
+        : (item.seriesKey === null
+          ? null
+          : seriesFolderName(item.seriesKey, item.title));
+      const targetDir = input.mediaRoots === undefined
+        ? null
+        : (folder === null ? input.mediaRoots.translate : join(input.mediaRoots.translate, folder));
+      try {
+        movedVideoPath = await moveVideoIntoFile({
+          sourcePath: artifactOriginalPath,
+          targetDir,
+          // Tên file theo tiêu đề tập (dọn ký tự cấm) — trùng tên tự đánh số.
+          preferredName: item.title
+        });
+      } catch (error) {
+        // Dời thất bại (hết đĩa ở đích…) — KHÔNG làm mục dịch thất bại; video
+        // vẫn ở artifacts, chỉ cảnh báo.
+        console.warn(`[translation-pipeline] dời video đã dịch về thư mục translate thất bại: ${
+          error instanceof Error ? error.message : String(error)
+        }`);
+        movedVideoPath = null;
+      }
+      if (movedVideoPath !== null) {
+        // Đồng bộ artifact trong DB (trang dự án/job vẫn mở được video).
+        try {
+          input.creator.updateArtifactPath?.(job.id, artifactOriginalPath, movedVideoPath);
+        } catch (error) {
+          console.warn(`[translation-pipeline] cập nhật artifact thất bại: ${
+            error instanceof Error ? error.message : String(error)
+          }`);
+        }
+      }
+    }
+    const probe = await probeSource(movedVideoPath ?? artifactOriginalPath);
+    const outputPath = normalizePath(movedVideoPath ?? artifactOriginalPath);
     applyItem(item.id, {
       status: 'completed',
       outputVideoPath: outputPath,
       durationSeconds: Math.round(probe.duration),
       error: null
     });
-    // GĐ4: báo daemon "tập này đã dịch xong" (thông báo + tự nạp đăng theo cụm).
+    // v2.6 — dịch xong tập này ⇒ XOÁ video gốc trong `data\download` (chỉ khi
+    // đã chắc video dịch nằm đúng chỗ; file ngoài download thì để nguyên).
+    if (movedVideoPath !== null) {
+      await deleteDownloadedSource(item.sourcePath);
+    }
+    // GĐ4: báo daemon "tập này đã dịch xong" (thông báo trong app).
     await afterEpisodeCompleted(item.id, {
       projectId: usedProjectId,
       videoPath: outputPath,
       title: item.title,
       episodeIndex: item.episodeIndex === null ? undefined : item.episodeIndex
     });
+  }
+
+  /**
+   * v2.6: xoá video gốc đã tải về sau khi tập dịch xong. Chỉ xoá khi file nằm
+   * trong `data\download` (file người dùng đặt chỗ khác thì nguyên vẹn). Lỗi
+   * xoá chỉ cảnh báo — không làm mục dịch thất bại. Thư mục con của bộ rỗng
+   * được dọn luôn (best-effort).
+   */
+  async function deleteDownloadedSource(sourcePath: string): Promise<void> {
+    const downloadRoot = input.mediaRoots?.download;
+    if (downloadRoot === undefined) return;
+    const normalized = normalizePath(sourcePath);
+    if (!isPathInside(normalized, downloadRoot)) return;
+    try {
+      await rm(normalized, { force: false });
+    } catch (error) {
+      console.warn(`[translation-pipeline] xoá video gốc trong download thất bại: ${
+        error instanceof Error ? error.message : String(error)
+      }`);
+      return;
+    }
+    // Thư mục cha của bộ (download\<tên bộ>) trống → dọn luôn.
+    const parentDir = dirname(normalized);
+    if (isPathInside(parentDir, downloadRoot) && parentDir !== downloadRoot) {
+      try {
+        const remaining = await readdir(parentDir);
+        if (remaining.length === 0) await rm(parentDir, { recursive: true });
+      } catch {
+        // bỏ qua — dọn rác không quan trọng
+      }
+    }
   }
 
   /** Dựng project cho job dịch: item.projectId còn tồn tại → dùng, không → mặc định. */
@@ -832,6 +1003,37 @@ export function createTranslationPipelineService(
     }
   }
 
+  /**
+   * v2.6: thư mục để put full movie ghép xong theo BỘ — `merging & upload\<tên bộ>\`;
+   * trường hợp đặc biệt (không có mediaRoots dùng cấu hình cũ; không có tên bộ → chính là root).
+   */
+  function uploadFolderFor(seriesKey: string | null): string {
+    if (input.mediaRoots === undefined) return legacyUploadFolder;
+    const folder = seriesFolderName(seriesKey);
+    return folder === null ? input.mediaRoots.merging : join(input.mediaRoots.merging, folder);
+  }
+
+  /** Giữ tên file full movie an toàn (bỏ ký tự cấm, không đè file khác). */
+  function fileStem(title: string): string | null {
+    return sanitizeFolderName(title);
+  }
+
+  /** Tên file trống trả về giống nhau; thêm (2)(3)… nếu tên đã tồn tại. */
+  function uniqueUploadPath(directory: string, fileName: string): string {
+    let candidate = join(directory, fileName);
+    for (let attempt = 2; attempt < 1_000; attempt += 1) {
+      if (!existsSync(candidate)) break;
+      candidate = join(directory, `${fileStemStem(fileName)} (${attempt})${extname(fileName)}`);
+    }
+    return candidate;
+  }
+
+  /** Ổn định tên gốc + phần mở rộng ra khỏi tên file. */
+  function fileStemStem(fileName: string): string {
+    const extension = extname(fileName);
+    return fileName.slice(0, fileName.length - extension.length);
+  }
+
   /** Ghép 1 nhóm: hiểu rõ mở trạng thái → ffmpeg (hoặc copy 1 tập) → nạp onMerged. */
   async function mergeGroup(
     seriesKey: string | null,
@@ -859,48 +1061,51 @@ export function createTranslationPipelineService(
         error: null
       });
     });
+    // v2.6: nếu ffmpeg chết giữa chừng thì file dở phải khỏi nằm lại trong
+    // "merging & upload" (thư mục này CHỈ chứa video ghép thành công).
+    let uploadPath: string | null = null;
     try {
-      await mkdir(pipelineDir, { recursive: true });
       // Ghép theo THỨ TỰ TẬP (episodeIndex) — không lệch, không lộn xộn.
       const segments = [...completed].sort(compareMergeOrder).map((item, index): SegmentSpec => ({
         path: item.outputVideoPath!,
         episodeIndex: item.episodeIndex,
         positionHint: index + 1
       }));
+      // v2.6 — full movie nằm trong `data\merging & upload[\<tên bộ>]\` (chỗ
+      // "video ghép thành công", nguồn tự nạp upload); KHÔNG có mediaRoots →
+      // giữ `<dataDir>/upload-pending` cho các môi trường cấu hình cũ.
+      const title = fullMovieTitle(seriesKey, group);
+      const uploadFolder = uploadFolderFor(seriesKey);
+      await mkdir(uploadFolder, { recursive: true });
+      uploadPath = uniqueUploadPath(uploadFolder, `${fileStem(title) ?? `pending-full-${runId}`}.mp4`);
       let report: { outputPath: string; durationSeconds: number };
       if (segments.length === 1) {
         // Bộ chỉ có 1 tập: mergeVideoSegments yêu cầu ≥2 phân đoạn — bỏ ffmpeg,
-        // lấy thẳng phân đoạn đó làm full movie (công bằng, không báo lỗi).
+        // copy thẳng phân đoạn đó làm full movie (công bằng, không báo lỗi).
         report = {
-          outputPath: segments[0]!.path,
+          outputPath: uploadPath,
           durationSeconds: completed[0]!.durationSeconds ?? 0
         };
+        await copyFile(segments[0]!.path, uploadPath);
       } else {
-        const outputPath = join(pipelineDir, `merged-${runId}.mp4`);
         const merged = (input.mergeSegments !== undefined
           ? await input.mergeSegments({
               ffmpegPath: input.ffmpegPath!,
               ffprobePath: input.ffprobePath!,
               segments,
-              outputPath
+              outputPath: uploadPath
             })
           : await mergeVideoSegments({
               ffmpegPath: input.ffmpegPath!,
               ffprobePath: input.ffprobePath!,
               segments,
-              outputPath
+              outputPath: uploadPath
             }));
         report = { outputPath: merged.outputPath, durationSeconds: merged.durationSeconds };
       }
       if (!Number.isFinite(report.durationSeconds)) {
         throw new Error('Video ghép không đọc được thời lượng');
       }
-      await mkdir(uploadFolder, { recursive: true });
-      // Tên đầy đủ cho file full movie load vào hàng đợi đa kênh.
-      const title = fullMovieTitle(seriesKey, group);
-      const uploadPath = join(uploadFolder, `pending-full-${runId}.mp4`);
-      await rm(uploadPath, { force: true });
-      await copyFile(report.outputPath, uploadPath);
       mutateSync(draft => {
         for (const item of draft.items) {
           if ((item.seriesKey ?? null) !== seriesKey) continue;
@@ -939,6 +1144,9 @@ export function createTranslationPipelineService(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[translation-pipeline] ghép video thất bại: ${message}`);
+      if (uploadPath !== null) {
+        await rm(uploadPath, { force: true }).catch(() => undefined);
+      }
       mutateSync(draft => {
         setMerge(draft, seriesKey, {
           status: 'failed',

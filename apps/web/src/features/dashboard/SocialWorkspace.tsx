@@ -26,6 +26,8 @@ import type {
   SocialJobPlatformSettings,
   SocialJobSummary,
   SocialOverview,
+  SocialPendingUploadItem,
+  SocialPendingUploads,
   SocialService,
   SocialTranslatedVideo,
   SocialPlatformName
@@ -162,6 +164,8 @@ export default function SocialWorkspace(props: {
   const [consoleOpen, setConsoleOpen] = useState(true);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [selectedJobId, setSelectedJobId] = useState('');
+  /** Hàng chờ upload 2 tầng (video ghép chưa chọn nhóm) — null khi daemon cũ không có endpoint. */
+  const [pendingUploads, setPendingUploads] = useState<SocialPendingUploads | null>(null);
   const overviewRef = useRef<SocialOverview | null>(null);
 
   const pushLog = useCallback((text: string, level: LogLine['level'] = 'info') => {
@@ -199,6 +203,10 @@ export default function SocialWorkspace(props: {
       setOverview(data);
       setError('');
       setInsightsKey(key => key + 1);
+      // Hàng chờ upload 2 tầng — refresh cùng nhịp poll (mục mới xuất hiện sau ghép);
+      // daemon cũ chưa có endpoint → ẩn panel, không báo lỗi.
+      const pending = await service.getPendingUploads().catch((): null => null);
+      setPendingUploads(pending);
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -468,6 +476,17 @@ export default function SocialWorkspace(props: {
           ) : null}
           {activeTab === 'calendar' ? (
             <>
+              {/* Hàng chờ upload 2 tầng: video ghép xong chưa chọn nhóm — đặt trên composer, gọn */}
+              {pendingUploads !== null ? (
+                <PendingUploadsPanel
+                  data={pendingUploads}
+                  clusters={clusters}
+                  t={t}
+                  onAssign={(item, clusterId) => void action(t('dashboard.social.enqueued'), () => service.assignPendingUpload(item.id, clusterId))}
+                  onRemove={item => void action(t('dashboard.social.jobRemoved'), () => service.removePendingUpload(item.id))}
+                  onToggleAuto={enabled => void action(t('dashboard.social.autoPublishSaved'), () => service.setPendingUploadsAutoAssign(enabled))}
+                />
+              ) : null}
               {/* Composer đặt TRÊN lịch: đủ chỗ cho nút "Xếp Lịch Đăng" trên màn 1080p không cần cuộn. */}
               <ComposerBlock
                 clusters={clusters}
@@ -1623,6 +1642,82 @@ function ErrorInspector(props: {
 }
 
 // ---------------------------------------------------------------------------
+// Hàng chờ Upload 2 tầng — video ghép xong chưa chọn nhóm đăng
+// ---------------------------------------------------------------------------
+
+function PendingUploadsPanel(props: {
+  data: SocialPendingUploads;
+  clusters: SocialClusterSummary[];
+  t: Translate;
+  onAssign(item: SocialPendingUploadItem, clusterId: string): void;
+  onRemove(item: SocialPendingUploadItem): void;
+  onToggleAuto(enabled: boolean): void;
+}) {
+  const { data, t } = props;
+  return (
+    <div className="social-pending" aria-label={t('dashboard.social.pendingUploadTitle')}>
+      <div className="social-pending-head">
+        <span className="social-pending-title">⬆ {t('dashboard.social.pendingUploadTitle')}</span>
+        {data.autoAssign ? (
+          <span className="social-chip social-chip-scheduled" title={t('dashboard.social.autoPublishHint')}>
+            {t('dashboard.social.pendingUploadRoundRobin')}
+          </span>
+        ) : null}
+        <label className="social-switch" title={t('dashboard.social.autoPublishHint')}>
+          <input
+            type="checkbox"
+            data-testid="social-pending-autoassign"
+            checked={data.autoAssign}
+            onChange={event => props.onToggleAuto(event.target.checked)}
+          />
+          {t('dashboard.social.pendingUploadAutoToggle')}
+        </label>
+      </div>
+      {data.items.length === 0 ? (
+        <p className="social-empty">{t('dashboard.social.pendingUploadEmpty')}</p>
+      ) : (
+        <ul className="social-pending-list">
+          {data.items.map(item => (
+            <li key={item.id} className="social-pending-row">
+              <span className="social-pending-row-name" title={item.path}>
+                {item.title !== '' ? item.title : fileNameOf(item.path)}
+              </span>
+              <span className="social-pending-row-when">{formatSchedule(item.createdAt)}</span>
+              <select
+                className="social-pending-row-assign"
+                value=""
+                aria-label={`${t('dashboard.social.pendingUploadAssign')} ${item.title !== '' ? item.title : fileNameOf(item.path)}`}
+                onChange={event => {
+                  const clusterId = event.target.value;
+                  // Trả select về trạng thái chờ chọn sau khi gán.
+                  event.target.value = '';
+                  if (clusterId !== '') props.onAssign(item, clusterId);
+                }}
+              >
+                <option value="">{t('dashboard.social.pendingUploadAssign')}…</option>
+                {props.clusters.map(cluster => (
+                  <option key={cluster.id} value={cluster.id}>
+                    {cluster.name}{cluster.seriesName !== '' ? ` (${cluster.seriesName})` : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="social-btn social-btn-sm social-btn-danger"
+                title={t('dashboard.social.remove')}
+                onClick={() => props.onRemove(item)}
+              >
+                🗑
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Composer đa kênh — trình bày inline trong tab Lịch Đăng như demo
 // ---------------------------------------------------------------------------
 
@@ -2341,7 +2436,7 @@ function ClusterEditor(props: {
               checked={autoPublishAfterTranslate}
               onChange={event => setAutoPublishAfterTranslate(event.target.checked)}
             />
-            {' '}📥 Tự nạp đăng sau khi dịch xong
+            {' '}📥 Nhận video ghép tự động
           </label>
           <label>
             <input

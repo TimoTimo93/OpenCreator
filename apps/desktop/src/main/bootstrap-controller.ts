@@ -47,6 +47,8 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
     logger: DesktopLogger;
     daemonEntryPath: string;
     appHome: string;
+    /** v2.6: thư mục cài app — daemon lưu media vào `<appRoot>\data\...`. */
+    appRoot?: string;
     dataDir: string;
     codexRuntimeRoot: string;
     creatorRuntimeRoot: string;
@@ -392,6 +394,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
       cwd: environment.defaultCwd,
       env: environment.env,
       appHome: this.input.appHome,
+      appRoot: this.input.appRoot,
       codexBin: environment.codexBin,
       codexHome: environment.codexHome,
       codexVersion: environment.version,

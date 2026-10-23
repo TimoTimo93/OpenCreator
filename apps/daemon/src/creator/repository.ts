@@ -169,6 +169,8 @@ export type CreatorRepository = {
     agentThreadId?: string | null;
   }): void;
   setArtifactStatus(id: string, status: CreatorArtifactStatus): void;
+  /** v2.6: đổi đường dẫn artifact (video dịch được dời về data\translate). */
+  updateArtifactPath(jobId: string, fromPath: string, toPath: string): void;
   insertArtifact(input: InsertArtifactInput): CreatorArtifact;
   insertActivity(input: InsertActivityInput): CreatorActivity;
   updateActivity(input: {
@@ -559,6 +561,9 @@ export function createCreatorRepository(
     },
     setArtifactStatus(id: string, status: CreatorArtifactStatus): void {
       db.prepare('UPDATE creator_artifacts SET status = ? WHERE id = ?').run(status, id);
+    },
+    updateArtifactPath(jobId: string, fromPath: string, toPath: string): void {
+      db.prepare('UPDATE creator_artifacts SET path = ? WHERE job_id = ? AND path = ?').run(toPath, jobId, fromPath);
     },
     insertArtifact,
     insertActivity,

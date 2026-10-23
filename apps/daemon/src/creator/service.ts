@@ -288,8 +288,7 @@ export function createCreatorService(input: {
         hasAudio: boolean;
       };
     }): { job: CreatorJob; artifact: CreatorArtifact; deduplicated: boolean } {
-      return repository.transaction(() => {
-        const current = repository.getJob(jobId);
+      return repository.transaction(() => {        const current = repository.getJob(jobId);
         if (current === undefined) {
           throw new CreatorServiceError('creator_job_not_found', 'Creator job not found');
         }
@@ -374,6 +373,13 @@ export function createCreatorService(input: {
           deduplicated: false
         };
       });
+    },
+    /**
+     * v2.6: đổi đường dẫn artifact (video đã dịch được dời sang
+     * `data\translate...`). Trận này không đổi revision — chỉ nhắm path tệp.
+     */
+    updateArtifactPath(jobId: string, fromPath: string, toPath: string): void {
+      repository.updateArtifactPath(jobId, fromPath, toPath);
     },
     registerImportedSourceVideo(jobId: string, input: {
       expectedRevision: number;

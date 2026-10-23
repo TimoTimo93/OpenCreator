@@ -373,64 +373,73 @@ describe('social service — autoPublishAfterTranslate (công tắc theo cụm)'
   });
 });
 
-describe('social service — enqueueAfterTranslate (hook tự nạp đăng)', () => {
-  it('chỉ nạp cho cụm ĐANG bật; cụm tắt không có job; title ghép " — Tập n"', async () => {
+describe('social service — hàng chờ upload 2 tầng (v2.6)', () => {
+  it('mặc định TỰ ĐỘNG: video ghép vào chờ → tự gán cụm + slot giờ vàng', async () => {
     const { service } = await makeService();
-    service.createCluster({ name: 'Bật', autoPublishAfterTranslate: true, defaultScheduleTimes: ['19:30'] });
-    service.createCluster({ name: 'Tắt', autoPublishAfterTranslate: false });
-    const clusters = service.getOverview().clusters;
-    const enabled = clusters.find(cluster => cluster.name === 'Bật')!;
-    const disabled = clusters.find(cluster => cluster.name === 'Tắt')!;
-
-    const result = service.enqueueAfterTranslate({
-      path: 'D:/dich/tap-5.mp4',
-      title: 'Long Hổ Riệu',
-      episodeIndex: 5
-    });
-    expect(result.accepted).toBe(1);
-    expect(result.clusters).toEqual([enabled.id]);
+    service.createCluster({ name: 'Nhóm 1', defaultScheduleTimes: ['19:30'] });
+    const result = service.addPendingUpload({ path: 'D:/ghép/phim-full-1.mp4', title: 'Phim (Full Movie)' });
+    expect(result.pending.autoAssign).toBe(true);
+    expect(result.autoAssignedClusterId).toBe(service.getOverview().clusters[0]!.id);
+    // Đã gán → khỏi danh sách chờ, vào hàng đợi cụm.
+    expect(service.listPendingUploads().items).toHaveLength(0);
     const jobs = service.getOverview().jobs;
     expect(jobs).toHaveLength(1);
-    expect(jobs[0]!.clusterId).toBe(enabled.id);
-    expect(jobs[0]!.clusterId).not.toBe(disabled.id);
-    expect(jobs[0]!.title).toBe('Long Hổ Riệu — Tập 5');
-    // scheduledAt bỏ trống → tự xếp khung giờ vàng (tương lai, không phải rác).
+    expect(jobs[0]!.title).toBe('Phim (Full Movie)');
     expect(new Date(jobs[0]!.scheduledAt).getTime()).toBeGreaterThan(Date.now() - 60_000);
   });
 
-  it('không có cụm nào bật → không nạp gì (banner web cũ vẫn là đường thủ công)', async () => {
+  it('2 cụm + TỰ ĐỘNG → xoay vòng theo thứ tự danh sách 1→2→1', async () => {
     const { service } = await makeService();
-    service.createCluster({ name: 'Tắt hẳn', autoPublishAfterTranslate: false });
-    const result = service.enqueueAfterTranslate({ path: 'D:/dich/tap-1.mp4', title: 'Phim', episodeIndex: 1 });
-    expect(result.accepted).toBe(0);
-    expect(result.clusters).toEqual([]);
+    service.createCluster({ name: 'Nhóm 1', defaultScheduleTimes: ['19:30'] });
+    service.createCluster({ name: 'Nhóm 2', defaultScheduleTimes: ['19:30'] });
+    const ids = service.getOverview().clusters.map(cluster => cluster.id);
+    const first = service.addPendingUpload({ path: 'D:/m/bo-1.mp4', title: 'Bộ 1' });
+    const second = service.addPendingUpload({ path: 'D:/m/bo-2.mp4', title: 'Bộ 2' });
+    const third = service.addPendingUpload({ path: 'D:/m/bo-3.mp4', title: 'Bộ 3' });
+    expect(first.autoAssignedClusterId).toBe(ids[0]);
+    expect(second.autoAssignedClusterId).toBe(ids[1]);
+    expect(third.autoAssignedClusterId).toBe(ids[0]);
+    expect(service.listPendingUploads().items).toHaveLength(0);
+    expect(service.getOverview().jobs).toHaveLength(3);
+  });
+
+  it('auto TẮT → video nằm chờ UNASSIGNED; gán THỦ CÔNG vào cụm được chọn', async () => {
+    const { service } = await makeService();
+    service.createCluster({ name: 'Nhóm 1' });
+    service.createCluster({ name: 'Nhóm 2' });
+    service.setUploadAutoAssign(false);
+    const view = service.addPendingUpload({ path: 'D:/m/bo-4.mp4', title: 'Bộ 4' });
+    expect(view.autoAssignedClusterId).toBe(null);
+    const pending = service.listPendingUploads();
+    expect(pending.autoAssign).toBe(false);
+    expect(pending.items).toHaveLength(1);
     expect(service.getOverview().jobs).toHaveLength(0);
+    // Gán thủ công → chọn ĐÚNG cụm mình muốn (không xoay vòng).
+    const target = service.getOverview().clusters[1]!.id;
+    service.assignPendingUpload(pending.items[0]!.id, target);
+    const jobs = service.getOverview().jobs;
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.clusterId).toBe(target);
+    expect(service.listPendingUploads().items).toHaveLength(0);
   });
 
-  it('không có episodeIndex → title giữ nguyên (không đuôi " — Tập")', async () => {
+  it('cùng PATH nạp 2 lần → không nhân đôi (video chỉ vào chờ 1 lần)', async () => {
     const { service } = await makeService();
-    service.createCluster({ name: 'Bật', autoPublishAfterTranslate: true });
-    const result = service.enqueueAfterTranslate({ path: 'D:/dich/full.mp4', title: 'Phim hay' });
-    expect(result.accepted).toBe(1);
-    expect(service.getOverview().jobs[0]!.title).toBe('Phim hay');
-  });
-
-  it('nạp lặp cùng path → duplicate (không tạo job thứ hai)', async () => {
-    const { service } = await makeService();
-    service.createCluster({ name: 'Bật', autoPublishAfterTranslate: true });
-    const first = service.enqueueAfterTranslate({ path: 'D:/dich/tap-2.mp4', title: 'Phim', episodeIndex: 2 });
-    expect(first.accepted).toBe(1);
-    const second = service.enqueueAfterTranslate({ path: 'D:/dich/tap-2.mp4', title: 'Phim', episodeIndex: 2 });
-    expect(second.accepted).toBe(0);
+    service.createCluster({ name: 'Nhóm 1' });
+    const first = service.addPendingUpload({ path: 'D:/m/f.mp4', title: 'F' });
+    const second = service.addPendingUpload({ path: 'D:/m/f.mp4', title: 'F' });
+    expect(second.autoAssignedClusterId).toBe(null);
+    // Job không bị tạo thêm lần 2.
     expect(service.getOverview().jobs).toHaveLength(1);
   });
 
-  it('path rỗng → không nạp, không ném', async () => {
+  it('removePendingUpload gỡ khỏi danh sách chờ; không có cụm → đợi cho tới khi tạo', async () => {
     const { service } = await makeService();
-    service.createCluster({ name: 'Bật', autoPublishAfterTranslate: true });
-    const result = service.enqueueAfterTranslate({ path: '   ', title: 'Phim' });
-    expect(result.accepted).toBe(0);
-    expect(result.clusters).toEqual([]);
-    expect(service.getOverview().jobs).toHaveLength(0);
+    // Chưa có cụm nào → tự động không gán được, video nằm chờ.
+    const view = service.addPendingUpload({ path: 'D:/m/bo-5.mp4', title: 'Bộ 5' });
+    expect(view.autoAssignedClusterId).toBe(null);
+    expect(service.listPendingUploads().items).toHaveLength(1);
+    service.removePendingUpload(view.pending.items[0]!.id);
+    expect(service.listPendingUploads().items).toHaveLength(0);
   });
 });

@@ -15,6 +15,7 @@ import {
   type SocialPlatformState
 } from './types.js';
 import { normalizeDatabaseTimestamp } from '../storage/database.js';
+import { ensurePendingUploadsSchema } from './pending-uploads.js';
 
 export type SocialDB = Database.Database;
 
@@ -101,6 +102,7 @@ export function openSocialDatabase(path: string): SocialDB {
       value TEXT NOT NULL DEFAULT ''
     );
   `);
+  ensurePendingUploadsSchema(db);
   // GĐ3: bảng thống kê + bình luận (cộng thêm — không đổi bảng cũ).
   db.exec(`
     CREATE TABLE IF NOT EXISTS social_stats (

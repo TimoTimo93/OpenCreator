@@ -41,6 +41,8 @@ export type DaemonStartInput = {
   cwd: string;
   env: NodeJS.ProcessEnv;
   appHome: string;
+  /** v2.6: thư mục cài app — daemon lưu media vào `<appRoot>\data\...`. */
+  appRoot?: string;
   codexBin: string;
   codexHome: string;
   codexVersion: string;
@@ -368,6 +370,8 @@ export function buildDaemonEnvironment(
   const env = { ...input.env };
   Object.assign(env, {
     OPENCREATOR_HOME: input.appHome,
+    // v2.6: gốc lưu media — thư mục cài app (`<appRoot>\data\download` v.v.).
+    ...(input.appRoot === undefined ? {} : { OPENCREATOR_APP_ROOT: input.appRoot }),
     OPENCREATOR_MANAGED_PARENT_PID: String(process.pid),
     OPENCREATOR_CODEX_BIN: input.codexBin,
     OPENCREATOR_CODEX_VERSION: input.codexVersion,

@@ -9,6 +9,12 @@ import {
   createTranslationPipelineService,
   type TranslationPipelineSummary
 } from '../../src/creator/translation-pipeline/pipeline.js';
+import {
+  resolveMediaStorageRoots,
+  seriesFolderName,
+  isPathInside,
+  type MediaStorageRoots
+} from '../../src/creator/translation-pipeline/media-storage.js';
 import type { MediaProbe } from '../../src/creator/validators/media.js';
 
 const cleanupDirs: Array<{ path: string }> = [];
@@ -26,9 +32,11 @@ type FakeJobEntry = {
 
 function makeFakeCreator() {
   const jobs = new Map<string, FakeJobEntry>();
+  const updateArtifactCalls: Array<{ jobId: string; fromPath: string; toPath: string }> = [];
   let nextId = 0;
   return {
     jobs,
+    updateArtifactCalls,
     creator: {
       createJob(_request: { creationKey?: string }): CreatorJob {
         const id = `job_${nextId += 1}`;
@@ -76,6 +84,18 @@ function makeFakeCreator() {
         entry.artifacts.push(artifact);
         entry.job.revision += 1;
         return { job: entry.job, artifact, deduplicated: false };
+      },
+      updateArtifactPath(jobId: string, fromPath: string, toPath: string): void {
+        const entry = jobs.get(jobId);
+        if (entry === undefined) return;
+        updateArtifactCalls.push({ jobId, fromPath, toPath });
+        for (let index = entry.artifacts.length - 1; index >= 0; index -= 1) {
+          const artifact = entry.artifacts[index];
+          if (artifact?.path === fromPath) {
+            artifact.path = toPath;
+            return;
+          }
+        }
       }
     }
   };
@@ -179,6 +199,8 @@ async function makeService(options: {
     title: string;
     episodeCount: number;
   }) => Promise<void>;
+  /** v2.6: bố cục media mới (download/translate/merging & upload). */
+  mediaRoots?: MediaStorageRoots;
   getProject?: (projectId: string) => { projectId: string } | undefined;
 } = {}): Promise<{
   service: ReturnType<typeof build>;
@@ -186,10 +208,11 @@ async function makeService(options: {
   sourcePaths: string[];
   mergeCalls: Array<Array<string>>;
   createJobRequests: Array<{ projectId: string; creationKey?: string }>;
+  updateArtifactCalls: Array<{ jobId: string; fromPath: string; toPath: string }>;
 }> {
   const dataDir = options.dataDir ?? await mkdtemp(join(tmpdir(), 'oc-pipeline-test-'));
   trackTempDir(dataDir);
-  const { creator, jobs } = makeFakeCreator();
+  const { creator, jobs, updateArtifactCalls } = makeFakeCreator();
   const { dispatcher } = makeFakeDispatcher(jobs, options.stageDelayMs ?? 20);
   const createJobRequests: Array<{ projectId: string; creationKey?: string }> = [];
   const creatorWithCapture = {
@@ -209,6 +232,7 @@ async function makeService(options: {
   const mergeCalls: Array<Array<string>> = [];
   const service = createTranslationPipelineService({
     dataDir,
+    ...(options.mediaRoots === undefined ? {} : { mediaRoots: options.mediaRoots }),
     creator: creatorWithCapture,
     dispatcher,
     projects: {
@@ -242,7 +266,7 @@ async function makeService(options: {
   function build() {
     return service;
   }
-  return { service: build(), dataDir, sourcePaths, mergeCalls, createJobRequests };
+  return { service: build(), dataDir, sourcePaths, mergeCalls, createJobRequests, updateArtifactCalls };
 }
 
 async function waitForSettle(service: {
@@ -270,12 +294,12 @@ afterAll(async () => {
 describe('translation pipeline service', () => {
   it('enqueue khử trùng theo đường dẫn, tự chạy tuần tự và ghép đúng thứ tự số tập', async () => {
     const { service, sourcePaths, mergeCalls } = await makeService();
-    const first = service.enqueue([
+    const first = await service.enqueue([
       { path: sourcePaths[0]!, title: 'Tập 2', seriesKey: 'series-A', episodeIndex: 2 },
       { path: sourcePaths[1]!, title: 'Tập 1', seriesKey: 'series-A', episodeIndex: 1 }
     ]);
     expect(first.items).toHaveLength(2);
-    const second = service.enqueue([{ path: sourcePaths[0]!, episodeIndex: 2 }]);
+    const second = await service.enqueue([{ path: sourcePaths[0]!, episodeIndex: 2 }]);
     expect(second.items).toHaveLength(2);
 
     const summary = await waitForSettle(service);
@@ -297,7 +321,7 @@ describe('translation pipeline service', () => {
     const { service, sourcePaths, mergeCalls } = await makeService({
       failProbeIndex: 0
     });
-    const summary = service.enqueue([
+    const summary = await service.enqueue([
       { path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 },
       { path: sourcePaths[1]!, title: 'Tập 2', episodeIndex: 2 }
     ]);
@@ -317,7 +341,7 @@ describe('translation pipeline service', () => {
   it('paused chặn chạy; resume tiếp tục', async () => {
     const { service, sourcePaths } = await makeService();
     service.pause();
-    service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
+    await service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
     await new Promise(resolvePromise => setTimeout(resolvePromise, 150));
     expect(service.getSummary().counts.queued).toBe(1);
     service.resume();
@@ -328,13 +352,13 @@ describe('translation pipeline service', () => {
   it('remove hủy mục running thành canceled và retry về hàng chờ', async () => {
     const { service, sourcePaths } = await makeService({ stageDelayMs: 150 });
     service.pause();
-    const summary = service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
+    const summary = await service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
     const itemId = summary.items[0]!.id;
     // Mục queued bị gỡ thẳng khỏi hàng đợi.
     service.remove(itemId);
     expect(service.getSummary().items).toHaveLength(0);
     // Nạp lại và chờ mục vào running rồi hủy.
-    const summary2 = service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
+    const summary2 = await service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
     const itemId2 = summary2.items[0]!.id;
     service.resume();
     await new Promise(resolvePromise => setTimeout(resolvePromise, 220));
@@ -385,9 +409,9 @@ describe('translation pipeline v2 — dịch cả bộ', () => {
     // Nạp lộn xộn: ep 100 trước, rồi 3, rồi 1..2. (Test này kiểm THỨ TỰ DỊCH —
     // v2.5 mọi mục bộ không gọi hook từng tập ⇒ bỏ seriesKey để hook phản ánh
     // thứ tự hoàn thành.)
-    service.enqueue([{ path: extraPaths[0]!, title: 'Tập 100', episodeIndex: 100 }]);
+    await service.enqueue([{ path: extraPaths[0]!, title: 'Tập 100', episodeIndex: 100 }]);
     await waitFor(() => service.getSummary().counts.running === 1);
-    service.enqueue([
+    await service.enqueue([
       { path: extraPaths[1]!, title: 'Tập 3', episodeIndex: 3 },
       { path: extraPaths[2]!, title: 'Tập 1', episodeIndex: 1 },
       { path: extraPaths[3]!, title: 'Tập 2', episodeIndex: 2 }
@@ -410,7 +434,7 @@ describe('translation pipeline v2 — dịch cả bộ', () => {
       },
       getProject: projectId => ({ projectId, name: 'Mối Tình Đầu' })
     });
-    service.enqueue([
+    await service.enqueue([
       { path: sourcePaths[0]!, title: 'Tập 1', seriesKey: 'series-A', episodeIndex: 1, projectId: 'project_9', batchMode: true },
       { path: sourcePaths[1]!, title: 'Tập 2', seriesKey: 'series-A', episodeIndex: 2, projectId: 'project_9', batchMode: true }
     ]);
@@ -438,7 +462,7 @@ describe('translation pipeline v2 — dịch cả bộ', () => {
         mergedKeys.push(info.seriesKey);
       }
     });
-    service.enqueue([
+    await service.enqueue([
       { path: sourcePaths[0]!, title: 'S1-Tập 1', seriesKey: 'series-1', episodeIndex: 1, batchMode: true },
       { path: sourcePaths[1]!, title: 'S2-Tập 1', seriesKey: 'series-2', episodeIndex: 1, batchMode: true }
     ]);
@@ -505,7 +529,7 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
       },
       getProject: projectId => ({ projectId })
     });
-    service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 3', episodeIndex: 3, projectId: 'project_9' }]);
+    await service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 3', episodeIndex: 3, projectId: 'project_9' }]);
     await waitForSettle(service);
     expect(hookCalls).toHaveLength(1);
     expect(hookCalls[0]!.title).toBe('Tập 3');
@@ -522,7 +546,7 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
         throw new Error('social db khóa');
       }
     });
-    service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
+    await service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
     const after = await waitForSettle(service);
     expect(after.counts.completed).toBe(1);
     expect(after.counts.failed).toBe(0);
@@ -536,7 +560,7 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
         hookCalls.push(info);
       }
     });
-    first.service.enqueue([{ path: first.sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
+    await first.service.enqueue([{ path: first.sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
     await waitForSettle(first.service);
     expect(hookCalls).toHaveLength(1);
     await waitFor(() => first.service.getSummary().items[0]!.socialEnqueuedAt != null);
@@ -554,7 +578,7 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
 
   it('restart với mục completed CHƯA đánh dấu (rớt giữa hook) → recover gọi hook đúng 1 lần rồi tự ghi', async () => {
     const first = await makeService(); // không cắm hook → dịch xong, không đánh dấu
-    first.service.enqueue([{ path: first.sourcePaths[0]!, title: 'Tập 2', episodeIndex: 2 }]);
+    await first.service.enqueue([{ path: first.sourcePaths[0]!, title: 'Tập 2', episodeIndex: 2 }]);
     await waitForSettle(first.service);
     expect(first.service.getSummary().items[0]!.socialEnqueuedAt ?? null).toBeNull();
 
@@ -578,7 +602,7 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
     const { service, sourcePaths, createJobRequests } = await makeService({
       getProject: projectId => projectId === 'project_9' ? { projectId: 'project_9' } : undefined
     });
-    service.enqueue([
+    await service.enqueue([
       { path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1, projectId: 'project_9' },
       { path: sourcePaths[1]!, title: 'Tập 2', episodeIndex: 2, projectId: 'project_lost' }
     ]);
@@ -591,7 +615,7 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
 
   it('không cắm hook → pipeline vẫn chạy bình thường (mặc định cũ)', async () => {
     const { service, sourcePaths } = await makeService();
-    service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
+    await service.enqueue([{ path: sourcePaths[0]!, title: 'Tập 1', episodeIndex: 1 }]);
     const after = await waitForSettle(service);
     expect(after.counts.completed).toBe(1);
     expect(after.items[0]!.socialEnqueuedAt ?? null).toBeNull();
@@ -609,7 +633,7 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
       onEpisodeCompleted: async info => { hookCalls.push({ title: info.title }); },
       onMerged: async info => { mergeCalls.push({ title: info.title, episodeCount: info.episodeCount }); }
     });
-    service.enqueue([
+    await service.enqueue([
       { path: sourcePaths[0]!, title: '《天赋万古无双，只手横推三千帝》 Tập 1', episodeIndex: 1 },
       { path: sourcePaths[1]!, title: '《天赋万古无双，只手横推三千帝》 Tập 2', episodeIndex: 2 }
     ]);
@@ -628,7 +652,7 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
     const { service, sourcePaths, mergeCalls: mergeSegments } = await makeService({
       onEpisodeCompleted: async info => { hookCalls.push({ title: info.title }); }
     });
-    service.enqueue([{ path: sourcePaths[0]!, title: 'OpenCreator kiem tra dich video', episodeIndex: 1 }]);
+    await service.enqueue([{ path: sourcePaths[0]!, title: 'OpenCreator kiem tra dich video', episodeIndex: 1 }]);
     const after = await waitForSettle(service);
     expect(after.items[0]!.seriesKey ?? null).toBeNull();
     expect(hookCalls).toHaveLength(1);
@@ -637,7 +661,7 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
 
   it('nhóm lẻ (seriesKey null) KHÔNG được tự ghép — không trộn video không liên quan', async () => {
     const { service, sourcePaths, mergeCalls } = await makeService();
-    service.enqueue([
+    await service.enqueue([
       { path: sourcePaths[0]!, title: 'video lẻ Một', episodeIndex: 1 },
       { path: sourcePaths[1]!, title: 'video lẻ Hai', episodeIndex: 2 }
     ]);
@@ -675,5 +699,77 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
     const summary = second.service.getSummary();
     expect(summary.items[0]!.seriesKey).toBe('title:Bộ phim A');
     expect(summary.items[1]!.seriesKey ?? null).toBeNull(); // đã nạp đăng → giữ nguyên
+  });
+});
+
+describe('translation pipeline v2.6 — bố cục media data\\download / translate / merging & upload', () => {
+  it('seriesFolderName đọc tên bộ từ key (bỏ hash Hồng Quá, thẻ 《》)', () => {
+    expect(seriesFolderName('title:Tên Phim')).toBe('Tên Phim');
+    expect(seriesFolderName('folder:Tên hot-3f9c21')).toBe('Tên hot');
+    expect(seriesFolderName('honggua:123', '《Ánh Sáng Cuối》 Tập 1')).toBe('Ánh Sáng Cuối');
+    expect(seriesFolderName(null)).toBe(null); // video lẻ → nằm trực tiếp
+    expect(seriesFolderName('honggua:123')).toBe(null); // không gọi được tên
+    expect(seriesFolderName('title:abc<>:*')).toBe('abc'); // ký tự cấm bị dọn sạch
+  });
+
+  it('isPathInside đúng biên (chính root / con / ngoài)', () => {
+    const root = join('D:', 'm', 'data');
+    expect(isPathInside(join(root, 'a.mp4'), root)).toBe(true);
+    expect(isPathInside(join(root, 'b', 'a.mp4'), root)).toBe(true);
+    expect(isPathInside(root, root)).toBe(true);
+    expect(isPathInside(join(root, 'other', 'x.mp4'), join(root, 'other'))).toBe(true);
+    expect(isPathInside(join('D:', 'm', 'khác', 'a.mp4'), root)).toBe(false);
+  });
+
+  it('nạp tập thuộc BỘ → file nguồn dời về data\\download\\<Tên bộ>\\ + movedFrom chống nạp lặp', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'oc-pipeline-test-'));
+    trackTempDir(rootDir);
+    const { service, sourcePaths } = await makeService({
+      dataDir: rootDir,
+      mediaRoots: resolveMediaStorageRoots({ appRoot: rootDir, dataDir: rootDir })
+    });
+    const seriesFolder = join(rootDir, 'data', 'download', 'Bộ phim K');
+    const first = await service.enqueue([
+      { path: sourcePaths[0]!, title: '《Bộ phim K》 Tập 1', episodeIndex: 1 }
+    ]);
+    expect(first.items).toHaveLength(1);
+    // File bị DỜI vào thư mục theo tên phim (không còn ở chỗ cũ).
+    expect(existsSync(sourcePaths[0]!)).toBe(false);
+    expect(existsSync(join(seriesFolder, 'tap-01.mp4'))).toBe(true);
+    expect(first.items[0]!.sourcePath).toBe(join(seriesFolder, 'tap-01.mp4'));
+    expect(first.items[0]!.movedFrom).toBe(sourcePaths[0]);
+    // Tick Hồng Quá nối lại cùng đường dẫn cũ → KHÔNG nạp lặp.
+    const second = await service.enqueue([{ path: sourcePaths[0]!, title: '《Bộ phim K》 Tập 1', episodeIndex: 1 }]);
+    expect(second.items).toHaveLength(1);
+    expect(second.items[0]!.id).toBe(first.items[0]!.id);
+  });
+
+  it('dịch xong tập bộ → video về translate\\<bộ>\\, cập nhật artifact, XOÁ video gốc; full movie về merging & upload\\<bộ>', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'oc-pipeline-test-'));
+    trackTempDir(rootDir);
+    const { service, sourcePaths, mergeCalls, updateArtifactCalls } = await makeService({
+      dataDir: rootDir,
+      mediaRoots: resolveMediaStorageRoots({ appRoot: rootDir, dataDir: rootDir })
+    });
+    await service.enqueue([{ path: sourcePaths[0]!, title: '《Bộ phim K》 Tập 1', episodeIndex: 1 }]);
+    const after = await waitForSettle(service);
+    // 1 tập cũng ghép (copy thẳng phân đoạn) → full movie trong merging & upload.
+    const groupMerge = after.merges.find(entry => entry.seriesKey === 'title:Bộ phim K');
+    expect(groupMerge?.status).toBe('completed');
+    expect(groupMerge?.uploadReady).toContain(join('merging & upload', 'Bộ phim K'));
+    expect(existsSync(groupMerge?.uploadReady ?? '')).toBe(true);
+    expect(after.uploadFolder).toBe(join(rootDir, 'data', 'merging & upload'));
+    // Video đã dịch về translate\<bộ>, tên file lấy từ tiêu đề tập.
+    const output = after.items[0]!.outputVideoPath ?? '';
+    expect(output).toContain(join('translate', 'Bộ phim K'));
+    expect(output.endsWith('.mp4')).toBe(true);
+    expect(existsSync(output)).toBe(true);
+    // Artifact đọc chỗ mới (viewer dự án không hỏng).
+    expect(updateArtifactCalls).toHaveLength(1);
+    expect(updateArtifactCalls[0]!.toPath).toBe(output);
+    // Video gốc trong download bị XOÁ sau khi dịch xong (thư mục bộ rỗng được dọn).
+    expect(existsSync(join(rootDir, 'data', 'download', 'Bộ phim K'))).toBe(false);
+    // 1 tập — không qua ffmpeg thật; mergeSegments giả không chạy.
+    expect(mergeCalls).toHaveLength(0);
   });
 });

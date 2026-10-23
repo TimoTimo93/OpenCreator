@@ -30,6 +30,8 @@ import { classifyDouyinChallenge } from './issue-catalog.js';
 
 type DownloadExecutorOptions = {
   configStore: Pick<CreatorServicesConfigStore, 'read'>;
+  /** v2.6: root lưu video tải về mặc định (`data\download`) khi cấu hình bị trống. */
+  downloadRootFallback?: string;
   ytDlpPath: string;
   ytDlpPrefixArgs?: string[];
   ytDlpEnv?: NodeJS.ProcessEnv;
@@ -76,7 +78,8 @@ export function createDownloadExecutor(
       }
       const settings = await input.configStore.read();
       const proxy = settings.proxy.trim();
-      const downloadRoot = settings.downloadRoot.trim();
+      // v2.6: cấu hình trống → mặc định bố cục mới `<nơi cài>\data\download`.
+      const downloadRoot = settings.downloadRoot.trim() || input.downloadRootFallback?.trim() || '';
       if (stage.stageRun.stageId === 'probe') {
         return probe(input, url, proxy, stage);
       }

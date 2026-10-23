@@ -179,6 +179,8 @@ async function launchDesktop(): Promise<void> {
     logger,
     daemonEntryPath,
     appHome: paths.root,
+    // v2.6: gốc lưu media — thư mục cài app (exe dir) khi đóng gói, root repo khi dev.
+    appRoot: app.isPackaged ? dirname(app.getPath('exe')) : appRootPath,
     dataDir,
     codexRuntimeRoot,
     creatorRuntimeRoot,

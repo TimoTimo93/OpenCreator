@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+﻿import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSocialService } from './social-service.js';
 import type { SocialOverview } from './social-service.js';
@@ -17,7 +17,7 @@ import {
 
 type Call = { method: string; path: string; body?: unknown };
 
-function fakeClient() {
+function fakeClient(pending = pendingUploads()) {
   const calls: Call[] = [];
   return {
     calls,
@@ -37,6 +37,7 @@ function fakeClient() {
                 path: 'D:/downloads/tap-5.mp4', title: 'Tập 5', seriesName: 'Long Hổ Riệu',
                 downloadedAt: '2026-10-19T07:00:00.000Z', sizeBytes: 120 * 1024 * 1024
               }] }
+            : base === '/social/pending-uploads' ? pending
             : overview();
       },
       async post(path: string, body?: unknown) {
@@ -47,7 +48,7 @@ function fakeClient() {
               : overview();
       },
       async patch(path: string, body?: unknown) { calls.push({ method: 'PATCH', path, body }); return overview(); },
-      async delete(path: string) { calls.push({ method: 'DELETE', path }); return { clusters: [], jobs: [] } as never; }
+      async delete(path: string) { calls.push({ method: 'DELETE', path }); return overview(); }
     } as never as Parameters<typeof createSocialService>[0]
   };
 }
@@ -143,6 +144,18 @@ function enqueueResult() {
   return { accepted: 1, duplicates: [], summary: overview() };
 }
 
+/** Hàng chờ upload 2 tầng (mặc định tắt autoAssign — override cho test riêng). */
+function pendingUploads(autoAssign = false) {
+  return {
+    autoAssign,
+    items: [{
+      id: 'pu_1', path: 'D:/merged/tap-9-full.mp4', title: 'Tập 9 (Full)', createdAt: '2026-10-22T10:00:00.000Z'
+    }, {
+      id: 'pu_2', path: 'D:/merged/tap-10-full.mp4', title: '', createdAt: '2026-10-22T10:30:00.000Z'
+    }]
+  };
+}
+
 describe('createSocialService', () => {
   it('đường dẫn REST đúng từng động tác (gồm reschedule + downloads)', async () => {
     const { calls, client } = fakeClient();
@@ -166,6 +179,10 @@ describe('createSocialService', () => {
     await service.refreshStats();
     await service.listComments('cluster_a', 50);
     await service.scanComments('cluster_a');
+    await service.getPendingUploads();
+    await service.assignPendingUpload('pu_1', 'a1');
+    await service.removePendingUpload('pu_1');
+    await service.setPendingUploadsAutoAssign(true);
     expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
       'GET /social/overview',
       'POST /social/clusters',
@@ -185,10 +202,17 @@ describe('createSocialService', () => {
       'GET /social/stats',
       'POST /social/stats/refresh',
       'GET /social/comments?clusterId=cluster_a&limit=50',
-      'POST /social/comments/scan'
+      'POST /social/comments/scan',
+      'GET /social/pending-uploads',
+      'POST /social/pending-uploads/pu_1/assign',
+      'DELETE /social/pending-uploads/pu_1',
+      'POST /social/pending-uploads/auto-assign'
     ]);
     const patch = calls.find(call => call.method === 'PATCH' && call.path === '/social/jobs/j1');
     expect(patch?.body).toEqual({ scheduledAt: '2026-10-21T12:30:00.000Z' });
+    // Body chuẩn của 4 endpoint hàng chờ upload
+    expect(calls.find(call => call.path === '/social/pending-uploads/pu_1/assign')?.body).toEqual({ clusterId: 'a1' });
+    expect(calls.find(call => call.path === '/social/pending-uploads/auto-assign')?.body).toEqual({ enabled: true });
   });
 });
 
@@ -335,6 +359,90 @@ describe('SocialWorkspace — composer đa kênh', () => {
         }
       });
     });
+  });
+});
+
+describe('SocialWorkspace — hàng chờ upload 2 tầng', () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it('hiển thị item chờ trên tab 2; không autoAssign → chọn "Gán nhóm" gọi POST assign đúng cụm', async () => {
+    const { calls, client } = fakeClient();
+    render(
+      <LanguageProvider initialPreference="vi-VN">
+        <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
+      </LanguageProvider>
+    );
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
+    // Panel chờ upload với item đã ghép (tên rỗng → lấy tên file)
+    expect(await screen.findByText(/Chờ Upload \(chưa chọn nhóm\)/)).toBeInTheDocument();
+    expect(screen.getByText('Tập 9 (Full)')).toBeInTheDocument();
+    expect(screen.getByText('tap-10-full.mp4')).toBeInTheDocument();
+    // Chưa bật tự động → mỗi item có select Gán nhóm liệt kê cụm từ overview
+    const assignSelects = screen.getAllByLabelText(/Gán nhóm/);
+    expect(assignSelects).toHaveLength(2);
+    expect(screen.getAllByRole('option', { name: /Cụm A/ })).toHaveLength(2);
+    // Không có badge xoay vòng khi tắt
+    expect(screen.queryByText(/xoay vòng/)).not.toBeInTheDocument();
+    // Chọn cụm → POST /social/pending-uploads/pu_1/assign body {clusterId}
+    fireEvent.change(assignSelects[0]!, { target: { value: 'cluster_a' } });
+    await waitFor(() => {
+      const assign = calls.find(call => call.method === 'POST' && call.path === '/social/pending-uploads/pu_1/assign');
+      expect(assign).toBeDefined();
+      expect(assign!.body).toEqual({ clusterId: 'cluster_a' });
+    });
+  });
+
+  it('công tắc autoAssign gửi POST auto-assign {enabled}; bật → badge xoay vòng + item còn gán tay', async () => {
+    const { calls, client } = fakeClient(pendingUploads(true));
+    render(
+      <LanguageProvider initialPreference="vi-VN">
+        <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
+      </LanguageProvider>
+    );
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
+    // Bật sẵn → badge xoay vòng + select gán tay vẫn hiện cho từng item
+    expect(await screen.findByText(/xoay vòng/)).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/Gán nhóm/)).toHaveLength(2);
+    // Tắt tự động → POST {enabled:false}
+    const toggle = await screen.findByTestId('social-pending-autoassign') as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      const saved = calls.find(call => call.method === 'POST' && call.path === '/social/pending-uploads/auto-assign');
+      expect(saved).toBeDefined();
+      expect(saved!.body).toEqual({ enabled: false });
+    });
+  });
+
+  it('nút 🗑 gọi DELETE /social/pending-uploads/:id khỏi danh sách chờ', async () => {
+    const { calls, client } = fakeClient(pendingUploads(false));
+    render(
+      <LanguageProvider initialPreference="vi-VN">
+        <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
+      </LanguageProvider>
+    );
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
+    expect(await screen.findByText(/Chờ Upload \(chưa chọn nhóm\)/)).toBeInTheDocument();
+    // Gỡ item 1
+    fireEvent.click(within(screen.getAllByRole('listitem')[0]!).getByRole('button', { name: '🗑' }));
+    await waitFor(() => {
+      const removed = calls.find(call => call.method === 'DELETE' && call.path === '/social/pending-uploads/pu_1');
+      expect(removed).toBeDefined();
+    });
+  });
+
+  it('hàng chờ rỗng (autoAssign bật) hiển thị thông báo trống, không crash', async () => {
+    const { client } = fakeClient({ autoAssign: true, items: [] });
+    render(
+      <LanguageProvider initialPreference="vi-VN">
+        <SocialWorkspace service={createSocialService(client)} onBack={vi.fn()} />
+      </LanguageProvider>
+    );
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch Đăng & Composer/ }));
+    expect(await screen.findByText(/Chờ Upload \(chưa chọn nhóm\)/)).toBeInTheDocument();
+    expect(screen.getByText('Chưa có full movie nào trong hàng chờ.')).toBeInTheDocument();
   });
 });
 

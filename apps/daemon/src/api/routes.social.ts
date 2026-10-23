@@ -216,6 +216,51 @@ export async function registerSocialRoutes(
     }
   });
 
+  // v2.6 — HÀNG CHỜ UPLOAD 2 TẦNG (video ghép xong, CHƯA chọn nhóm).
+  server.get('/social/pending-uploads', async (request, reply) => {
+    try {
+      return social.listPendingUploads();
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.post<{ Params: { id: string }; Body: unknown }>('/social/pending-uploads/:id/assign', async (request, reply) => {
+    const body = (typeof request.body === 'object' && request.body !== null
+      ? request.body : {}) as Record<string, unknown>;
+    const clusterId = body['clusterId'];
+    if (typeof clusterId !== 'string' || clusterId.trim() === '') {
+      return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.clusterId là bắt buộc'));
+    }
+    try {
+      return social.assignPendingUpload(request.params.id, clusterId.trim());
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.delete<{ Params: { id: string } }>('/social/pending-uploads/:id', async (request, reply) => {
+    try {
+      return social.removePendingUpload(request.params.id);
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+  server.post<{ Body: unknown }>('/social/pending-uploads/auto-assign', async (request, reply) => {
+    const body = (typeof request.body === 'object' && request.body !== null
+      ? request.body : {}) as Record<string, unknown>;
+    if (typeof body['enabled'] !== 'boolean') {
+      return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.enabled (boolean) là bắt buộc'));
+    }
+    try {
+      return social.setUploadAutoAssign(body['enabled'] as boolean);
+    } catch (error) {
+      return socialFailure(error, reply);
+    }
+  });
+
+
   server.delete<{ Params: { id: string } }>('/social/jobs/:id', async (request, reply) => {
     try {
       return social.removeJob(request.params.id);

@@ -246,7 +246,7 @@ export async function registerTranslationBatchRoutes(
       // thuộc về một project.
       for (const item of parsed) item.projectId = project.id;
     }
-    const summary = pipeline.enqueue(parsed);
+    const summary = await pipeline.enqueue(parsed);
     return {
       ...summary,
       progress: batchProgress(summary.items),

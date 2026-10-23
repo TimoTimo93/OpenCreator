@@ -35,6 +35,7 @@ export function resolveProductionServerEnvironment(
 ): Pick<
   BuildServerInput,
   | 'appHome'
+  | 'appRoot'
   | 'dataDir'
   | 'configFile'
   | 'credentialsFile'
@@ -51,6 +52,8 @@ export function resolveProductionServerEnvironment(
   return {
     gatewayOrigin: env.OPENCREATOR_GATEWAY_ORIGIN?.trim() || 'https://www.open-creator.ai',
     ...optionalEnvironmentValue('appHome', env.OPENCREATOR_HOME),
+    // v2.6: thư mục cài app — gốc lưu media (`<thư mục cài>\data\...`).
+    ...optionalEnvironmentValue('appRoot', env.OPENCREATOR_APP_ROOT),
     ...optionalEnvironmentValue('dataDir', env.OPENCREATOR_DATA_DIR),
     ...optionalEnvironmentValue('configFile', env.OPENCREATOR_CONFIG_FILE),
     ...optionalEnvironmentValue('credentialsFile', env.OPENCREATOR_CREDENTIALS_FILE),

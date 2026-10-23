@@ -65,7 +65,7 @@ export async function registerTranslationPipelineRoutes(
           : {})
       });
     }
-    return pipeline.enqueue(parsed);
+      return pipeline.enqueue(parsed);
   });
 
   server.post('/creator/translation-pipeline/pause', async () => pipeline.pause());

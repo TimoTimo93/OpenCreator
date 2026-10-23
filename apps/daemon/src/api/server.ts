@@ -260,6 +260,7 @@ import { registerCreatorRoutes } from './routes.creator.js';
 import { registerCreatorRuntimeRoutes } from './routes.creator-runtime.js';
 import { registerCreatorDramaRoutes } from './routes.creator-drama.js';
 import { createDramaDownloadBridge } from '../creator/hongguo/download-bridge.js';
+import { resolveMediaStorageRoots } from '../creator/translation-pipeline/media-storage.js';
 import { registerTranslationPipelineRoutes } from './routes.creator-translation-pipeline.js';
 import { registerTranslationBatchRoutes } from './routes.translation-batch.js';
 import { registerSocialRoutes } from './routes.social.js';
@@ -299,6 +300,8 @@ import { registerPlatformConnectionRoutes } from './routes.platform-connections.
 export type BuildServerInput = {
   token: string;
   appHome?: string;
+  /** v2.6: thư mục cài app (chứa OpenCreator.exe) — gốc lưu media `\<appRoot>\data`. */
+  appRoot?: string;
   dataDir?: string;
   configFile?: string;
   credentialsFile?: string;
@@ -380,10 +383,37 @@ export async function buildServer(input: BuildServerInput) {
   });
   const auth = requireAuth(input.token);
   const dataDir = resolve(input.dataDir ?? '.runtime');
+  const explicitAppRoot = input.appRoot?.trim() ?? process.env.OPENCREATOR_APP_ROOT?.trim() ?? '';
+  /**
+   * v2.6 — Fallback suy appRoot từ đường dẫn của daemon: bản đóng gói daemon
+   * nằm ở `<nơi cài>\resources\daemon\dist\...` → appRoot là 3 cấp phía trên.
+   * (app.asar có fuse kiểm tra tính toàn vẹn nên không patch được — desktop
+   * chỉ truyền env ở bản cài mới; bản cũ vẫn chạy nhờ fallback này.)
+   */
+  let resolvedAppRoot: string | null = explicitAppRoot !== '' ? explicitAppRoot : null;
+  if (resolvedAppRoot === null) {
+    try {
+      const modulePath = fileURLToPath(import.meta.url);
+      if (/resources\\daemon\\dist/i.test(modulePath)) {
+        resolvedAppRoot = resolve(modulePath, '..', '..', '..', '..', '..');
+      }
+    } catch {
+      resolvedAppRoot = null;
+    }
+  }
+  /**
+   * v2.6 — bố cục lưu media cạnh NƠI CÀI app (`...\data\download`,
+   * `data\translate`, `data\merging & upload`). Mọi luồng video mới đều dùng
+   * roots này; thiếu appRoot (daemon chạy riêng/dev) thì fallback dưới dataDir.
+   */
+  const mediaRoots = resolveMediaStorageRoots({ appRoot: resolvedAppRoot, dataDir });
   const appHome = resolve(input.appHome ?? dataDir);
   const configFile = resolve(input.configFile ?? join(appHome, 'config.toml'));
   const runtimeDir = resolve(input.runtimeDir ?? join(dataDir, 'creator-runtime'));
-  const creatorDir = resolve(input.creatorDir ?? join(dataDir, 'creator'));
+  // v2.6: jobs root của creator (stage workdir chứa video nguồn/lớn) đặt cạnh
+  // media root (`<nơi cài>\data\creator`) — tránh C: (ổ dữ liệu nhỏ) bị phình
+  // tới ENOSPC. Chỉ luồng job MỚI dùng chỗ mới; DB + job cũ nằm yên.
+  const creatorDir = resolve(input.creatorDir ?? join(mediaRoots.root, 'creator'));
   const defaultManagedProjectRoot = join(
     input.defaultProjectRoot ?? join(homedir(), 'Documents'),
     'OpenCreator'
@@ -983,6 +1013,8 @@ export async function buildServer(input: BuildServerInput) {
     ) {
       creatorExecutors.push(createDownloadExecutor({
         configStore: creatorServicesConfigStore,
+        // v2.6: mặc định lưu video tải về vào `<nơi cài>\data\download`.
+        downloadRootFallback: mediaRoots.download,
         ytDlpPath: ytDlp.executable,
         ytDlpPrefixArgs: ytDlp.prefixArgs,
         ytDlpEnv: ytDlp.env,
@@ -1684,10 +1716,12 @@ export async function buildServer(input: BuildServerInput) {
   try {
     translationPipeline = createTranslationPipelineService({
       dataDir,
+      mediaRoots,
       creator: {
         createJob: request => creatorService.createJob(request),
         getJob: jobId => creatorService.getJob(jobId),
-        registerSourceVideo: (jobId, request) => creatorService.registerSourceVideo(jobId, request)
+        registerSourceVideo: (jobId, request) => creatorService.registerSourceVideo(jobId, request),
+        updateArtifactPath: (jobId, fromPath, toPath) => creatorService.updateArtifactPath(jobId, fromPath, toPath)
       },
       dispatcher: creatorCommandDispatcher,
       projects: {
@@ -1711,44 +1745,40 @@ export async function buildServer(input: BuildServerInput) {
         const fullTitle = info.episodeIndex === undefined
           ? info.title
           : `${info.title} — Tập ${info.episodeIndex}`;
+        // v2.6: KHÔNG tự nạp đăng tung tập nữa — video lẻ nằm lại thư mục
+        // `translate` để người dùng chọn nạp thủ công trong Composer.
         notificationService.enqueueGenericEvent({
           kind: 'translation_episode_done',
           title: `Đã dịch xong: ${fullTitle}`,
-          body: 'Video đã dịch xong, sẵn sàng trong hàng đợi đăng đa kênh.',
+          body: 'Video đã dịch xong, nằm trong thư mục Translate để đăng thủ công hoặc ghép cả bộ.',
           dedupeKey: `translation_episode_done:${info.videoPath}`
         });
-        const automation = socialAutomation;
-        if (automation === undefined) return;
-        const result = automation.enqueueAfterTranslate({
-          path: info.videoPath,
-          title: info.title,
-          episodeIndex: info.episodeIndex ?? null,
-          projectId: info.projectId ?? null
-        });
-        if (result.accepted > 0) {
-          console.log(`[translation-pipeline] tự nạp đăng: xếp ${result.accepted} job cho ${result.clusters.length} cụm bật tự nạp (${fullTitle})`);
-        }
       },
       // v2 "dịch cả bộ" — ghép xong 1 bộ: thông báo + tự nạp FULL MOVIE (thay
       // cho tung tập) vào hàng đợi của các cụm đang bật autoPublishAfterTranslate.
       onMerged: async info => {
         const fullTitle = `${info.title} (Full Movie)`;
+        // v2.6 — HÀNG CHỜ UPLOAD 2 TẦNG: video ghép thành công nằm trong thư
+        // mục "merging & upload" tự vào DANH SÁCH CHỜ UPLOAD (chưa chọn nhóm);
+        // gán nhóm THỦ CÔNG (chọn cụm) hoặc TỰ ĐỘNG xoay vòng 1→N→1.
         notificationService.enqueueGenericEvent({
           kind: 'translation_full_movie_merged',
           title: `Đã ghép xong: ${fullTitle}`,
-          body: `Ghép ${info.episodeCount} tập thành full movie — video đang nằm trong thư mục đợi upload đa kênh.`,
+          body: `Ghép ${info.episodeCount} tập thành full movie — đã vào hàng chờ upload (chọn nhóm thủ công hoặc tự động).`,
           dedupeKey: `translation_full_movie_merged:${info.videoPath}`
         });
         const automation = socialAutomation;
         if (automation === undefined) return;
-        const result = automation.enqueueAfterTranslate({
-          path: info.videoPath,
-          title: fullTitle,
-          episodeIndex: null,
-          projectId: info.projectId
-        });
-        if (result.accepted > 0) {
-          console.log(`[translation-pipeline] tự nạp full movie: xếp ${result.accepted} job cho ${result.clusters.length} cụm bật tự nạp (${fullTitle})`);
+        try {
+          const result = automation.addPendingUpload({
+            path: info.videoPath,
+            title: fullTitle
+          });
+          console.log(`[translation-pipeline] full movie vào hàng chờ upload: autoAssign=${result.pending.autoAssign} autoCluster=${result.autoAssignedClusterId ?? 'chưa'} (${fullTitle})`);
+        } catch (error) {
+          console.warn(`[translation-pipeline] nạp hàng chờ upload thất bại: ${
+            error instanceof Error ? error.message : String(error)
+          }`);
         }
       },
       onUpdate: summary => {
@@ -1828,15 +1858,16 @@ export async function buildServer(input: BuildServerInput) {
           model: services.llm.model
         };
       },
-      // Media picker: thư mục gốc chứa video đã tải về (downloadRoot cấu hình
-      // hoặc mặc định Documents/OpenCreator) — chỉ đọc, không đụng downloader.
+      // Media picker: thư mục gốc chứa video đã tải về (downloadRoot người dùng
+      // cấu hình hoặc mặc định bố cục v2.6 `<nơi cài>\data\download`) — chỉ đọc,
+      // không đụng downloader.
       readDownloadsRoot: async () => {
         try {
           const services = await creatorServicesConfigStore.read();
           const configured = services.downloadRoot.trim();
-          return configured !== '' ? configured : join(homedir(), 'Documents', 'OpenCreator');
+          return configured !== '' ? configured : mediaRoots.download;
         } catch {
-          return join(homedir(), 'Documents', 'OpenCreator');
+          return mediaRoots.download;
         }
       },
       // YouTube Data API key (tùy chọn) — quét stats bằng API rẻ quota.
