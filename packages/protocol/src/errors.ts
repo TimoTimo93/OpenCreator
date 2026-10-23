@@ -153,6 +153,7 @@ export type RuntimeErrorCode =
   | 'creator_hongguo_launch_failed'
   | 'creator_pipeline_unavailable'
   | 'creator_pipeline_item_not_found'
+  | 'creator_merge_not_confirmable'
   | 'creator_runtime_unavailable'
   | 'creator_batch_merge_running'
   | 'creator_batch_merge_empty'

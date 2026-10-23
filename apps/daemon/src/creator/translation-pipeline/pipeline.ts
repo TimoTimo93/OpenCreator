@@ -75,7 +75,7 @@ export type PipelineEpisode = {
 };
 
 export type TranslationPipelineMerge = {
-  status: 'idle' | 'running' | 'completed' | 'failed';
+  status: 'idle' | 'waiting' | 'running' | 'completed' | 'failed';
   /** Nhóm ghép theo bộ — mỗi seriesKey một trạng thái ghép riêng (không trộn 2 bộ). */
   seriesKey: string | null;
   runId: string | null;
@@ -89,6 +89,11 @@ export type TranslationPipelineMerge = {
 export type TranslationPipelineState = {
   items: PipelineEpisode[];
   paused: boolean;
+  /**
+   * v2.6: chế độ ghép — 'auto' (mặc định; phần mềm tự kiểm tra đủ/tập thứ tự rồi
+   * tự ghép), 'manual' (tự sắp xếp + CHỜ người dùng bấm Xác nhận mới ghép).
+   */
+  mergeMode?: 'auto' | 'manual';
   /** Một mục ghép cho MỖI bộ (seriesKey) — cá biệt: null = nhóm lẻ (không thuộc bộ nào). */
   merges: TranslationPipelineMerge[];
 };
@@ -120,6 +125,14 @@ export type TranslationPipelineService = {
   retry(episodeId: string): TranslationPipelineSummary;
   clearFinished(): { summary: TranslationPipelineSummary; removed: number };
   mergeNow(): TranslationPipelineSummary;
+  /** v2.6: đổi chế độ ghép 'auto' | 'manual' (mở restart app). */
+  setMergeMode(mode: 'auto' | 'manual'): TranslationPipelineSummary;
+  /**
+   * v2.6 (chế độ thủ công): người dùng ĐÃ KIỂM lại danh sách sắp xếp + nhấn
+   * Xác nhận → chỉ ghép ĐÚNG bộ này, và chỉ khi đủ tập/thứ tự/file (đi qua
+   * lại phần tổng check — bấm nút cho phép không phải chờ lượt idle).
+   */
+  confirmMerge(seriesKey: string): Promise<TranslationPipelineSummary>;
   recover(): Promise<void>;
   close(): Promise<void>;
 };
@@ -281,6 +294,8 @@ export function createTranslationPipelineService(
     return {
       items: backfillSeriesKeys(Array.isArray(state.items) ? state.items.filter(isEpisode) : []),
       paused: state.paused === true,
+      // v2.6: giữ lại chế độ ghép (mất => mặc định 'auto').
+      mergeMode: state.mergeMode === 'manual' ? 'manual' : state.mergeMode === 'auto' ? 'auto' : undefined,
       // Migration: state cũ có 1 `merge` duy nhất → thành nhóm seriesKey null;
       // state mới đọc mảng `merges` (mỗi bộ một mục).
       merges: normalizeMerges(state.merges, state.merge)
@@ -519,6 +534,53 @@ export function createTranslationPipelineService(
         await pump();
         await runMerge(true);
       })();
+      return summarize(readState());
+    },
+    setMergeMode(mode: 'auto' | 'manual'): TranslationPipelineSummary {
+      mutateSync(draft => { draft.mergeMode = mode; });
+      if (mode === 'auto') {
+        // Quay về chế độ tự động → kiểm + ghép ngay các bộ đã đủ (nếu có).
+        void (async () => {
+          await pump();
+          await runMergeAuto();
+        })();
+      }
+      return summarize(readState());
+    },
+    async confirmMerge(seriesKey: string): Promise<TranslationPipelineSummary> {
+      ensureTools();
+      const target = seriesKey.trim();
+      if (target === '') return summarize(readState());
+      const state = readState();
+      const group = groupBySeries(state).get(target);
+      if (group === undefined || group.length === 0) {
+        throw new Error(`Không có bộ nào với key "${target}"`);
+      }
+      const eligibility = mergeEligibility(group);
+      if (!eligibility.ok) {
+        // Vẫn cập nhật trạng thái để web quay lại lý do chính xác.
+        mutateSync(draft => {
+          setMerge(draft, target, {
+            status: 'waiting',
+            seriesKey: target,
+            runId: null,
+            outputPath: null,
+            uploadReady: null,
+            episodeCount: null,
+            skipped: [],
+            error: eligibility.reason
+          });
+        });
+        return summarize(readState());
+      }
+      if (mergeRunning) return summarize(readState());
+      mergeRunning = true;
+      try {
+        await mergeGroup(target, group, group.filter(item => item.status === 'completed' && item.outputVideoPath !== null));
+      } finally {
+        mergeRunning = false;
+      }
+      void pump();
       return summarize(readState());
     },
     recover(): Promise<void> {
@@ -947,17 +1009,102 @@ export function createTranslationPipelineService(
       // sẽ bị trộn thành "Full Movie" rác (đã gặp ở state cũ). Video lẻ chỉ đi
       // con đường nạp đăng tung tập / nạp thủ công.
       if (seriesKey === null) continue;
-      // Còn tập chờ/đang dịch trong NHÓM này → chưa ghép nhóm đó.
-      if (group.some(item => item.status === 'queued' || item.status === 'running')) continue;
-      const completed = group.filter(item =>
-        item.status === 'completed' && item.outputVideoPath !== null
-      );
-      if (completed.length === 0) continue;
+      const eligibility = mergeEligibility(group);
+      if (!eligibility.ok) {
+        // v2.6 — để trong trạng thái "waiting" cho web thấy rõ đang chờ gì
+        // (không ghép một nửa: cam kết đủ tập + đúng thứ tự 1→N).
+        mutateSync(draft => {
+          setMerge(draft, seriesKey, {
+            status: 'waiting',
+            seriesKey,
+            runId: null,
+            outputPath: null,
+            uploadReady: null,
+            episodeCount: null,
+            skipped: [],
+            error: eligibility.reason
+          });
+        });
+        continue;
+      }
       // Đã ghép hết (mọi phân đoạn đã dấu merged) → bỏ qua, chống ghép lại vô ích.
-      if (completed.every(item => item.merged)) continue;
+      if (group.every(item => item.merged)) continue;
+      // v2.6 — CHẾ ĐỘ THỦ CÔNG: đủ tập rồi nhưng phải CHỜ NGƯỜI DÙNG XÁC NHẬN
+      // (web hiển thị danh sách sắp xếp + nút "Xác nhận ghép").
+      if (mergeMode() === 'manual') {
+        mutateSync(draft => {
+          setMerge(draft, seriesKey, {
+            status: 'waiting',
+            seriesKey,
+            runId: null,
+            outputPath: null,
+            uploadReady: null,
+            episodeCount: null,
+            skipped: [],
+            error: `Đủ ${group.length} tập, thứ tự 1→${group.length} chuẩn — CHỜ BẠN XÁC NHẬN GHÉP (chế độ thủ công).`
+          });
+        });
+        continue;
+      }
+      // Chế độ TỰ ĐỘNG: tự kiểm (kiểm chuẩn ở mergeEligibility + đường dẫn file)
+      // và tự ghép — merge đã xắp theo episodeIndex nên thứ tự luôn 1→N.
       await runMerge(false, seriesKey);
       if (closed) return;
     }
+  }
+
+  /** Chế độ ghép hiện tại (mặc định AUTO — phần mềm tự kiểm + tự ghép). */
+  function mergeMode(): 'auto' | 'manual' {
+    return readState().mergeMode === 'manual' ? 'manual' : 'auto';
+  }
+
+  /**
+   * v2.6 — KIỂM TRA ĐỦ TẬP + ĐÚNG THỨ TỰ trước khi ghép:
+   * 1) MỌI mục của bộ phải đã dịch xong (không ghép một phần — cam kết của
+   *    người dùng: "đầy đủ rồi mới đưa vào hàng chờ upload");
+   * 2) mọi mục phải xác định được SỐ TẬP (ghép thứ tự chính xác 1→N);
+   * 3) số tập phủ 1..N liên tục, không khuyết (thiếu tập giữa = tải/dịch chưa đủ).
+   */
+  function mergeEligibility(group: PipelineEpisode[]): { ok: boolean; reason: string | null } {
+    const completed = group.filter(item => item.status === 'completed' && item.outputVideoPath !== null);
+    const pending = group.length - completed.length;
+    if (pending > 0) {
+      return {
+        ok: false,
+        reason: `Chờ đủ bộ: đã dịch ${completed.length}/${group.length} tập — đang chờ/hỏng ${pending} tập còn lại. Ghép chỉ chạy khi ĐỦ tập.`
+      };
+    }
+    const noIndex = completed.filter(item => item.episodeIndex === null);
+    if (noIndex.length > 0) {
+      return {
+        ok: false,
+        reason: `Chưa ghép: ${noIndex.length} video không xác định được số tập (thứ tự không kiểm soát) — kiểu video này phải được gán số tập rõ ràng.`
+      };
+    }
+    // Cam kết "phải tồn tại": phân đoạn biến mất (đơn dọn đĩa, đĩa đầy…) ⇒ không ghép.
+    const missingFile = completed.filter(item => !existsSync(item.outputVideoPath!));
+    if (missingFile.length > 0) {
+      return {
+        ok: false,
+        reason: `Chưa ghép: ${missingFile.length} video đã dịch bị thiếu file trên đĩa — cần dịch lại các tập đó (Retry trong Trình Soi Lỗi hoặc nạp lại bộ).`
+      };
+    }
+    const indexes = [...new Set(completed.map(item => item.episodeIndex!))].sort((left, right) => left - right);
+    if (indexes.length !== completed.length) {
+      return { ok: false, reason: 'Chưa ghép: có số tập trùng nhau giữa các video — kiểm tra lại video nạp bộ.' };
+    }
+    if (indexes[0] !== 1) {
+      return { ok: false, reason: `Chưa ghép: thiếu tập đầu tiên (mất tập ${indexes[0]! - 1}?) — bộ phải khởi đầu từ tập 1.` };
+    }
+    const missing: number[] = [];
+    for (let expected = 1; expected <= indexes[indexes.length - 1]!; expected += 1) {
+      if (indexes[expected - 1] !== expected) missing.push(expected);
+      else continue;
+    }
+    if (missing.length > 0) {
+      return { ok: false, reason: `Thiếu tập: ${missing.slice(0, 12).join(', ')}${missing.length > 12 ? '…' : ''} — chưa đủ bộ để ghép.` };
+    }
+    return { ok: true, reason: null };
   }
 
   /**
@@ -1246,6 +1393,7 @@ function normalizeMergeEntry(value: unknown): TranslationPipelineMerge | null {
   if (typeof candidate.status !== 'string') return null;
   return {
     status: candidate.status === 'running' || candidate.status === 'completed' || candidate.status === 'failed'
+      || candidate.status === 'waiting'
       ? candidate.status
       : 'idle',
     seriesKey: typeof candidate.seriesKey === 'string' ? candidate.seriesKey : null,

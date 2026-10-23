@@ -12718,6 +12718,65 @@
   border-color: var(--accent);
 }
 
+/* v2.6 — hàng ghép: chip trạng thái + (khi đủ tập ở chế độ thủ công) nút xác nhận ghép */
+.video-translation-batch-merge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.video-translation-batch-merge-row .video-translation-batch-merge-chip {
+  flex: 1;
+  min-width: 0;
+}
+
+.video-translation-batch-merge-chip[data-status='waiting'] {
+  border-color: color-mix(in srgb, #e0a13f 55%, var(--border));
+  color: color-mix(in srgb, #e0a13f 80%, var(--text));
+}
+
+.video-translation-batch-merge-confirm {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, #34c05e 60%, var(--border));
+  background: color-mix(in srgb, #34c05e 14%, var(--surface));
+  color: color-mix(in srgb, #34c05e 76%, var(--text));
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.video-translation-batch-merge-confirm:hover {
+  border-color: color-mix(in srgb, #34c05e 85%, var(--border));
+}
+
+/* v2.6 — công tắc "Chế độ ghép" (auto/manual) ở đầu panel danh sách dịch cả bộ */
+.video-translation-merge-mode {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.video-translation-merge-mode span {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.video-translation-merge-mode select {
+  max-width: 250px;
+  padding: 3px 6px;
+  font-size: 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface, transparent);
+  color: var(--fg);
+}
+
 .video-translation-batch-group-head strong {
   overflow: hidden;
   text-overflow: ellipsis;

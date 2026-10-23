@@ -75,6 +75,27 @@ function dramaMocks() {
       merges: [],
       uploadFolder: ''
     })),
+    setTranslationMergeMode: vi.fn(async (mode: 'auto' | 'manual') => ({
+      items: [],
+      paused: false,
+      mergeMode: mode,
+      counts: { queued: 0, running: 0, completed: 0, failed: 0 },
+      progress: {
+        total: 0, queued: 0, running: 0, completed: 0, failed: 0, canceled: 0, allDone: true, percent: 0
+      },
+      merges: [],
+      uploadFolder: ''
+    })),
+    confirmTranslationMerge: vi.fn(async (seriesKey: string) => ({
+      items: [],
+      paused: false,
+      counts: { queued: 0, running: 0, completed: 0, failed: 0 },
+      progress: {
+        total: 0, queued: 0, running: 0, completed: 0, failed: 0, canceled: 0, allDone: true, percent: 0
+      },
+      merges: [{ seriesKey, status: 'running', outputPath: null, uploadReady: null, episodeCount: null, error: null }],
+      uploadFolder: ''
+    })),
     renameProject: vi.fn(async (projectId: string, name: string) => ({ project: { id: projectId, name } }))
   };
 }

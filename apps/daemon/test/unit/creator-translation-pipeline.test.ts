@@ -278,7 +278,7 @@ async function waitForSettle(service: {
     summary = service.getSummary();
     const mergeStatus = summary.merges[0]?.status ?? 'idle';
     if (summary.counts.queued === 0 && summary.counts.running === 0
-      && (mergeStatus === 'completed' || mergeStatus === 'failed'
+      && (mergeStatus === 'completed' || mergeStatus === 'failed' || mergeStatus === 'waiting'
         || summary.counts.completed === 0)) {
       return summary;
     }
@@ -671,6 +671,71 @@ describe('translation pipeline — hook onEpisodeCompleted', () => {
     expect(mergeCalls).toHaveLength(0);
   });
 
+  it('v2.6 — 1 tập LỖI trong bộ ⇒ KHÔNG ghép; trạng thái waiting báo rõ thiếu', async () => {
+    const { service, sourcePaths, mergeCalls } = await makeService({ failProbeIndex: 0 });
+    await service.enqueue([
+      { path: sourcePaths[0]!, title: 'Bộ phim X Tập 1', seriesKey: 'series-A', episodeIndex: 1 },
+      { path: sourcePaths[1]!, title: 'Bộ phim X Tập 2', seriesKey: 'series-A', episodeIndex: 2 }
+    ]);
+    const after = await waitForSettle(service);
+    expect(after.counts.failed).toBe(1);
+    expect(after.counts.completed).toBe(1);
+    // KHÔNG ghép một nửa — chờ đủ bộ:
+    expect(mergeCalls).toHaveLength(0);
+    const mergeState = after.merges.find(entry => entry.seriesKey === 'series-A');
+    expect(mergeState?.status).toBe('waiting');
+    expect(mergeState?.error).toContain('1/2');
+    expect(mergeState?.error).toContain('khi ĐỦ tập');
+    // Full movie không trôi vào hàng chờ upload khi chưa đủ.
+    expect(after.items.every(item => item.merged === false)).toBe(true);
+  });
+
+  it('v2.6 — VẮNG tập giữa bộ (1, 2, 4 thiếu 3) ⇒ KHÔNG ghép — báo thiếu tập', async () => {
+    const { service, dataDir, mergeCalls } = await makeService();
+    const exist1 = join(dataDir, 'gap-1.mp4');
+    const exist2 = join(dataDir, 'gap-2.mp4');
+    await writeFile(exist1, 'v1');
+    await writeFile(exist2, 'v2');
+    await service.enqueue([
+      { path: exist1, title: 'Tập 1', seriesKey: 'series-C', episodeIndex: 1 },
+      { path: exist2, title: 'Tập 2', seriesKey: 'series-C', episodeIndex: 2 },
+      { path: join(dataDir, 'gap-4-missing.mp4'), title: 'Tập 4', seriesKey: 'series-C', episodeIndex: 4 }
+    ]);
+    const after = await waitForSettle(service);
+    expect(mergeCalls).toHaveLength(0);
+    const mergeState = after.merges.find(entry => entry.seriesKey === 'series-C');
+    expect(mergeState?.status).toBe('waiting');
+  });
+
+  it('v2.6 — ĐỦ tập + liên tục + đúng thứ tự ⇒ ghép 1→N (trật tự giữ nguyên)', async () => {
+    const { service, sourcePaths, mergeCalls } = await makeService();
+    await service.enqueue([
+      { path: sourcePaths[0]!, title: 'Tập 2', seriesKey: 'series-D', episodeIndex: 2 },
+      { path: sourcePaths[1]!, title: 'Tập 1', seriesKey: 'series-D', episodeIndex: 1 }
+    ]);
+    const after = await waitForSettle(service);
+    const mergeState = after.merges.find(entry => entry.seriesKey === 'series-D');
+    expect(mergeState?.status).toBe('completed');
+    expect(mergeState?.episodeCount).toBe(2);
+    // Ghép theo THỨ TỰ SỐ TẬP 1→2 (dù nạp 2 trước; tập 1 dùng sourcePaths[1]).
+    expect(mergeCalls[0]).toBeDefined();
+    expect(mergeCalls[0]![0]).toContain('tap-02');
+    expect(mergeCalls[0]![1]).toContain('tap-01');
+    expect(after.items.every(item => item.merged)).toBe(true);
+  });
+
+  it('v2.6 — đủ tập nhưng TẬP ĐẦU không phải 1 ⇒ chờ (cam kết bắt đầu từ tập 1)', async () => {
+    const { service, sourcePaths, mergeCalls } = await makeService();
+    await service.enqueue([
+      { path: sourcePaths[0]!, title: 'Phần 2 — Tập 3', seriesKey: 'series-E', episodeIndex: 3 },
+      { path: sourcePaths[1]!, title: 'Phần 2 — Tập 4', seriesKey: 'series-E', episodeIndex: 4 }
+    ]);
+    const after = await waitForSettle(service);
+    expect(mergeCalls).toHaveLength(0);
+    const mergeState = after.merges.find(entry => entry.seriesKey === 'series-E');
+    expect(mergeState?.status).toBe('waiting');
+  });
+
   it('bù seriesKey khi đọc state cũ: mục chưa nạp đăng được bù theo thẻ 《》, mục đã nạp giữ nguyên', async () => {
     const first = await makeService();
     // Viết state giả trực tiếp: 1 mục chưa nạp (thẻ 《》) + 1 mục đã nạp đăng.
@@ -771,5 +836,77 @@ describe('translation pipeline v2.6 — bố cục media data\\download / transl
     expect(existsSync(join(rootDir, 'data', 'download', 'Bộ phim K'))).toBe(false);
     // 1 tập — không qua ffmpeg thật; mergeSegments giả không chạy.
     expect(mergeCalls).toHaveLength(0);
+  });
+});
+
+describe('translation pipeline v2.6 — 2 cơ chế ghép (tự động / chờ xác nhận)', () => {
+  it('chế độ MANUAL: đủ tập nhưng KHÔNG tự ghép — chờ Xác nhận; confirm → ghép', async () => {
+    const { service, sourcePaths, mergeCalls, dataDir } = await makeService();
+    service.setMergeMode('manual');
+    expect(service.getSummary().mergeMode).toBe('manual');
+    await service.enqueue([
+      { path: sourcePaths[0]!, title: 'Tập 1', seriesKey: 'series-M', episodeIndex: 1 },
+      { path: sourcePaths[1]!, title: 'Tập 2', seriesKey: 'series-M', episodeIndex: 2 }
+    ]);
+    // Dịch xong đủ 2/2 — pipeline KHÔNG ghép (angan chờ người dùng):
+    let summary = service.getSummary();
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      summary = service.getSummary();
+      const mergeState0 = summary.merges.find(entry => entry.seriesKey === 'series-M');
+      if (summary.counts.completed >= 2 && mergeState0?.status === 'waiting') break;
+    }
+    expect(summary.counts.completed).toBe(2);
+    expect(mergeCalls).toHaveLength(0);
+    const mergeState = summary.merges.find(entry => entry.seriesKey === 'series-M');
+    expect(mergeState?.status).toBe('waiting');
+    expect(mergeState?.error).toContain('XÁC NHẬN');
+    // Full movie: chưa có hàng đưa vào chờ.
+    expect(existsSync(join(dataDir, 'upload-pending', 'pending-full.mp4'))).toBe(false);
+    // Người dùng bấm Xác nhận → ghép đủ 1→2:
+    const after = await service.confirmMerge('series-M');
+    const done = after.merges.find(entry => entry.seriesKey === 'series-M');
+    expect(done?.status).toBe('completed');
+    expect(mergeCalls).toHaveLength(1);
+    // thứ tự tập 1 trước (nạp đúng thứ tự: sourcePaths[0] là tập 1):
+    expect(mergeCalls[0]![0]).toContain('tap-01');
+    expect(mergeCalls[0]![1]).toContain('tap-02');
+    expect(after.items.every(item => item.merged)).toBe(true);
+  });
+
+  it('chế độ MANUAL + xác nhận khi chưa đủ tập → vẫn chờ, lí do không ghép', async () => {
+    const { service, sourcePaths } = await makeService({ failProbeIndex: 0 });
+    service.setMergeMode('manual');
+    await service.enqueue([
+      { path: sourcePaths[0]!, title: 'Tập 1', seriesKey: 'series-N', episodeIndex: 1 },
+      { path: sourcePaths[1]!, title: 'Tập 2', seriesKey: 'series-N', episodeIndex: 2 }
+    ]);
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      if (service.getSummary().counts.completed >= 1) break;
+    }    const after = await service.confirmMerge('series-N');
+    const mergeState = after.merges.find(entry => entry.seriesKey === 'series-N');
+    expect(mergeState?.status).toBe('waiting');
+    expect(mergeState?.error).toContain('Chờ đủ bộ');
+  });
+
+  it('quay về AUTO → bộ dư (đã đủ) được tự ghép ngay', async () => {
+    const { service, sourcePaths } = await makeService();
+    service.setMergeMode('manual');
+    await service.enqueue([
+      { path: sourcePaths[0]!, title: 'Tập 1', seriesKey: 'series-P', episodeIndex: 1 },
+      { path: sourcePaths[1]!, title: 'Tập 2', seriesKey: 'series-P', episodeIndex: 2 }
+    ]);
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      if (service.getSummary().counts.completed >= 2) break;
+    }
+    expect(service.getSummary().merges.find(entry => entry.seriesKey === 'series-P')?.status).toBe('waiting');
+    service.setMergeMode('auto');
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (service.getSummary().merges.find(entry => entry.seriesKey === 'series-P')?.status === 'completed') break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    expect(service.getSummary().merges.find(entry => entry.seriesKey === 'series-P')?.status).toBe('completed');
   });
 });

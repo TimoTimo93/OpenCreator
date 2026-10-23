@@ -1753,6 +1753,137 @@ describe('VideoTranslationWorkspace — panel dịch cả bộ bên trái (v2)',
 });
 
 // ---------------------------------------------------------------------------
+// v2.6 — duyệt ghép 2 chế độ (mergeMode auto/manual + waiting + xác nhận ghép)
+// ---------------------------------------------------------------------------
+
+/** Batch có mergeMode + merges 'waiting' (daemon trả lý do tiếng Việt trong error). */
+function mergeModeFixture(mode: 'auto' | 'manual', merges: Array<Record<string, unknown>>): Record<string, unknown> {
+  return { ...batchStatusFixture(), mergeMode: mode, merges };
+}
+
+describe('VideoTranslationWorkspace — duyệt ghép 2 chế độ (v2.6)', () => {
+  it('công tắc "Chế độ ghép" hiện giá trị từ summary; đổi manual → POST merge-mode {mode}', async () => {
+    const setTranslationMergeMode = vi.fn(async (mode: 'auto' | 'manual') =>
+      mergeModeFixture(mode, [{ seriesKey: 'honggua:1', status: 'idle', outputPath: null, uploadReady: null, episodeCount: null, error: null }]));
+    const service = {
+      applyAction: vi.fn(),
+      runAgentTurn: vi.fn(),
+      getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
+      getTranslationBatch: vi.fn(async () => mergeModeFixture('auto', [
+        { seriesKey: 'honggua:1', status: 'idle', outputPath: null, uploadReady: null, episodeCount: null, error: null }
+      ])),
+      setTranslationMergeMode
+    };
+    const renderView = render(<LanguageProvider initialPreference="vi-VN"><CreatorSessionProvider
+      initialJob={job({ status: 'draft', revision: 1, stages: [], state: { currentStep: 0, furthestStep: 0, workspacePhase: 'configure' } })}
+      service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+    ><VideoTranslationWorkspace onBack={vi.fn()} runtimeDependencies={{ service } as never} /></CreatorSessionProvider></LanguageProvider>);
+    try {
+      const panel = await screen.findByRole('complementary', { name: 'Danh sách dịch cả bộ' });
+      const modeSelect = within(panel).getByLabelText('Chế độ ghép') as HTMLSelectElement;
+      // auto là mặc định (cả khi daemon không gửi field).
+      expect(modeSelect.value).toBe('auto');
+      // Đổi manual → POST /creator/translation-pipeline/merge-mode {mode:'manual'}
+      fireEvent.change(modeSelect, { target: { value: 'manual' } });
+      await waitFor(() => expect(setTranslationMergeMode).toHaveBeenCalledWith('manual'));
+      // Đổi lại auto
+      fireEvent.change(modeSelect, { target: { value: 'auto' } });
+      await waitFor(() => expect(setTranslationMergeMode).toHaveBeenCalledWith('auto'));
+    } finally {
+      renderView.unmount();
+    }
+  });
+
+  it('status waiting + lý do THIẾU TẬP: chip amber chỉ hiện lý do, KHÔNG có nút xác nhận', async () => {
+    const confirmTranslationMerge = vi.fn(async () => batchStatusFixture());
+    const service = {
+      applyAction: vi.fn(),
+      runAgentTurn: vi.fn(),
+      getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
+      getTranslationBatch: vi.fn(async () => mergeModeFixture('manual', [
+        { seriesKey: 'honggua:1', status: 'waiting', outputPath: null, uploadReady: null, episodeCount: null, error: 'Còn thiếu 2 tập — đủ 10/10 tập kết quả mới ghép được' }
+      ])),
+      confirmTranslationMerge
+    };
+    const renderView = render(<LanguageProvider initialPreference="vi-VN"><CreatorSessionProvider
+      initialJob={job({ status: 'draft', revision: 1, stages: [], state: { currentStep: 0, furthestStep: 0, workspacePhase: 'configure' } })}
+      service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+    ><VideoTranslationWorkspace onBack={vi.fn()} runtimeDependencies={{ service } as never} /></CreatorSessionProvider></LanguageProvider>);
+    try {
+      const panel = await screen.findByRole('complementary', { name: 'Danh sách dịch cả bộ' });
+      // Lý do (từ error) hiển thị nguyên văn trên chip; chip đánh dấu data-status=waiting (amber).
+      const chip = within(panel).getByText('Còn thiếu 2 tập — đủ 10/10 tập kết quả mới ghép được');
+      expect(chip).toHaveAttribute('data-status', 'waiting');
+      // Thiếu tập → hiện NÚT XÁC NHẬN
+      expect(within(panel).queryByRole('button', { name: '✅ Xác nhận ghép' })).not.toBeInTheDocument();
+      expect(confirmTranslationMerge).not.toHaveBeenCalled();
+    } finally {
+      renderView.unmount();
+    }
+  });
+
+  it('lý do "CHỜ BẠN XÁC NHẬN GHÉP" → nút xác nhận POST merge-confirm + toast', async () => {
+    const confirmTranslationMerge = vi.fn(async (seriesKey: string) => mergeModeFixture('manual', [
+      { seriesKey, status: 'running', outputPath: 'D:\\out\\bao-full.mp4', uploadReady: null, episodeCount: 10, error: null }
+    ]));
+    const service = {
+      applyAction: vi.fn(),
+      runAgentTurn: vi.fn(),
+      getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
+      getTranslationBatch: vi.fn(async () => mergeModeFixture('manual', [
+        { seriesKey: 'honggua:1', status: 'waiting', outputPath: null, uploadReady: null, episodeCount: null, error: 'Đủ 10/10 tập — CHỜ BẠN XÁC NHẬN GHÉP' }
+      ])),
+      confirmTranslationMerge
+    };
+    const renderView = render(<LanguageProvider initialPreference="vi-VN"><CreatorSessionProvider
+      initialJob={job({ status: 'draft', revision: 1, stages: [], state: { currentStep: 0, furthestStep: 0, workspacePhase: 'configure' } })}
+      service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+    ><VideoTranslationWorkspace onBack={vi.fn()} runtimeDependencies={{ service } as never} /></CreatorSessionProvider></LanguageProvider>);
+    try {
+      const panel = await screen.findByRole('complementary', { name: 'Danh sách dịch cả bộ' });
+      // Đủ tập → nút tích cực hiện cạnh chip chờ.
+      fireEvent.click(within(panel).getByRole('button', { name: '✅ Xác nhận ghép' }));
+      await waitFor(() => expect(confirmTranslationMerge).toHaveBeenCalledWith('honggua:1'));
+      // Success → toast "Đã xác nhận — đang ghép".
+      await screen.findByText('Đã xác nhận — đang ghép');
+    } finally {
+      renderView.unmount();
+    }
+  });
+
+  it('daemon trả 409 creator_merge_not_confirmable → notice hiển thị detail từ daemon', async () => {
+    const confirmTranslationMerge = vi.fn(async () => {
+      throw Object.assign(new Error('chưa đủ điều kiện ghép'), {
+        code: 'creator_merge_not_confirmable', status: 409, details: { detail: 'Thiếu tập 4' }
+      });
+    });
+    const service = {
+      applyAction: vi.fn(),
+      runAgentTurn: vi.fn(),
+      getDramaDownloadTasks: vi.fn(async () => ({ tasks: [] })),
+      getTranslationBatch: vi.fn(async () => mergeModeFixture('manual', [
+        { seriesKey: 'honggua:1', status: 'waiting', outputPath: null, uploadReady: null, episodeCount: null, error: 'Đủ 10/10 tập — CHỜ BẠN XÁC NHẬN GHÉP' }
+      ])),
+      confirmTranslationMerge
+    };
+    const renderView = render(<LanguageProvider initialPreference="vi-VN"><CreatorSessionProvider
+      initialJob={job({ status: 'draft', revision: 1, stages: [], state: { currentStep: 0, furthestStep: 0, workspacePhase: 'configure' } })}
+      service={{ applyAction: vi.fn(), runAgentTurn: vi.fn() } as never}
+    ><VideoTranslationWorkspace onBack={vi.fn()} runtimeDependencies={{ service } as never} /></CreatorSessionProvider></LanguageProvider>);
+    try {
+      const panel = await screen.findByRole('complementary', { name: 'Danh sách dịch cả bộ' });
+      fireEvent.click(within(panel).getByRole('button', { name: '✅ Xác nhận ghép' }));
+      await waitFor(() => expect(confirmTranslationMerge).toHaveBeenCalledTimes(1));
+      // 409: notice lấy detail từ daemon ("Thiếu tập 4"), KHÔNG toast thành công.
+      await screen.findByText(/Thiếu tập 4/);
+      expect(screen.queryByText('Đã xác nhận — đang ghép')).not.toBeInTheDocument();
+    } finally {
+      renderView.unmount();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // v2.1 — điều hướng bước khi ĐÃ CÓ danh sách dịch cả bộ (không cần chọn nguồn)
 // ---------------------------------------------------------------------------
 

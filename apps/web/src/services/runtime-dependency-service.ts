@@ -52,6 +52,12 @@ export type TranslationBatchMergeState = {
 export type TranslationBatchStatus = {
   items: TranslationBatchEpisode[];
   paused: boolean;
+  /**
+   * v2.6 — chế độ ghép 2 chế độ: 'auto' (pipeline tự kiểm & ghép nhóm đủ tập)
+   * / 'manual' (pipeline chỉ xếp hiện trạng 'waiting', chờ người dùng xác nhận).
+   * Daemon cũ không có field → coi như 'auto'.
+   */
+  mergeMode?: 'auto' | 'manual';
   counts: { queued: number; running: number; completed: number; failed: number };
   /** Một trạng thái ghép cho mỗi bộ — chống trộn 2 bộ khi ghép. */
   merges: TranslationBatchMergeState[];
@@ -207,6 +213,14 @@ export function createRuntimeDependencyService(client: ClientLike) {
     /** v2.2 — tiếp tục hàng đợi dịch sau khi tạm dừng. */
     resumeTranslationBatch(): Promise<TranslationBatchStatus> {
       return client.post('/creator/translation-pipeline/resume', {}) as Promise<TranslationBatchStatus>;
+    },
+    /** v2.6 — đổi chế độ ghép: 'auto' tự ghép nhóm đủ tập / 'manual' xếp 'waiting' chờ xác nhận. */
+    setTranslationMergeMode(mode: 'auto' | 'manual'): Promise<TranslationBatchStatus> {
+      return client.post('/creator/translation-pipeline/merge-mode', { mode }) as Promise<TranslationBatchStatus>;
+    },
+    /** v2.6 — xác nhận ghép 1 bộ (chỉ xác nhận được khi đủ tập; thiếu tập daemon trả 409). */
+    confirmTranslationMerge(seriesKey: string): Promise<TranslationBatchStatus> {
+      return client.post('/creator/translation-pipeline/merge-confirm', { seriesKey }) as Promise<TranslationBatchStatus>;
     },
     /** Mở thư mục chứa file (Windows: Explorer chọn file). */
     revealTranslationBatch(path: string, mode: 'file' | 'directory' = 'file'): Promise<{ ok: boolean }> {

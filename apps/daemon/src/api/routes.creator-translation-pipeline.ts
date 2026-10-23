@@ -71,6 +71,29 @@ export async function registerTranslationPipelineRoutes(
   server.post('/creator/translation-pipeline/pause', async () => pipeline.pause());
   server.post('/creator/translation-pipeline/resume', async () => pipeline.resume());
   server.post('/creator/translation-pipeline/merge', async () => pipeline.mergeNow());
+
+  // v2.6 — chế độ ghép + XÁC NHẬN (tự động / thủ công).
+  server.post<{ Body: unknown }>('/creator/translation-pipeline/merge-mode', async (request, reply) => {
+    const body = request.body;
+    const mode = (typeof body === 'object' && body !== null ? body as Record<string, unknown> : {})['mode'];
+    if (mode !== 'auto' && mode !== 'manual') {
+      return reply.code(400).send(apiError('VALIDATION_FAILED', "body.mode phải là 'auto' hoặc 'manual'"));
+    }
+    return pipeline.setMergeMode(mode as 'auto' | 'manual');
+  });
+
+  server.post<{ Body: unknown }>('/creator/translation-pipeline/merge-confirm', async (request, reply) => {
+    const body = request.body;
+    const seriesKey = (typeof body === 'object' && body !== null ? body as Record<string, unknown> : {})['seriesKey'];
+    if (typeof seriesKey !== 'string' || seriesKey.trim() === '') {
+      return reply.code(400).send(apiError('VALIDATION_FAILED', 'body.seriesKey (key bộ phim) là bắt buộc'));
+    }
+    try {
+      return await pipeline.confirmMerge(seriesKey.trim());
+    } catch (error) {
+      return reply.code(409).send(apiError('creator_merge_not_confirmable', error instanceof Error ? error.message : String(error)));
+    }
+  });
   server.post('/creator/translation-pipeline/clear-finished', async () => pipeline.clearFinished());
 
   server.delete<{ Params: { id: string } }>('/creator/translation-pipeline/items/:id', async (request, reply) => {

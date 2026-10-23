@@ -29,6 +29,7 @@ import { OfficialModelField, useOfficialServices } from './official-services.js'
 import type { RuntimeDependenciesController } from '../../app/use-runtime-dependencies.js';
 import { LocalTranscriptionNotice } from './LocalTranscriptionNotice.js';
 import { useLocalizedCopy, type LocalizeCopy } from '../../i18n/useLocalizedCopy.js';
+import { useAppLanguage } from '../../i18n/LanguageProvider.js';
 import type { CreatorServicesSettingsService } from '../../services/creator-services-service.js';
 import type { VideoMetadataService } from '../../services/video-metadata-service.js';
 import type { TranslationBatchEpisode, TranslationBatchStatus } from '../../services/runtime-dependency-service.js';
@@ -1651,6 +1652,9 @@ export default function VideoTranslationWorkspace(props: {
   runtimeDependencies?: RuntimeDependenciesController;
 }) {
   const l = useLocalizedCopy();
+  // v2.6 — chuỗi UI mới của panel dịch cả bộ (chế độ ghép / chờ ghép) dùng i18n key
+  // chuẩn dashboard.*; chuỗi cũ giữ nguyên l(zh, en).
+  const { t } = useAppLanguage();
   const translationStartedNotice = l(
     '翻译任务已开始，进度会实时同步到创作动态',
     'Translation started. Progress will appear in creation activity.'
@@ -3159,6 +3163,28 @@ export default function VideoTranslationWorkspace(props: {
         setBatchNotice(creatorErrorMessage(cause, l));
       }
     };
+    // v2.6 — chế độ ghép 2 chế độ: 'auto' ghép tự nhóm đủ tập; 'manual' xếp 'waiting' chờ xác nhận.
+    const setMergeMode = async (mode: 'auto' | 'manual'): Promise<void> => {
+      if (batchService === undefined) return;
+      try {
+        const response = await batchService.setTranslationMergeMode(mode);
+        setBatchStatus(response);
+        setBatchNotice(l('已更新合并模式。', 'Merge mode updated.'));
+      } catch (cause) {
+        setBatchNotice(creatorErrorMessage(cause, l));
+      }
+    };
+    // v2.6 — xác nhận ghép thủ công cho 1 bộ (chỉ hiện khi lý do chờ là "CHỜ BẠN XÁC NHẬN GHÉP").
+    const confirmMerge = async (seriesKey: string | null): Promise<void> => {
+      if (batchService === undefined || seriesKey === null) return;
+      try {
+        const response = await batchService.confirmTranslationMerge(seriesKey);
+        setBatchStatus(response);
+        setBatchNotice(t('dashboard.translate.mergeConfirmSent'));
+      } catch (cause) {
+        setBatchNotice(creatorErrorMessage(cause, l));
+      }
+    };
     const revealOutput = async (item: TranslationBatchEpisode): Promise<void> => {
       if (item.outputVideoPath === null || item.outputVideoPath === '') return;
       try {
@@ -3180,6 +3206,18 @@ export default function VideoTranslationWorkspace(props: {
       <aside className="video-translation-batch-list" aria-label={l('整部翻译列表', 'Series translation list')}>
         <div className="video-translation-batch-head">
           <strong>{l('整部翻译列表', 'Video translation list')}</strong>
+          {/* v2.6 — chế độ ghép 2 chế độ: auto ghép tay nhóm đủ tập; manual xếp 'waiting' chờ xác nhận */}
+          <label className="video-translation-merge-mode">
+            <span>{t('dashboard.translate.mergeModeLabel')}</span>
+            <select
+              value={batchStatus?.mergeMode ?? 'auto'}
+              aria-label={t('dashboard.translate.mergeModeLabel')}
+              onChange={event => void setMergeMode(event.target.value === 'manual' ? 'manual' : 'auto')}
+            >
+              <option value="auto">{t('dashboard.translate.mergeModeAuto')}</option>
+              <option value="manual">{t('dashboard.translate.mergeModeManual')}</option>
+            </select>
+          </label>
           <button
             type="button"
             aria-label={paused ? l('继续', 'Continue') : l('暂停', 'Pause')}
@@ -3194,22 +3232,52 @@ export default function VideoTranslationWorkspace(props: {
             item.status === 'completed' || item.status === 'failed' || item.status === 'canceled'
           );
           const mergeState = mergeOf(key);
+          // v2.6 — status 'waiting': pipeline đã COI như đủ nhóm (manual) hoặc đang chờ đủ tập;
+          // LÝ DO ưu tiên nằm ở `error` (daemon trả chữ tiếng Việt đọc được).
+          const waitingReason = mergeState?.status === 'waiting'
+            ? (mergeState.error !== null && mergeState.error !== ''
+              ? mergeState.error
+              : t('dashboard.translate.mergeStatusWaiting'))
+            : null;
+          // Đủ tập rồi → lý do chứa dấu hiệu "CHỜ BẠN XÁC NHẬN GHÉP" → nút tích cực xác nhận ghép.
+          // Thiếu tập thì KHÔNG có nút — người dùng chỉ cần chờ dịch nốt.
+          const confirmable = waitingReason !== null
+            && mergeState !== undefined
+            && key !== null
+            && mergeState.error !== null
+            && mergeState.error.includes('CHỜ BẠN XÁC NHẬN GHÉP');
           const mergeChip = mergeState === undefined || mergeState.status === 'idle'
             ? (allGroupDone ? l('等待合并', 'Waiting to merge') : undefined)
-            : mergeState.status === 'running' ? l('正在合并完整影片...', 'Merging the full movie...')
-              : mergeState.status === 'completed'
-                ? (mergeState.uploadReady !== null
-                  ? l(`完整影片已就绪：${mergeState.uploadReady.split(/[\\/]/).pop() ?? ''}`, `Full movie ready: ${mergeState.uploadReady.split(/[\\/]/).pop()}`)
-                  : l('完整影片已就绪', 'Full movie ready'))
-                : l(`合并完整影片失败：${mergeState.error ?? ''}`, `Merging the full movie failed: ${mergeState.error ?? ''}`);
+            : mergeState.status === 'waiting'
+              ? waitingReason
+              : mergeState.status === 'running' ? l('正在合并完整影片...', 'Merging the full movie...')
+                : mergeState.status === 'completed'
+                  ? (mergeState.uploadReady !== null
+                    ? l(`完整影片已就绪：${mergeState.uploadReady.split(/[\\/]/).pop() ?? ''}`, `Full movie ready: ${mergeState.uploadReady.split(/[\\/]/).pop()}`)
+                    : l('完整影片已就绪', 'Full movie ready'))
+                  : l(`合并完整影片失败：${mergeState.error ?? ''}`, `Merging the full movie failed: ${mergeState.error ?? ''}`);
           return (
             <div className="video-translation-batch-group" data-series={key ?? 'solo'} key={key ?? 'solo'}>
               <div className="video-translation-batch-group-head">
                 <strong title={labelOf(key)}>{labelOf(key)}</strong>
                 <span>{l(`已译 ${done}/${groupItems.length} 集`, `${done}/${groupItems.length} episodes done`)}</span>
               </div>
-              {mergeChip !== undefined ? (
-                <p className="video-translation-batch-merge-chip" data-status={mergeState?.status ?? 'idle'}>{mergeChip}</p>
+              {mergeChip !== undefined || confirmable ? (
+                <div className="video-translation-batch-merge-row">
+                  {mergeChip !== undefined ? (
+                    <p className="video-translation-batch-merge-chip" data-status={mergeState?.status ?? 'idle'}>{mergeChip}</p>
+                  ) : null}
+                  {confirmable ? (
+                    <button
+                      type="button"
+                      className="video-translation-batch-merge-confirm"
+                      title={mergeState?.error ?? ''}
+                      onClick={() => void confirmMerge(key)}
+                    >
+                      {t('dashboard.translate.mergeConfirmBtn')}
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
               <ul className="video-translation-batch-episodes">
                 {sorted(groupItems).map(item => {
@@ -4660,7 +4728,7 @@ function mediaPreviewErrorMessage(kind: 'video' | 'voice', localize: LocalizeCop
 }
 
 function creatorErrorMessage(cause: unknown, l: LocalizeCopy): string {
-  const candidate = cause as { code?: unknown; message?: unknown };
+  const candidate = cause as { code?: unknown; message?: unknown; details?: unknown };
   const code = typeof candidate?.code === 'string' ? candidate.code : '';
   if (code === 'creator_revision_conflict') {
     return l(
@@ -4676,6 +4744,17 @@ function creatorErrorMessage(cause: unknown, l: LocalizeCopy): string {
   }
   if (code === 'creator_job_control_unavailable') {
     return l('当前 Creator Runtime 不支持任务终止与继续。', 'The current Creator Runtime does not support stopping and resuming tasks.');
+  }
+  if (code === 'creator_merge_not_confirmable') {
+    // v2.6 — 409 "chưa xác nhận được ghép": daemon trả reason trong details.detail
+    // (vd "Thiếu tập 4 — chưa đủ số tập tối thiểu").
+    const candidateDetails = candidate?.details as { detail?: unknown } | undefined;
+    const detail = typeof candidateDetails?.detail === 'string' && candidateDetails.detail !== ''
+      ? candidateDetails.detail
+      : typeof candidate?.message === 'string' && candidate.message !== '' ? candidate.message : '';
+    return detail !== ''
+      ? l(`尚未达到合并条件：${detail}`, `Merge is not confirmable yet: ${detail}`)
+      : l('尚未达到合并条件，请等待更多集数完成。', 'Merge is not confirmable yet — wait for more episodes to finish.');
   }
   if (code === 'creator_source_missing') {
     return l('本地视频尚未上传，请重新选择视频后再试。', 'The local video has not been uploaded. Select it again and retry.');
